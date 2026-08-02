@@ -472,7 +472,7 @@ class HttpQuizAiProvider:
         repeated = [chunk for chunk in chunks if chunk.id in recent_chunk_ids]
         random.Random(generation_number).shuffle(fresh)
         random.Random(generation_number + 97).shuffle(repeated)
-        candidate_limit = min(len(chunks), max(total + 2, 8))
+        candidate_limit = min(len(chunks), max(total + 2, 4))
         return (fresh + repeated)[:candidate_limit]
 
     def _source_evidence(

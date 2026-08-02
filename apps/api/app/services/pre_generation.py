@@ -7,8 +7,13 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import Book, ContentChunk, PdfDocument
+from app.models import Book, ContentChunk, PdfDocument, QuizGenerationTask
 from app.schemas import PreGenerationResponse, QuizGenerateRequest
+from app.services.quiz_generation import (
+    recover_generation_tasks,
+    run_generation_task,
+    start_generation_task,
+)
 
 
 @dataclass(frozen=True)
@@ -31,7 +36,21 @@ def pre_generation_response(book: Book) -> PreGenerationResponse:
         message=message,
         error_message=book.pre_generation_error,
         quiz_id=book.pre_generation_quiz_id,
+        task_id=_task_id_for_book(book),
     )
+
+
+def _task_id_for_book(book: Book) -> str | None:
+    task = next(
+        (
+            task
+            for task in book.generation_tasks
+            if task.task_type == "pre_generation"
+            and task.status in {"pending", "processing", "completed", "failed"}
+        ),
+        None,
+    )
+    return task.id if task else None
 
 
 def begin_pre_generation(db: Session, book_id: str) -> PreGenerationStart:
@@ -77,61 +96,37 @@ def begin_pre_generation(db: Session, book_id: str) -> PreGenerationStart:
 def start_pre_generation(db: Session, book_id: str) -> PreGenerationResponse:
     result = begin_pre_generation(db, book_id)
     if result.should_start:
-        threading.Thread(target=run_pre_generation, args=(book_id,), daemon=True).start()
+        task = start_generation_task(
+            db,
+            book_id,
+            QuizGenerateRequest(
+                duration_minutes=15,
+                difficulty="medium",
+                single_count=5,
+                multiple_count=3,
+                short_count=2,
+            ),
+            "pre_generation",
+        )
+        result.response.task_id = task.id
     return result.response
 
 
 def recover_pre_generation_tasks(db: Session) -> list[str]:
-    book_ids = list(
-        db.scalars(
-            select(Book.id).where(Book.pre_generation_status.in_(["pending", "processing"]))
-        ).all()
-    )
-    if not book_ids:
-        return []
-    db.execute(
-        update(Book)
-        .where(Book.id.in_(book_ids))
-        .values(pre_generation_status="pending", pre_generation_error=None)
-    )
-    db.commit()
-    return book_ids
+    return recover_generation_tasks(db, "pre_generation")
 
 
 def run_pre_generation(book_id: str) -> None:
     with SessionLocal() as db:
-        book = db.get(Book, book_id)
-        if not book or book.pre_generation_status != "pending":
-            return
-        book.pre_generation_status = "processing"
-        db.commit()
-
-        try:
-            # Reuse the same validation, Provider selection and source-evidence path as manual tests.
-            from app.routers.quizzes import _generate_quiz
-
-            quiz = _generate_quiz(
-                book_id,
-                QuizGenerateRequest(
-                    duration_minutes=15,
-                    difficulty="medium",
-                    single_count=5,
-                    multiple_count=3,
-                    short_count=2,
-                ),
-                db,
-                task_type="pre_generation",
+        task = db.scalar(
+            select(QuizGenerationTask)
+            .where(
+                QuizGenerationTask.book_id == book_id,
+                QuizGenerationTask.task_type == "pre_generation",
+                QuizGenerationTask.status == "pending",
             )
-            book = db.get(Book, book_id)
-            book.pre_generation_status = "completed"
-            book.pre_generation_quiz_id = quiz.id
-            book.pre_generation_error = None
-            db.commit()
-        except Exception as exc:  # Background tasks must persist a visible failure state.
-            db.rollback()
-            book = db.get(Book, book_id)
-            if not book:
-                return
-            book.pre_generation_status = "failed"
-            book.pre_generation_error = str(getattr(exc, "detail", exc))[:500]
-            db.commit()
+            .order_by(QuizGenerationTask.created_at.desc())
+        )
+        if not task:
+            return
+        run_generation_task(task.id)

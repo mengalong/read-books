@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 
 import fitz
 from sqlalchemy import select
@@ -54,6 +55,19 @@ def create_source_book(client, title: str = "测试书籍") -> tuple[str, str]:
             )
         db.commit()
         return book_id, pdf.id
+
+
+def wait_for_generation(client, task_id: str) -> dict:
+    for _ in range(100):
+        response = client.get(f"/api/quiz-generation-tasks/{task_id}")
+        assert response.status_code == 200
+        task = response.json()
+        if task["status"] == "completed":
+            return task
+        if task["status"] == "failed":
+            raise AssertionError(task["error_message"])
+        time.sleep(0.01)
+    raise AssertionError("出题任务在测试等待时间内没有完成")
 
 
 def test_token_usage_report_groups_calls_by_task(client):
@@ -134,8 +148,9 @@ def test_generate_submit_and_avoid_recent_sources(client):
         "short_count": 1,
     }
     generated = client.post(f"/api/books/{book_id}/quizzes", json=payload)
-    assert generated.status_code == 201
-    quiz = generated.json()
+    assert generated.status_code == 202
+    task = wait_for_generation(client, generated.json()["id"])
+    quiz = client.get(f"/api/quizzes/{task['quiz_id']}").json()
     assert len(quiz["questions"]) == 4
     assert all(question["source_evidence"] for question in quiz["questions"])
     assert all(question["correct_answers"] is None for question in quiz["questions"])
@@ -158,8 +173,10 @@ def test_generate_submit_and_avoid_recent_sources(client):
             for question in questions
         ]
 
+    review = client.post(f"/api/quizzes/{quiz['id']}/reviews")
+    assert review.status_code == 200
     submitted = client.post(
-        f"/api/quizzes/{quiz['id']}/submit",
+        f"/api/reviews/{review.json()['id']}/submit",
         json={"elapsed_seconds": 420, "answers": answers},
     )
     assert submitted.status_code == 200
@@ -170,17 +187,43 @@ def test_generate_submit_and_avoid_recent_sources(client):
     assert result["questions"][-1]["grading_rubric"]
 
     second = client.post(f"/api/books/{book_id}/quizzes", json=payload)
-    assert second.status_code == 201
+    assert second.status_code == 202
+    second_task = wait_for_generation(client, second.json()["id"])
+    second_quiz = client.get(f"/api/quizzes/{second_task['quiz_id']}").json()
     second_sources = {
         evidence["chunk_id"]
-        for question in second.json()["questions"]
+        for question in second_quiz["questions"]
         for evidence in question["source_evidence"]
     }
     assert first_sources.isdisjoint(second_sources)
 
     history = client.get(f"/api/books/{book_id}/history")
     assert history.status_code == 200
-    assert len(history.json()) == 2
+    assert len(history.json()) == 1
+
+    reopened = client.post(f"/api/reviews/{review.json()['id']}/reopen")
+    assert reopened.status_code == 200
+    assert reopened.json()["id"] == review.json()["id"]
+    assert reopened.json()["status"] == "in_progress"
+
+    resubmitted = client.post(
+        f"/api/reviews/{review.json()['id']}/submit",
+        json={"elapsed_seconds": 300, "answers": answers},
+    )
+    assert resubmitted.status_code == 200
+    assert resubmitted.json()["id"] == review.json()["id"]
+    assert resubmitted.json()["elapsed_seconds"] == 300
+
+    another_review = client.post(f"/api/quizzes/{quiz['id']}/reviews")
+    assert another_review.status_code == 200
+    assert another_review.json()["id"] != review.json()["id"]
+    assert another_review.json()["attempt_number"] == 2
+    all_reviews = client.get(f"/api/reviews?book_id={book_id}")
+    assert [item["attempt_number"] for item in all_reviews.json()] == [2, 1]
+
+    deleted = client.delete(f"/api/reviews/{another_review.json()['id']}")
+    assert deleted.status_code == 204
+    assert client.get(f"/api/quizzes/{quiz['id']}").status_code == 200
 
 
 def test_quiz_generation_switches_between_configured_and_mock_provider(client, monkeypatch):
@@ -218,7 +261,8 @@ def test_quiz_generation_switches_between_configured_and_mock_provider(client, m
     assert configured.status_code == 200
 
     real_mode_quiz = client.post(f"/api/books/{book_id}/quizzes", json=payload)
-    assert real_mode_quiz.status_code == 201
+    assert real_mode_quiz.status_code == 202
+    wait_for_generation(client, real_mode_quiz.json()["id"])
     assert calls == {"http": 1, "mock": 0}
 
     switched = client.put(
@@ -232,7 +276,8 @@ def test_quiz_generation_switches_between_configured_and_mock_provider(client, m
     assert switched.status_code == 200
 
     mock_mode_quiz = client.post(f"/api/books/{book_id}/quizzes", json=payload)
-    assert mock_mode_quiz.status_code == 201
+    assert mock_mode_quiz.status_code == 202
+    wait_for_generation(client, mock_mode_quiz.json()["id"])
     assert calls == {"http": 1, "mock": 1}
 
 
@@ -254,6 +299,7 @@ def test_pre_generation_is_idempotent_and_requires_completed_source(client, monk
     assert first.status_code == 202
     assert first.json()["status"] == "pending"
     assert len(started) == 1
+    generation_task_id = first.json()["task_id"]
 
     duplicate = client.post(f"/api/books/{book_id}/pre-generation")
     assert duplicate.status_code == 202
@@ -265,7 +311,10 @@ def test_pre_generation_is_idempotent_and_requires_completed_source(client, monk
         json={"duration_minutes": 15, "single_count": 1, "multiple_count": 0, "short_count": 0},
     )
     assert blocked.status_code == 409
-    assert blocked.json()["detail"] == "该书正在后台预生成测试，请等待本次任务完成"
+    assert blocked.json()["detail"] in {
+        "该书正在后台预生成测试，请等待本次任务完成",
+        "该书已有出题任务正在进行，请等待本次任务完成",
+    }
 
     with SessionLocal() as db:
         stored_book = db.get(Book, book_id)
@@ -273,7 +322,7 @@ def test_pre_generation_is_idempotent_and_requires_completed_source(client, monk
         db.commit()
         recovered = recover_pre_generation_tasks(db)
         db.refresh(stored_book)
-        assert book_id in recovered
+        assert generation_task_id in recovered
         assert stored_book.pre_generation_status == "pending"
 
     without_pdf = client.post(

@@ -4,7 +4,18 @@ from datetime import date, datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -48,6 +59,12 @@ class Book(TimestampMixin, Base):
         back_populates="book", cascade="all, delete-orphan"
     )
     quizzes: Mapped[list[Quiz]] = relationship(
+        back_populates="book", cascade="all, delete-orphan"
+    )
+    generation_tasks: Mapped[list[QuizGenerationTask]] = relationship(
+        back_populates="book", cascade="all, delete-orphan"
+    )
+    review_tasks: Mapped[list[ReviewTask]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
     )
 
@@ -102,12 +119,16 @@ class Quiz(TimestampMixin, Base):
     elapsed_seconds: Mapped[int | None] = mapped_column(Integer)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_review_date: Mapped[date | None] = mapped_column(Date)
+    generation_task_id: Mapped[str | None] = mapped_column(String(36), index=True)
 
     book: Mapped[Book] = relationship(back_populates="quizzes")
     questions: Mapped[list[Question]] = relationship(
         back_populates="quiz", cascade="all, delete-orphan", order_by="Question.position"
     )
     answers: Mapped[list[Answer]] = relationship(
+        back_populates="quiz", cascade="all, delete-orphan"
+    )
+    review_tasks: Mapped[list[ReviewTask]] = relationship(
         back_populates="quiz", cascade="all, delete-orphan"
     )
 
@@ -136,6 +157,9 @@ class Question(TimestampMixin, Base):
     answer: Mapped[Answer | None] = relationship(
         back_populates="question", cascade="all, delete-orphan", uselist=False
     )
+    review_answers: Mapped[list[ReviewAnswer]] = relationship(
+        back_populates="question", cascade="all, delete-orphan"
+    )
 
 
 class Answer(TimestampMixin, Base):
@@ -157,6 +181,75 @@ class Answer(TimestampMixin, Base):
 
     quiz: Mapped[Quiz] = relationship(back_populates="answers")
     question: Mapped[Question] = relationship(back_populates="answer")
+
+
+class QuizGenerationTask(TimestampMixin, Base):
+    __tablename__ = "quiz_generation_tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    book_id: Mapped[str] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    task_type: Mapped[str] = mapped_column(String(40), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    total_questions: Mapped[int] = mapped_column(Integer, default=0)
+    completed_questions: Mapped[int] = mapped_column(Integer, default=0)
+    current_question_position: Mapped[int | None] = mapped_column(Integer)
+    current_phase: Mapped[str] = mapped_column(String(120), default="等待开始")
+    difficulty: Mapped[str] = mapped_column(String(20), default="medium")
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    single_count: Mapped[int] = mapped_column(Integer, default=0)
+    multiple_count: Mapped[int] = mapped_column(Integer, default=0)
+    short_count: Mapped[int] = mapped_column(Integer, default=0)
+    page_start: Mapped[int | None] = mapped_column(Integer)
+    page_end: Mapped[int | None] = mapped_column(Integer)
+    quiz_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+    book: Mapped[Book] = relationship(back_populates="generation_tasks")
+
+
+class ReviewTask(TimestampMixin, Base):
+    __tablename__ = "review_tasks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    book_id: Mapped[str] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    quiz_id: Mapped[str] = mapped_column(ForeignKey("quizzes.id", ondelete="CASCADE"), index=True)
+    attempt_number: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(20), default="in_progress", index=True)
+    total_score: Mapped[float | None] = mapped_column(Float)
+    max_score: Mapped[float] = mapped_column(Float, default=100)
+    elapsed_seconds: Mapped[int | None] = mapped_column(Integer)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_review_date: Mapped[date | None] = mapped_column(Date)
+
+    book: Mapped[Book] = relationship(back_populates="review_tasks")
+    quiz: Mapped[Quiz] = relationship(back_populates="review_tasks")
+    answers: Mapped[list[ReviewAnswer]] = relationship(
+        back_populates="review_task", cascade="all, delete-orphan"
+    )
+
+
+class ReviewAnswer(TimestampMixin, Base):
+    __tablename__ = "review_answers"
+    __table_args__ = (UniqueConstraint("review_task_id", "question_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    review_task_id: Mapped[str] = mapped_column(
+        ForeignKey("review_tasks.id", ondelete="CASCADE"), index=True
+    )
+    question_id: Mapped[str] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), index=True
+    )
+    selected_answers: Mapped[list[str]] = mapped_column(JSON, default=list)
+    text_answer: Mapped[str | None] = mapped_column(Text)
+    score: Mapped[float] = mapped_column(Float, default=0)
+    max_score: Mapped[float] = mapped_column(Float)
+    is_correct: Mapped[bool] = mapped_column(default=False)
+    feedback: Mapped[str] = mapped_column(Text, default="")
+    matched_points: Mapped[list[str]] = mapped_column(JSON, default=list)
+    missing_points: Mapped[list[str]] = mapped_column(JSON, default=list)
+
+    review_task: Mapped[ReviewTask] = relationship(back_populates="answers")
+    question: Mapped[Question] = relationship(back_populates="review_answers")
 
 
 class ModelConfiguration(TimestampMixin, Base):

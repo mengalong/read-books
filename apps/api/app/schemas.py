@@ -54,6 +54,11 @@ class BookSummary(ApiModel):
     pre_generation_status: str = "disabled"
     pre_generation_error: str | None = None
     pre_generation_quiz_id: str | None = None
+    active_generation_task_id: str | None = None
+    active_generation_status: str | None = None
+    active_generation_completed_questions: int = 0
+    active_generation_total_questions: int = 0
+    active_generation_phase: str | None = None
 
 
 class PdfResponse(ApiModel):
@@ -69,8 +74,24 @@ class PdfResponse(ApiModel):
     updated_at: datetime
 
 
+class QuizSummary(BaseModel):
+    id: str
+    book_id: str
+    title: str
+    difficulty: str
+    duration_minutes: int
+    status: str
+    question_count: int
+    max_score: float
+    created_at: datetime
+    review_count: int = 0
+    latest_score: float | None = None
+    last_reviewed_at: datetime | None = None
+
+
 class BookDetail(BookSummary):
     pdfs: list[PdfResponse] = Field(default_factory=list)
+    quizzes: list[QuizSummary] = Field(default_factory=list)
 
 
 class ChunkResponse(ApiModel):
@@ -104,6 +125,26 @@ class QuizGenerateRequest(BaseModel):
     short_count: int = Field(default=2, ge=0, le=8)
     page_start: int | None = Field(default=None, ge=1)
     page_end: int | None = Field(default=None, ge=1)
+
+
+class QuizGenerationTaskResponse(BaseModel):
+    id: str
+    book_id: str
+    task_type: str
+    status: Literal["pending", "processing", "completed", "failed"]
+    total_questions: int
+    completed_questions: int
+    current_question_position: int | None
+    current_phase: str
+    difficulty: str
+    duration_minutes: int
+    single_count: int
+    multiple_count: int
+    short_count: int
+    quiz_id: str | None
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
 
 
 class QuestionResponse(ApiModel):
@@ -168,11 +209,53 @@ class QuizResult(QuizResponse):
     weak_points: list[str]
 
 
+class ReviewTaskResponse(BaseModel):
+    id: str
+    quiz_id: str
+    book_id: str
+    book_title: str
+    title: str
+    attempt_number: int
+    status: Literal["in_progress", "submitted"]
+    difficulty: str
+    duration_minutes: int
+    total_score: float | None
+    max_score: float
+    elapsed_seconds: int | None
+    submitted_at: datetime | None
+    next_review_date: date | None
+    created_at: datetime
+    questions: list[QuestionResponse]
+    answers: list[AnswerResult] = Field(default_factory=list)
+    weak_points: list[str] = Field(default_factory=list)
+
+
 class HistoryItem(ApiModel):
     id: str
+    quiz_id: str
+    book_id: str
+    book_title: str
     title: str
     difficulty: str
     status: str
+    total_score: float | None
+    max_score: float
+    duration_minutes: int
+    elapsed_seconds: int | None
+    question_count: int
+    created_at: datetime
+    submitted_at: datetime | None
+    next_review_date: date | None
+
+
+class ReviewTaskSummary(ApiModel):
+    id: str
+    quiz_id: str
+    book_id: str
+    book_title: str
+    title: str
+    attempt_number: int
+    status: Literal["in_progress", "submitted"]
     total_score: float | None
     max_score: float
     duration_minutes: int
@@ -238,6 +321,7 @@ class PreGenerationResponse(BaseModel):
     message: str
     error_message: str | None = None
     quiz_id: str | None = None
+    task_id: str | None = None
 
 
 class PromptTemplateUpdate(BaseModel):
