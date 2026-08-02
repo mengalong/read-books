@@ -130,12 +130,13 @@ a {
 }
 
 .nav-group-label {
-  color: #71877f;
-  font-size: 11px;
-  font-weight: 700;
+  border-top: 1px solid #354642;
+  color: #d7e0dc;
+  font-size: 14px;
+  font-weight: 650;
   letter-spacing: 0;
-  margin: 18px 13px 1px;
-  text-transform: uppercase;
+  margin: 14px 0 0;
+  padding: 16px 13px 5px;
 }
 
 .sidebar-note {
@@ -2189,6 +2190,16 @@ p {
     flex: 0 0 auto;
     min-height: 36px;
     padding: 0 10px;
+  }
+
+  .nav-group-label {
+    align-items: center;
+    border-top: 0;
+    display: flex;
+    flex: 0 0 auto;
+    margin: 0;
+    min-height: 36px;
+    padding: 0 6px 0 12px;
   }
 
   .sidebar-note {
