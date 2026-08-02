@@ -4,7 +4,7 @@ import fitz
 from sqlalchemy import select
 
 from app.database import SessionLocal
-from app.models import Book, ContentChunk, PdfDocument, Question
+from app.models import Book, ContentChunk, ModelConfiguration, PdfDocument, Question
 from app.services.pdf_parser import parse_pdf_document
 
 
@@ -214,3 +214,189 @@ def test_pdf_parser_uses_ocr_for_unreadable_text(client, tmp_path: Path, monkeyp
         assert parsed_pdf.parse_status == "completed"
         assert ocr_calls == [str(file_path)]
         assert [chunk.content for chunk in chunks] == [ocr_text]
+
+
+def test_model_configuration_keeps_api_key_secret(client):
+    with SessionLocal() as db:
+        stored = db.get(ModelConfiguration, "default")
+        if stored:
+            db.delete(stored)
+            db.commit()
+
+    default_response = client.get("/api/settings/model")
+    assert default_response.status_code == 200
+    assert default_response.json()["provider_mode"] == "mock"
+    assert default_response.json()["api_key_configured"] is False
+    assert "api_key" not in default_response.json()
+
+    secret = "test-secret-key"
+    saved = client.put(
+        "/api/settings/model",
+        json={
+            "provider_mode": "openai_compatible",
+            "base_url": "https://models.example.com/v1",
+            "model_name": "review-model",
+            "api_key": secret,
+            "timeout_ms": 90_000,
+            "temperature": 0.4,
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["provider_mode"] == "openai_compatible"
+    assert saved.json()["api_key_configured"] is True
+    assert secret not in saved.text
+
+    loaded = client.get("/api/settings/model")
+    assert loaded.status_code == 200
+    assert loaded.json()["base_url"] == "https://models.example.com/v1"
+    assert loaded.json()["model_name"] == "review-model"
+    assert loaded.json()["api_key_configured"] is True
+    assert secret not in loaded.text
+
+    cleared = client.put(
+        "/api/settings/model",
+        json={
+            "provider_mode": "mock",
+            "base_url": "https://models.example.com/v1",
+            "model_name": "review-model",
+            "clear_api_key": True,
+            "timeout_ms": 90_000,
+            "temperature": 0.4,
+        },
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["api_key_configured"] is False
+
+
+def test_model_configuration_validates_real_provider_fields(client):
+    missing_url = client.put(
+        "/api/settings/model",
+        json={"provider_mode": "openai_compatible", "model_name": "review-model"},
+    )
+    assert missing_url.status_code == 422
+    assert missing_url.json()["detail"] == "真实模型模式需要填写接口地址"
+
+    missing_model = client.put(
+        "/api/settings/model",
+        json={
+            "provider_mode": "openai_compatible",
+            "base_url": "https://models.example.com/v1",
+        },
+    )
+    assert missing_model.status_code == 422
+    assert missing_model.json()["detail"] == "真实模型模式需要填写模型名称"
+
+    invalid_url = client.put(
+        "/api/settings/model",
+        json={
+            "provider_mode": "openai_compatible",
+            "base_url": "models.example.com/v1",
+            "model_name": "review-model",
+        },
+    )
+    assert invalid_url.status_code == 422
+    assert invalid_url.json()["detail"] == "接口地址必须以 http:// 或 https:// 开头"
+
+
+def test_model_configuration_can_load_incomplete_stored_values(client):
+    with SessionLocal() as db:
+        stored = db.get(ModelConfiguration, "default")
+        if stored is None:
+            stored = ModelConfiguration(id="default")
+            db.add(stored)
+        stored.provider_mode = "openai_compatible"
+        stored.base_url = ""
+        stored.model_name = ""
+        db.commit()
+
+    response = client.get("/api/settings/model")
+    assert response.status_code == 200
+    assert response.json()["provider_mode"] == "openai_compatible"
+
+    client.put(
+        "/api/settings/model",
+        json={
+            "provider_mode": "mock",
+            "base_url": "",
+            "model_name": "",
+            "clear_api_key": True,
+        },
+    )
+
+
+def test_model_connection_uses_form_values_and_saved_api_key(client, monkeypatch):
+    saved = client.put(
+        "/api/settings/model",
+        json={
+            "provider_mode": "mock",
+            "base_url": "https://saved.example.com/v1",
+            "model_name": "saved-model",
+            "api_key": "saved-secret",
+        },
+    )
+    assert saved.status_code == 200
+
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        is_success = True
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json():
+            return {"choices": [{"message": {"content": "连接成功"}}]}
+
+    class FakeClient:
+        def __init__(self, timeout: float):
+            captured["timeout"] = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def post(self, url: str, *, headers: dict, json: dict):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr("app.routers.settings.httpx.Client", FakeClient)
+    response = client.post(
+        "/api/settings/model/test",
+        json={
+            "base_url": "https://current.example.com/v1/",
+            "model_name": "current-model",
+            "timeout_ms": 12_000,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert response.json()["model_name"] == "current-model"
+    assert response.json()["model_response"] == "连接成功"
+    assert captured["url"] == "https://current.example.com/v1/chat/completions"
+    assert captured["headers"] == {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer saved-secret",
+    }
+    assert captured["timeout"] == 12
+    assert captured["json"]["model"] == "current-model"
+
+
+def test_model_connection_validates_required_fields(client):
+    missing_url = client.post(
+        "/api/settings/model/test",
+        json={"base_url": "", "model_name": "review-model"},
+    )
+    assert missing_url.status_code == 422
+    assert missing_url.json()["detail"] == "请先填写接口地址"
+
+    missing_model = client.post(
+        "/api/settings/model/test",
+        json={"base_url": "https://models.example.com/v1", "model_name": ""},
+    )
+    assert missing_model.status_code == 422
+    assert missing_model.json()["detail"] == "请先填写模型名称"

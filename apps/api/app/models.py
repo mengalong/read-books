@@ -154,3 +154,14 @@ class Answer(TimestampMixin, Base):
     quiz: Mapped[Quiz] = relationship(back_populates="answers")
     question: Mapped[Question] = relationship(back_populates="answer")
 
+
+class ModelConfiguration(TimestampMixin, Base):
+    __tablename__ = "model_configurations"
+
+    id: Mapped[str] = mapped_column(String(20), primary_key=True, default="default")
+    provider_mode: Mapped[str] = mapped_column(String(30), default="mock")
+    base_url: Mapped[str] = mapped_column(Text, default="")
+    api_key: Mapped[str | None] = mapped_column(Text)
+    model_name: Mapped[str] = mapped_column(String(200), default="")
+    timeout_ms: Mapped[int] = mapped_column(Integer, default=60_000)
+    temperature: Mapped[float] = mapped_column(Float, default=0.2)

@@ -17,10 +17,15 @@ from app.schemas import (
     QuizSubmitRequest,
 )
 from app.services.quiz_provider import GradeResult, get_quiz_provider
+from app.services.model_config import get_effective_model_configuration
 
 router = APIRouter(tags=["quizzes"])
 settings = get_settings()
-provider = get_quiz_provider(settings)
+
+
+def current_provider(db: Session):
+    configuration = get_effective_model_configuration(db, settings)
+    return get_quiz_provider(settings, configuration)
 
 
 def get_quiz_or_404(db: Session, quiz_id: str) -> Quiz:
@@ -119,7 +124,7 @@ def generate_quiz(
     recent_chunk_ids = {chunk_id for row in recent_chunk_rows for chunk_id in row}
 
     try:
-        generated = provider.generate_questions(
+        generated = current_provider(db).generate_questions(
             chunks=chunks,
             file_names=file_names,
             single_count=payload.single_count,
@@ -234,7 +239,7 @@ def submit_quiz(
         selected_answers = item.selected_answers if item else []
         text_answer = item.text_answer if item else None
         if question.question_type == "short":
-            grade = provider.grade_short_answer(question, text_answer or "")
+            grade = current_provider(db).grade_short_answer(question, text_answer or "")
         else:
             grade = grade_objective(question, selected_answers)
         total_score += grade.score
@@ -326,4 +331,3 @@ def get_book_history(book_id: str, db: Session = Depends(get_db)) -> list[Histor
         )
         for quiz in quizzes
     ]
-

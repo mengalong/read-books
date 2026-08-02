@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from app.config import Settings
 from app.models import ContentChunk, Question
+from app.services.model_config import EffectiveModelConfiguration
 
 
 @dataclass
@@ -276,8 +277,8 @@ class MockQuizAiProvider:
 
 
 class HttpQuizAiProvider:
-    def __init__(self, settings: Settings):
-        self.settings = settings
+    def __init__(self, configuration: EffectiveModelConfiguration):
+        self.configuration = configuration
 
     def _not_configured(self) -> RuntimeError:
         return RuntimeError(
@@ -291,7 +292,18 @@ class HttpQuizAiProvider:
         raise self._not_configured()
 
 
-def get_quiz_provider(settings: Settings) -> QuizAiProvider:
-    if settings.mock_mode:
+def get_quiz_provider(
+    settings: Settings, configuration: EffectiveModelConfiguration | None = None
+) -> QuizAiProvider:
+    if configuration is None:
+        configuration = EffectiveModelConfiguration(
+            provider_mode="mock" if settings.mock_mode else "openai_compatible",
+            base_url=settings.llm_base_url or "",
+            api_key=settings.llm_api_key,
+            model_name=settings.llm_model or "",
+            timeout_ms=settings.llm_timeout_ms,
+            temperature=settings.llm_temperature,
+        )
+    if configuration.provider_mode == "mock":
         return MockQuizAiProvider()
-    return HttpQuizAiProvider(settings)
+    return HttpQuizAiProvider(configuration)

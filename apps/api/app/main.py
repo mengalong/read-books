@@ -10,6 +10,7 @@ from app.database import Base, SessionLocal, engine
 from app.models import PdfDocument
 from app.routers.books import router as books_router
 from app.routers.quizzes import router as quizzes_router
+from app.routers.settings import router as settings_router
 from app.services.demo_data import seed_demo_data
 from app.services.pdf_parser import parse_pdf_document
 
@@ -52,6 +53,7 @@ app.add_middleware(
 
 app.include_router(books_router, prefix="/api")
 app.include_router(quizzes_router, prefix="/api")
+app.include_router(settings_router, prefix="/api")
 
 
 @app.get("/api/health")

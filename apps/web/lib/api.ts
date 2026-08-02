@@ -3,6 +3,9 @@ import type {
   BookSummary,
   Chunk,
   HistoryItem,
+  ModelConfiguration,
+  ModelConnectionTestResult,
+  ModelProviderMode,
   PdfDocument,
   Quiz,
   QuizResult,
@@ -127,4 +130,36 @@ export function getQuizResult(quizId: string) {
 
 export function getHistory(bookId: string) {
   return apiFetch<HistoryItem[]>(`/books/${bookId}/history`);
+}
+
+export function getModelConfiguration() {
+  return apiFetch<ModelConfiguration>("/settings/model");
+}
+
+export function updateModelConfiguration(payload: {
+  provider_mode: ModelProviderMode;
+  base_url: string;
+  model_name: string;
+  api_key?: string;
+  clear_api_key: boolean;
+  timeout_ms: number;
+  temperature: number;
+}) {
+  return apiFetch<ModelConfiguration>("/settings/model", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function testModelConnection(payload: {
+  base_url: string;
+  model_name: string;
+  api_key?: string;
+  clear_api_key: boolean;
+  timeout_ms: number;
+}) {
+  return apiFetch<ModelConnectionTestResult>("/settings/model/test", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }

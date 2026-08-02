@@ -1,4 +1,26 @@
 export type ReadingStatus = "reading" | "finished" | "reviewing";
+
+export type ModelProviderMode = "mock" | "openai_compatible";
+
+export type ModelConfiguration = {
+  id: string;
+  provider_mode: ModelProviderMode;
+  base_url: string;
+  model_name: string;
+  timeout_ms: number;
+  temperature: number;
+  api_key_configured: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type ModelConnectionTestResult = {
+  ok: boolean;
+  message: string;
+  latency_ms: number;
+  model_name: string;
+  model_response: string;
+};
 export type QuestionType = "single" | "multiple" | "short";
 
 export type BookStats = {

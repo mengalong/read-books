@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 const navigation = [
   { href: "/", label: "我的书架", icon: LibraryBig },
   { href: "/books/new", label: "添加书籍", icon: Plus },
+  { href: "/settings/model", label: "模型设置", icon: Settings2 },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -41,9 +42,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="sidebar-note">
           <strong><BookOpenText size={13} /> 原文优先</strong>
           每道题都保留 PDF 页码与原文依据，复习时可以回到上下文。
-        </div>
-        <div className="sidebar-note" style={{ borderTop: "0", marginTop: 14, paddingTop: 0 }}>
-          <Settings2 size={13} /> 模拟模型已启用
         </div>
       </aside>
       <main className="app-main">{children}</main>

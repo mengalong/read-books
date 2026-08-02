@@ -10,7 +10,7 @@
 - 文件上传：FastAPI `UploadFile` + `python-multipart`，流式写入本地磁盘
 - 数据库：SQLite + SQLAlchemy 2.0 + Alembic
 - PDF 解析：PyMuPDF，按页抽取文本并保留页码；对乱码、扫描版或受复制权限限制的 PDF，使用 macOS Vision OCR 兜底
-- 出题与评分：先使用 Mock LLM Provider，预留真实 LLM Provider
+- 出题与评分：先使用 Mock LLM Provider；网页端先落地模型连接配置，真实 LLM Provider 后续接入
 - 检索：MVP 使用关键词/覆盖权重检索，后续替换为向量检索
 - Python 虚拟环境：Conda 环境 `read-books`，Python 3.12+
 - 配置：`.env` + Pydantic Settings
@@ -218,11 +218,19 @@ interface QuizAiProvider {
 第一版实现两个 Provider：
 
 - `MockQuizAiProvider`：默认启用，用固定规则和样例数据生成题目/评分。
-- `HttpQuizAiProvider`：先保留接口和配置读取，后续接真实大模型。
+- `HttpQuizAiProvider`：保留统一 Provider 边界和配置对象，当前明确返回未启用提示，后续接真实大模型。
 
 业务代码只依赖 `QuizAiProvider`，不直接依赖具体模型。
 
 ### 8.2 配置项
+
+网页端模型设置页面对应后端接口：
+
+- `GET /api/settings/model`：读取当前生效配置，但只返回 `api_key_configured`，不返回 API Key 明文。
+- `PUT /api/settings/model`：保存连接参数和是否使用已配置模型的开关；未修改的固定长度掩码不作为密钥提交，输入新 API Key 后覆盖后台原值。
+- `POST /api/settings/model/test`：使用当前表单参数调用 OpenAI 兼容的 `/chat/completions`，校验 HTTP 状态和响应结构，并返回耗时和 `choices[0].message.content` 文本；前端另外展示脱敏后的等价 `curl` 命令。
+
+已保存的单用户配置存放在 SQLite 的 `model_configurations` 表中，并优先于环境变量。尚未保存网页配置时，后端回退到 `.env` 的默认值。读取接口不返回 API Key 明文，前端只根据 `api_key_configured` 显示固定 16 位掩码。当前页面支持提前录入并测试真实服务参数，但真实出题与评分协议适配尚未启用。
 
 配置文件和环境变量预留：
 

@@ -184,3 +184,41 @@ class HealthResponse(BaseModel):
     app: str
     environment: str
     mock_mode: bool
+
+
+class ModelConfigurationUpdate(BaseModel):
+    provider_mode: Literal["mock", "openai_compatible"] = "mock"
+    base_url: str = Field(default="", max_length=2_000)
+    model_name: str = Field(default="", max_length=200)
+    api_key: str | None = Field(default=None, max_length=4_000)
+    clear_api_key: bool = False
+    timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+    temperature: float = Field(default=0.2, ge=0, le=2)
+
+
+class ModelConfigurationResponse(ApiModel):
+    id: str
+    provider_mode: str
+    base_url: str
+    model_name: str
+    timeout_ms: int
+    temperature: float
+    api_key_configured: bool
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ModelConnectionTestRequest(BaseModel):
+    base_url: str = Field(max_length=2_000)
+    model_name: str = Field(max_length=200)
+    api_key: str | None = Field(default=None, max_length=4_000)
+    clear_api_key: bool = False
+    timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+
+
+class ModelConnectionTestResponse(BaseModel):
+    ok: bool
+    message: str
+    latency_ms: int
+    model_name: str
+    model_response: str
