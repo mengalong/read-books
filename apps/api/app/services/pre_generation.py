@@ -81,6 +81,23 @@ def start_pre_generation(db: Session, book_id: str) -> PreGenerationResponse:
     return result.response
 
 
+def recover_pre_generation_tasks(db: Session) -> list[str]:
+    book_ids = list(
+        db.scalars(
+            select(Book.id).where(Book.pre_generation_status.in_(["pending", "processing"]))
+        ).all()
+    )
+    if not book_ids:
+        return []
+    db.execute(
+        update(Book)
+        .where(Book.id.in_(book_ids))
+        .values(pre_generation_status="pending", pre_generation_error=None)
+    )
+    db.commit()
+    return book_ids
+
+
 def run_pre_generation(book_id: str) -> None:
     with SessionLocal() as db:
         book = db.get(Book, book_id)

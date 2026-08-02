@@ -13,6 +13,7 @@ from app.routers.quizzes import router as quizzes_router
 from app.routers.settings import router as settings_router
 from app.services.demo_data import seed_demo_data
 from app.services.pdf_parser import parse_pdf_document
+from app.services.pre_generation import recover_pre_generation_tasks, run_pre_generation
 
 settings = get_settings()
 
@@ -33,6 +34,10 @@ async def lifespan(_: FastAPI):
             )
         for pdf_id in pending_pdf_ids:
             threading.Thread(target=parse_pdf_document, args=(pdf_id,), daemon=True).start()
+    with SessionLocal() as db:
+        pending_pre_generation_ids = recover_pre_generation_tasks(db)
+    for book_id in pending_pre_generation_ids:
+        threading.Thread(target=run_pre_generation, args=(book_id,), daemon=True).start()
     yield
 
 

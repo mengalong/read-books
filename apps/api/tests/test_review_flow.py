@@ -6,6 +6,7 @@ from sqlalchemy import select
 from app.database import SessionLocal
 from app.models import Book, ContentChunk, ModelConfiguration, PdfDocument, Question
 from app.services.pdf_parser import parse_pdf_document
+from app.services.pre_generation import recover_pre_generation_tasks
 from app.services.quiz_provider import HttpQuizAiProvider, MockQuizAiProvider
 
 
@@ -211,6 +212,15 @@ def test_pre_generation_is_idempotent_and_requires_completed_source(client, monk
     )
     assert blocked.status_code == 409
     assert blocked.json()["detail"] == "该书正在后台预生成测试，请等待本次任务完成"
+
+    with SessionLocal() as db:
+        stored_book = db.get(Book, book_id)
+        stored_book.pre_generation_status = "processing"
+        db.commit()
+        recovered = recover_pre_generation_tasks(db)
+        db.refresh(stored_book)
+        assert book_id in recovered
+        assert stored_book.pre_generation_status == "pending"
 
     without_pdf = client.post(
         "/api/books",
