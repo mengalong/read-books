@@ -4,6 +4,7 @@ import pytest
 
 from app.models import ContentChunk, Question
 from app.services.model_config import EffectiveModelConfiguration
+from app.services.prompt_config import DEFAULT_PROMPTS, PromptTemplateDefinition
 from app.services.quiz_provider import HttpQuizAiProvider
 
 
@@ -183,6 +184,39 @@ def test_http_provider_rejects_unknown_source(monkeypatch):
             generation_number=0,
             recent_chunk_ids=set(),
         )
+
+
+def test_http_provider_uses_custom_generation_prompt(monkeypatch):
+    chunks = make_chunks()
+    payload = generated_payload([chunk.id for chunk in chunks])
+    requests = install_chat_responses(monkeypatch, [json.dumps(payload, ensure_ascii=False)])
+    custom_generation = PromptTemplateDefinition(
+        prompt_type="generation",
+        system_prompt="自定义系统 {{difficulty}}",
+        user_prompt="自定义用户 {{single_count}}/{{multiple_count}}/{{short_count}}/{{duration_minutes}} {{source_material}}",
+        version=1,
+        template_id="custom-generation",
+        is_active=True,
+    )
+    provider = HttpQuizAiProvider(
+        make_configuration(),
+        {"generation": custom_generation, "grading": DEFAULT_PROMPTS["grading"]},
+    )
+
+    provider.generate_questions(
+        chunks=chunks,
+        file_names={"pdf-1": "复习材料.pdf"},
+        single_count=1,
+        multiple_count=1,
+        short_count=1,
+        difficulty="medium",
+        generation_number=0,
+        recent_chunk_ids=set(),
+        duration_minutes=20,
+    )
+
+    assert requests[0]["json"]["messages"][0]["content"] == "自定义系统 medium"
+    assert requests[0]["json"]["messages"][1]["content"].startswith("自定义用户 1/1/1/20")
 
 
 def test_http_provider_grades_short_answer(monkeypatch):

@@ -26,6 +26,35 @@ export type ModelConnectionTestResult = {
   model_response: string;
   tested_at: string;
 };
+
+export type PromptType = "generation" | "grading";
+
+export type PromptTemplate = {
+  id: string;
+  prompt_type: PromptType;
+  system_prompt: string;
+  user_prompt: string;
+  version: number;
+  is_active: boolean;
+  available_variables: string[];
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type PromptPreview = {
+  prompt_type: PromptType;
+  rendered_system_prompt: string;
+  rendered_user_prompt: string;
+  available_variables: string[];
+};
+
+export type PreGenerationResponse = {
+  status: "disabled" | "pending" | "processing" | "completed" | "failed";
+  message: string;
+  error_message: string | null;
+  quiz_id: string | null;
+};
+
 export type QuestionType = "single" | "multiple" | "short";
 
 export type BookStats = {
@@ -49,6 +78,10 @@ export type BookSummary = {
   tags: string[];
   created_at: string;
   updated_at: string;
+  pre_generation_enabled: boolean;
+  pre_generation_status: PreGenerationResponse["status"];
+  pre_generation_error: string | null;
+  pre_generation_quiz_id: string | null;
   stats: BookStats;
 };
 

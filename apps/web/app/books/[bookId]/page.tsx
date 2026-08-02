@@ -1,12 +1,12 @@
 "use client";
 
-import { ArrowLeft, BookOpen, Clock3, FileText, History, Play, Trash2, UploadCloud } from "lucide-react";
+import { AlertCircle, ArrowLeft, BookOpen, CheckCircle2, Clock3, FileText, History, LoaderCircle, Play, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { BookCover, EmptyState, ErrorState, NextReview, StatusBadge, formatPdfMeta } from "@/components/ui";
-import { ApiError, deletePdf, getBook, getChunks, uploadPdf } from "@/lib/api";
+import { ApiError, deletePdf, getBook, getChunks, startPreGeneration, uploadPdf } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import type { BookDetail, Chunk, PdfDocument } from "@/lib/types";
 
@@ -17,6 +17,7 @@ export default function BookDetailPage() {
   const [chunks, setChunks] = useState<Chunk[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [startingPreGeneration, setStartingPreGeneration] = useState(false);
   const [error, setError] = useState("");
 
   async function refresh(loadChunks = true) {
@@ -35,13 +36,14 @@ export default function BookDetailPage() {
   useEffect(() => { void refresh(); }, [bookId]);
 
   useEffect(() => {
-    if (!book?.pdfs.some((pdf) => pdf.parse_status === "pending" || pdf.parse_status === "processing")) return;
+    if (!book?.pdfs.some((pdf) => pdf.parse_status === "pending" || pdf.parse_status === "processing") && !["pending", "processing"].includes(book?.pre_generation_status || "")) return;
     const timer = window.setInterval(() => { void refresh(); }, 2200);
     return () => window.clearInterval(timer);
   }, [book]);
 
   const completed = book?.stats.completed_pdf_count || 0;
   const pending = book?.pdfs.filter((pdf) => pdf.parse_status !== "completed").length || 0;
+  const preGenerating = book?.pre_generation_status === "pending" || book?.pre_generation_status === "processing";
   const previewChunks = useMemo(() => chunks.slice(0, 4), [chunks]);
 
   async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
@@ -70,6 +72,19 @@ export default function BookDetailPage() {
     }
   }
 
+  async function handleStartPreGeneration() {
+    setStartingPreGeneration(true);
+    setError("");
+    try {
+      await startPreGeneration(bookId);
+      await refresh(false);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "预生成测试启动失败");
+    } finally {
+      setStartingPreGeneration(false);
+    }
+  }
+
   if (loading) return <div className="page-wrap"><div className="loading-state">正在打开书籍……</div></div>;
   if (!book || error && !book) return <div className="page-wrap"><ErrorState message={error || "未找到这本书"} /></div>;
 
@@ -90,9 +105,19 @@ export default function BookDetailPage() {
         </div>
         <div className="detail-actions">
           <Link className="button button-secondary" href={`/books/${book.id}/history`}><History size={15} />测试历史</Link>
-          <Link className="button button-primary" href={completed ? `/books/${book.id}/quiz/new` : "#"} aria-disabled={!completed} onClick={(event) => { if (!completed) event.preventDefault(); }}><Play size={15} />开始测试</Link>
+          <Link className="button button-primary" href={completed && !preGenerating ? `/books/${book.id}/quiz/new` : "#"} aria-disabled={!completed || preGenerating} onClick={(event) => { if (!completed || preGenerating) event.preventDefault(); }}><Play size={15} />{preGenerating ? "预生成中" : "开始测试"}</Link>
+          {completed > 0 && book.pre_generation_status !== "completed" && <button className="button button-secondary" disabled={startingPreGeneration || book.pre_generation_status === "pending" || book.pre_generation_status === "processing"} onClick={() => void handleStartPreGeneration()} type="button"><Sparkles size={15} />{book.pre_generation_status === "failed" ? "重新预生成" : book.pre_generation_status === "pending" || book.pre_generation_status === "processing" ? "正在生成……" : "开启预生成"}</button>}
+          {completed > 0 && book.pre_generation_status === "completed" && book.pre_generation_quiz_id && <Link className="button button-secondary" href={`/quizzes/${book.pre_generation_quiz_id}`}><CheckCircle2 size={15} />打开预生成测试</Link>}
         </div>
       </section>
+
+      {book.pre_generation_status !== "disabled" && <div className={`pre-generation-banner ${book.pre_generation_status}`}>
+        {book.pre_generation_status === "completed" ? <CheckCircle2 size={18} /> : book.pre_generation_status === "failed" ? <AlertCircle size={18} /> : <LoaderCircle className={book.pre_generation_status === "processing" ? "spin" : ""} size={18} />}
+        <div>
+          <strong>{book.pre_generation_status === "completed" ? "预生成测试已准备好" : book.pre_generation_status === "failed" ? "预生成测试失败" : "正在生成题目中"}</strong>
+          <span>{book.pre_generation_error || (book.pre_generation_status === "completed" ? "可以直接打开这套测试，也可以继续创建新的测试。" : "系统正在后台生成一套默认复习测试，完成前不能重复触发。")}</span>
+        </div>
+      </div>}
 
       <div className="metrics-grid" style={{ marginBottom: 25 }}>
         <div className="metric"><div className="metric-label">原文资料</div><div className="metric-value">{completed}<span className="metric-detail">份已完成</span></div></div>

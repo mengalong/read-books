@@ -13,10 +13,24 @@ from app.schemas import (
     ModelConfigurationUpdate,
     ModelConnectionTestRequest,
     ModelConnectionTestResponse,
+    PromptPreviewResponse,
+    PromptTemplateResponse,
+    PromptTemplateUpdate,
 )
 from app.services.model_config import (
     DEFAULT_CONFIGURATION_ID,
     get_effective_model_configuration,
+)
+from app.services.prompt_config import (
+    PROMPT_TYPES,
+    PROMPT_VARIABLES,
+    get_prompt_history,
+    get_prompt_template,
+    prompt_values_for_preview,
+    render_prompt,
+    reset_prompt_template,
+    save_prompt_template,
+    validate_prompt,
 )
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -40,6 +54,26 @@ def to_response(db: Session) -> ModelConfigurationResponse:
         created_at=configuration.created_at,
         updated_at=configuration.updated_at,
     )
+
+
+def to_prompt_response(prompt) -> PromptTemplateResponse:
+    return PromptTemplateResponse(
+        id=prompt.template_id,
+        prompt_type=prompt.prompt_type,
+        system_prompt=prompt.system_prompt,
+        user_prompt=prompt.user_prompt,
+        version=prompt.version,
+        is_active=prompt.is_active,
+        available_variables=list(PROMPT_VARIABLES[prompt.prompt_type]),
+        created_at=prompt.created_at,
+        updated_at=prompt.updated_at,
+    )
+
+
+def prompt_type_or_404(prompt_type: str) -> str:
+    if prompt_type not in PROMPT_TYPES:
+        raise HTTPException(status_code=404, detail="未找到该提示词类型")
+    return prompt_type
 
 
 @router.get("/model", response_model=ModelConfigurationResponse)
@@ -80,6 +114,61 @@ def update_model_configuration(
     db.commit()
     db.refresh(stored)
     return to_response(db)
+
+
+@router.get("/prompts", response_model=list[PromptTemplateResponse])
+def get_prompt_templates(db: Session = Depends(get_db)) -> list[PromptTemplateResponse]:
+    return [to_prompt_response(get_prompt_template(db, prompt_type)) for prompt_type in PROMPT_TYPES]
+
+
+@router.get(
+    "/prompts/{prompt_type}/history", response_model=list[PromptTemplateResponse]
+)
+def get_prompt_template_history(
+    prompt_type: str, db: Session = Depends(get_db)
+) -> list[PromptTemplateResponse]:
+    prompt_type_or_404(prompt_type)
+    return [to_prompt_response(prompt) for prompt in get_prompt_history(db, prompt_type)]
+
+
+@router.put("/prompts/{prompt_type}", response_model=PromptTemplateResponse)
+def update_prompt_template(
+    prompt_type: str, payload: PromptTemplateUpdate, db: Session = Depends(get_db)
+) -> PromptTemplateResponse:
+    prompt_type_or_404(prompt_type)
+    try:
+        prompt = save_prompt_template(db, prompt_type, payload.system_prompt, payload.user_prompt)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return to_prompt_response(prompt)
+
+
+@router.post("/prompts/{prompt_type}/reset", response_model=PromptTemplateResponse)
+def reset_prompt(
+    prompt_type: str, db: Session = Depends(get_db)
+) -> PromptTemplateResponse:
+    prompt_type_or_404(prompt_type)
+    return to_prompt_response(reset_prompt_template(db, prompt_type))
+
+
+@router.post("/prompts/{prompt_type}/preview", response_model=PromptPreviewResponse)
+def preview_prompt(
+    prompt_type: str, payload: PromptTemplateUpdate
+) -> PromptPreviewResponse:
+    prompt_type_or_404(prompt_type)
+    try:
+        validate_prompt(prompt_type, payload.system_prompt, payload.user_prompt)
+        values = prompt_values_for_preview(prompt_type)
+        rendered_system = render_prompt(payload.system_prompt, values)
+        rendered_user = render_prompt(payload.user_prompt, values)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return PromptPreviewResponse(
+        prompt_type=prompt_type,
+        rendered_system_prompt=rendered_system,
+        rendered_user_prompt=rendered_user,
+        available_variables=list(PROMPT_VARIABLES[prompt_type]),
+    )
 
 
 def model_error_message(response: httpx.Response) -> str:

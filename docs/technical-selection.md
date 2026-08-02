@@ -224,6 +224,8 @@ interface QuizAiProvider {
 
 真实出题时，后端先选择本次候选 `ContentChunk`，只向模型提供片段 ID、页码和原文内容。模型返回后必须通过题量、题型、选项、正确答案、参考答案、评分要点和来源片段 ID 校验；PDF 文件名、页码与原文摘录由后端根据数据库记录重新构造，不采信模型生成的来源信息。客观题继续由后端确定性评分，只有问答题提交时调用模型。
 
+真实模型长响应的默认请求超时为 180 秒。单次出题候选片段数量按题量控制为 `max(题目总数 + 2, 8)`，降低无必要的上下文和读取超时；请求读取超时会返回明确的配置建议，不会保存半成品题目。
+
 ### 8.2 配置项
 
 网页端模型设置页面对应后端接口：
@@ -231,6 +233,10 @@ interface QuizAiProvider {
 - `GET /api/settings/model`：读取当前生效配置，但只返回 `api_key_configured`，不返回 API Key 明文。
 - `PUT /api/settings/model`：保存连接参数和是否使用已配置模型的开关；未修改的固定长度掩码不作为密钥提交，输入新 API Key 后覆盖后台原值。
 - `POST /api/settings/model/test`：使用当前表单参数调用 OpenAI 兼容的 `/chat/completions`，校验 HTTP 状态和响应结构，并返回耗时、测试时间和 `choices[0].message.content` 文本；成功/失败结果持久化到 `model_configurations`，前端另外展示脱敏后的等价 `curl` 命令。
+- `GET /api/settings/prompts`：读取出题和问答评分当前启用的提示词模板及可用变量。
+- `PUT /api/settings/prompts/{prompt_type}`：校验变量后保存新版本并启用。
+- `POST /api/settings/prompts/{prompt_type}/preview`：使用示例数据渲染模板，供保存前检查。
+- `POST /api/settings/prompts/{prompt_type}/reset`：以系统默认模板保存一个新版本。
 
 已保存的单用户配置存放在 SQLite 的 `model_configurations` 表中，并优先于环境变量。尚未保存网页配置时，后端回退到 `.env` 的默认值。读取接口不返回 API Key 明文，前端只根据 `api_key_configured` 显示固定 16 位掩码。页面开关启用已配置模型后，新生成的测试和问答题评分会使用该配置；关闭后立即回到 Mock Provider。
 
@@ -241,7 +247,7 @@ MOCK_MODE=true
 LLM_BASE_URL=
 LLM_API_KEY=
 LLM_MODEL=
-LLM_TIMEOUT_MS=60000
+LLM_TIMEOUT_MS=180000
 LLM_TEMPERATURE=0.2
 ```
 
@@ -264,7 +270,11 @@ export type AppConfig = {
 };
 ```
 
-### 8.3 Mock 数据原则
+### 8.3 提示词模板原则
+
+提示词模板保存在 SQLite 的 `prompt_templates` 表中，出题和问答评分分别维护版本。模板只能使用后端提供的白名单变量，例如 `{{source_material}}`、`{{difficulty}}`、`{{user_answer}}` 和 `{{grading_rubric}}`。版本切换只影响模型表达和任务约束，后端仍强制校验题目结构、分数范围和原文来源。
+
+### 8.4 Mock 数据原则
 
 Mock 不是随便造页面假数据，而是要模拟真实链路的数据结构：
 

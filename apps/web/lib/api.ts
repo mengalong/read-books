@@ -7,6 +7,10 @@ import type {
   ModelConnectionTestResult,
   ModelProviderMode,
   PdfDocument,
+  PreGenerationResponse,
+  PromptPreview,
+  PromptTemplate,
+  PromptType,
   Quiz,
   QuizResult,
   ReadingStatus,
@@ -79,6 +83,12 @@ export function uploadPdf(bookId: string, file: File) {
   const formData = new FormData();
   formData.append("file", file);
   return apiFetch<PdfDocument>(`/books/${bookId}/pdfs`, { method: "POST", body: formData });
+}
+
+export function startPreGeneration(bookId: string) {
+  return apiFetch<PreGenerationResponse>(`/books/${bookId}/pre-generation`, {
+    method: "POST",
+  });
 }
 
 export function deletePdf(bookId: string, pdfId: string) {
@@ -159,6 +169,40 @@ export function testModelConnection(payload: {
   timeout_ms: number;
 }) {
   return apiFetch<ModelConnectionTestResult>("/settings/model/test", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getPromptTemplates() {
+  return apiFetch<PromptTemplate[]>("/settings/prompts");
+}
+
+export function getPromptHistory(promptType: PromptType) {
+  return apiFetch<PromptTemplate[]>(`/settings/prompts/${promptType}/history`);
+}
+
+export function updatePromptTemplate(
+  promptType: PromptType,
+  payload: { system_prompt: string; user_prompt: string },
+) {
+  return apiFetch<PromptTemplate>(`/settings/prompts/${promptType}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function resetPromptTemplate(promptType: PromptType) {
+  return apiFetch<PromptTemplate>(`/settings/prompts/${promptType}/reset`, {
+    method: "POST",
+  });
+}
+
+export function previewPrompt(
+  promptType: PromptType,
+  payload: { system_prompt: string; user_prompt: string },
+) {
+  return apiFetch<PromptPreview>(`/settings/prompts/${promptType}/preview`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

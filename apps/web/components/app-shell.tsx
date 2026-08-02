@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpenText, History, LibraryBig, Plus, Settings2 } from "lucide-react";
+import { BookOpenText, FileCode2, History, LibraryBig, Plus, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -8,6 +8,7 @@ const navigation = [
   { href: "/", label: "我的书架", icon: LibraryBig },
   { href: "/books/new", label: "添加书籍", icon: Plus },
   { href: "/settings/model", label: "模型设置", icon: Settings2 },
+  { href: "/settings/prompts", label: "提示词管理", icon: FileCode2 },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

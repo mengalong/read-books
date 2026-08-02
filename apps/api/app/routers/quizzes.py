@@ -18,6 +18,7 @@ from app.schemas import (
 )
 from app.services.quiz_provider import GradeResult, get_quiz_provider
 from app.services.model_config import get_effective_model_configuration
+from app.services.prompt_config import get_effective_prompt_templates
 
 router = APIRouter(tags=["quizzes"])
 settings = get_settings()
@@ -25,7 +26,8 @@ settings = get_settings()
 
 def current_provider(db: Session):
     configuration = get_effective_model_configuration(db, settings)
-    return get_quiz_provider(settings, configuration)
+    prompts = get_effective_prompt_templates(db)
+    return get_quiz_provider(settings, configuration, prompts)
 
 
 def get_quiz_or_404(db: Session, quiz_id: str) -> Quiz:
@@ -88,6 +90,17 @@ def generate_quiz(
     book = db.get(Book, book_id)
     if not book:
         raise HTTPException(status_code=404, detail="未找到这本书")
+    if book.pre_generation_status in {"pending", "processing"}:
+        raise HTTPException(status_code=409, detail="该书正在后台预生成测试，请等待本次任务完成")
+    return _generate_quiz(book_id, payload, db)
+
+
+def _generate_quiz(
+    book_id: str, payload: QuizGenerateRequest, db: Session
+) -> QuizResponse:
+    book = db.get(Book, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="未找到这本书")
     if payload.single_count + payload.multiple_count + payload.short_count == 0:
         raise HTTPException(status_code=422, detail="至少需要选择一种题型")
     if payload.page_start and payload.page_end and payload.page_start > payload.page_end:
@@ -133,6 +146,7 @@ def generate_quiz(
             difficulty=payload.difficulty,
             generation_number=generation_number,
             recent_chunk_ids=recent_chunk_ids,
+            duration_minutes=payload.duration_minutes,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

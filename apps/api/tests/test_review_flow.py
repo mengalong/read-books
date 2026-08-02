@@ -181,6 +181,47 @@ def test_quiz_generation_switches_between_configured_and_mock_provider(client, m
     assert calls == {"http": 1, "mock": 1}
 
 
+def test_pre_generation_is_idempotent_and_requires_completed_source(client, monkeypatch):
+    book_id, _ = create_source_book(client, "预生成测试书")
+    started: list[tuple[object, tuple[str, ...]]] = []
+
+    class FakeThread:
+        def __init__(self, target, args, daemon):
+            started.append((target, args))
+            assert daemon is True
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr("app.services.pre_generation.threading.Thread", FakeThread)
+
+    first = client.post(f"/api/books/{book_id}/pre-generation")
+    assert first.status_code == 202
+    assert first.json()["status"] == "pending"
+    assert len(started) == 1
+
+    duplicate = client.post(f"/api/books/{book_id}/pre-generation")
+    assert duplicate.status_code == 202
+    assert duplicate.json()["status"] == "pending"
+    assert len(started) == 1
+
+    blocked = client.post(
+        f"/api/books/{book_id}/quizzes",
+        json={"duration_minutes": 15, "single_count": 1, "multiple_count": 0, "short_count": 0},
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"] == "该书正在后台预生成测试，请等待本次任务完成"
+
+    without_pdf = client.post(
+        "/api/books",
+        json={"title": "没有原文的书", "author": "测试作者"},
+    )
+    assert without_pdf.status_code == 201
+    unavailable = client.post(f"/api/books/{without_pdf.json()['id']}/pre-generation")
+    assert unavailable.status_code == 409
+    assert unavailable.json()["detail"] == "请先上传并完成解析 PDF，再开启预生成"
+
+
 def test_pdf_parser_keeps_page_numbers(client, tmp_path: Path):
     response = client.post(
         "/api/books",

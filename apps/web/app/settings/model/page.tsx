@@ -20,7 +20,7 @@ export default function ModelSettingsPage() {
   const [baseUrl, setBaseUrl] = useState("");
   const [modelName, setModelName] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [timeoutMs, setTimeoutMs] = useState(60_000);
+  const [timeoutMs, setTimeoutMs] = useState(180_000);
   const [temperature, setTemperature] = useState(0.2);
   const [showApiKey, setShowApiKey] = useState(false);
   const [loading, setLoading] = useState(true);

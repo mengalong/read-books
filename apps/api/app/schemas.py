@@ -50,6 +50,10 @@ class BookSummary(ApiModel):
     created_at: datetime
     updated_at: datetime
     stats: BookStats = Field(default_factory=BookStats)
+    pre_generation_enabled: bool = False
+    pre_generation_status: str = "disabled"
+    pre_generation_error: str | None = None
+    pre_generation_quiz_id: str | None = None
 
 
 class PdfResponse(ApiModel):
@@ -192,7 +196,7 @@ class ModelConfigurationUpdate(BaseModel):
     model_name: str = Field(default="", max_length=200)
     api_key: str | None = Field(default=None, max_length=4_000)
     clear_api_key: bool = False
-    timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+    timeout_ms: int = Field(default=180_000, ge=1_000, le=300_000)
     temperature: float = Field(default=0.2, ge=0, le=2)
 
 
@@ -217,7 +221,7 @@ class ModelConnectionTestRequest(BaseModel):
     model_name: str = Field(max_length=200)
     api_key: str | None = Field(default=None, max_length=4_000)
     clear_api_key: bool = False
-    timeout_ms: int = Field(default=60_000, ge=1_000, le=300_000)
+    timeout_ms: int = Field(default=180_000, ge=1_000, le=300_000)
 
 
 class ModelConnectionTestResponse(BaseModel):
@@ -227,3 +231,34 @@ class ModelConnectionTestResponse(BaseModel):
     model_name: str
     model_response: str | None = None
     tested_at: datetime
+
+
+class PreGenerationResponse(BaseModel):
+    status: Literal["disabled", "pending", "processing", "completed", "failed"]
+    message: str
+    error_message: str | None = None
+    quiz_id: str | None = None
+
+
+class PromptTemplateUpdate(BaseModel):
+    system_prompt: str = Field(min_length=1, max_length=20_000)
+    user_prompt: str = Field(min_length=1, max_length=40_000)
+
+
+class PromptTemplateResponse(ApiModel):
+    id: str
+    prompt_type: Literal["generation", "grading"]
+    system_prompt: str
+    user_prompt: str
+    version: int
+    is_active: bool
+    available_variables: list[str]
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class PromptPreviewResponse(BaseModel):
+    prompt_type: Literal["generation", "grading"]
+    rendered_system_prompt: str
+    rendered_user_prompt: str
+    available_variables: list[str]

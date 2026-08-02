@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
     llm_api_key: str | None = Field(default=None, repr=False)
     llm_model: str | None = None
-    llm_timeout_ms: int = 60_000
+    llm_timeout_ms: int = 180_000
     llm_temperature: float = 0.2
 
     @model_validator(mode="after")

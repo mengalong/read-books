@@ -1,7 +1,7 @@
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
@@ -15,9 +15,11 @@ from app.schemas import (
     BookUpdate,
     ChunkResponse,
     PdfResponse,
+    PreGenerationResponse,
 )
 from app.services.book_stats import to_book_detail, to_book_summary
 from app.services.pdf_parser import parse_pdf_document
+from app.services.pre_generation import start_pre_generation
 
 router = APIRouter(prefix="/books", tags=["books"])
 settings = get_settings()
@@ -86,7 +88,6 @@ def delete_book(book_id: str, db: Session = Depends(get_db)) -> None:
 )
 async def upload_pdf(
     book_id: str,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> PdfResponse:
@@ -127,8 +128,24 @@ async def upload_pdf(
     db.add(pdf)
     db.commit()
     db.refresh(pdf)
-    background_tasks.add_task(parse_pdf_document, pdf.id)
+    import threading
+
+    threading.Thread(target=parse_pdf_document, args=(pdf.id,), daemon=True).start()
     return PdfResponse.model_validate(pdf)
+
+
+@router.post(
+    "/{book_id}/pre-generation",
+    response_model=PreGenerationResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_book_pre_generation(
+    book_id: str, db: Session = Depends(get_db)
+) -> PreGenerationResponse:
+    try:
+        return start_pre_generation(db, book_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/{book_id}/pdfs", response_model=list[PdfResponse])
@@ -197,4 +214,3 @@ def list_chunks(
         )
         for chunk, file_name in rows
     ]
-

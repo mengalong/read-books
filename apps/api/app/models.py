@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -36,6 +36,10 @@ class Book(TimestampMixin, Base):
     language: Mapped[str] = mapped_column(String(30), default="中文")
     reading_status: Mapped[str] = mapped_column(String(30), default="finished", index=True)
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    pre_generation_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    pre_generation_status: Mapped[str] = mapped_column(String(20), default="disabled", index=True)
+    pre_generation_error: Mapped[str | None] = mapped_column(Text)
+    pre_generation_quiz_id: Mapped[str | None] = mapped_column(String(36))
 
     pdfs: Mapped[list[PdfDocument]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
@@ -163,9 +167,20 @@ class ModelConfiguration(TimestampMixin, Base):
     base_url: Mapped[str] = mapped_column(Text, default="")
     api_key: Mapped[str | None] = mapped_column(Text)
     model_name: Mapped[str] = mapped_column(String(200), default="")
-    timeout_ms: Mapped[int] = mapped_column(Integer, default=60_000)
+    timeout_ms: Mapped[int] = mapped_column(Integer, default=180_000)
     temperature: Mapped[float] = mapped_column(Float, default=0.2)
     last_test_status: Mapped[str | None] = mapped_column(String(20))
     last_test_message: Mapped[str | None] = mapped_column(Text)
     last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_test_latency_ms: Mapped[int | None] = mapped_column(Integer)
+
+
+class PromptTemplate(TimestampMixin, Base):
+    __tablename__ = "prompt_templates"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    prompt_type: Mapped[str] = mapped_column(String(30), index=True)
+    system_prompt: Mapped[str] = mapped_column(Text)
+    user_prompt: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
