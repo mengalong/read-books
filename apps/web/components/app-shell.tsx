@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 const navigation = [
   { href: "/", label: "我的书架", icon: LibraryBig },
   { href: "/books/new", label: "添加书籍", icon: Plus },
+  { href: "/reviews", label: "复习记录", icon: History },
 ];
 
 const systemNavigation = [
@@ -47,12 +48,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Link>
             );
           })}
-          {pathname.includes("/history") && (
-            <Link className="active" href={pathname}>
-              <History size={17} strokeWidth={1.8} />
-              复习记录
-            </Link>
-          )}
         </nav>
         <div className="sidebar-note">
           <strong><BookOpenText size={13} /> 原文优先</strong>

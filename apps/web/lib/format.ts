@@ -40,6 +40,7 @@ export function statusLabel(status: string) {
     completed: "解析完成",
     failed: "解析失败",
     ready: "待完成",
+    in_progress: "进行中",
     submitted: "已完成",
   };
   return labels[status] || status;

@@ -2,7 +2,6 @@ import type {
   BookDetail,
   BookSummary,
   Chunk,
-  HistoryItem,
   ModelConfiguration,
   ModelConnectionTestResult,
   ModelProviderMode,
@@ -12,8 +11,12 @@ import type {
   PromptTemplate,
   PromptType,
   Quiz,
+  QuizGenerationTask,
+  QuizSummary,
   QuizResult,
   ReadingStatus,
+  ReviewTask,
+  ReviewTaskSummary,
   TokenUsageReport,
 } from "@/lib/types";
 
@@ -112,10 +115,14 @@ export function generateQuiz(
     page_end?: number;
   },
 ) {
-  return apiFetch<Quiz>(`/books/${bookId}/quizzes`, {
+  return apiFetch<QuizGenerationTask>(`/books/${bookId}/quizzes`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function getGenerationTask(taskId: string) {
+  return apiFetch<QuizGenerationTask>(`/quiz-generation-tasks/${taskId}`);
 }
 
 export function getQuiz(quizId: string) {
@@ -135,12 +142,54 @@ export function submitQuiz(
   });
 }
 
+export function getBookQuizzes(bookId: string) {
+  return apiFetch<QuizSummary[]>(`/books/${bookId}/quizzes`);
+}
+
+export function startReview(quizId: string) {
+  return apiFetch<ReviewTask>(`/quizzes/${quizId}/reviews`, { method: "POST" });
+}
+
+export function getReview(reviewId: string) {
+  return apiFetch<ReviewTask>(`/reviews/${reviewId}`);
+}
+
+export function submitReview(
+  reviewId: string,
+  payload: {
+    elapsed_seconds: number;
+    answers: { question_id: string; selected_answers: string[]; text_answer?: string }[];
+  },
+) {
+  return apiFetch<ReviewTask>(`/reviews/${reviewId}/submit`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getReviewResult(reviewId: string) {
+  return apiFetch<ReviewTask>(`/reviews/${reviewId}/result`);
+}
+
+export function getReviewHistory(bookId?: string) {
+  const suffix = bookId ? `?book_id=${encodeURIComponent(bookId)}` : "";
+  return apiFetch<ReviewTaskSummary[]>(`/reviews${suffix}`);
+}
+
+export function reopenReview(reviewId: string) {
+  return apiFetch<ReviewTask>(`/reviews/${reviewId}/reopen`, { method: "POST" });
+}
+
+export function deleteReview(reviewId: string) {
+  return apiFetch<void>(`/reviews/${reviewId}`, { method: "DELETE" });
+}
+
 export function getQuizResult(quizId: string) {
   return apiFetch<QuizResult>(`/quizzes/${quizId}/result`);
 }
 
 export function getHistory(bookId: string) {
-  return apiFetch<HistoryItem[]>(`/books/${bookId}/history`);
+  return apiFetch<ReviewTaskSummary[]>(`/books/${bookId}/history`);
 }
 
 export function getModelConfiguration() {

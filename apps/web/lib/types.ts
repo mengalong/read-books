@@ -97,6 +97,7 @@ export type PreGenerationResponse = {
   message: string;
   error_message: string | null;
   quiz_id: string | null;
+  task_id: string | null;
 };
 
 export type QuestionType = "single" | "multiple" | "short";
@@ -126,6 +127,11 @@ export type BookSummary = {
   pre_generation_status: PreGenerationResponse["status"];
   pre_generation_error: string | null;
   pre_generation_quiz_id: string | null;
+  active_generation_task_id: string | null;
+  active_generation_status: "pending" | "processing" | null;
+  active_generation_completed_questions: number;
+  active_generation_total_questions: number;
+  active_generation_phase: string | null;
   stats: BookStats;
 };
 
@@ -142,7 +148,22 @@ export type PdfDocument = {
   updated_at: string;
 };
 
-export type BookDetail = BookSummary & { pdfs: PdfDocument[] };
+export type BookDetail = BookSummary & { pdfs: PdfDocument[]; quizzes: QuizSummary[] };
+
+export type QuizSummary = {
+  id: string;
+  book_id: string;
+  title: string;
+  difficulty: string;
+  duration_minutes: number;
+  status: string;
+  question_count: number;
+  max_score: number;
+  created_at: string;
+  review_count: number;
+  latest_score: number | null;
+  last_reviewed_at: string | null;
+};
 
 export type Chunk = {
   id: string;
@@ -198,6 +219,26 @@ export type Quiz = {
   questions: Question[];
 };
 
+export type QuizGenerationTask = {
+  id: string;
+  book_id: string;
+  task_type: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  total_questions: number;
+  completed_questions: number;
+  current_question_position: number | null;
+  current_phase: string;
+  difficulty: string;
+  duration_minutes: number;
+  single_count: number;
+  multiple_count: number;
+  short_count: number;
+  quiz_id: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AnswerResult = {
   question_id: string;
   selected_answers: string[];
@@ -215,11 +256,35 @@ export type QuizResult = Quiz & {
   weak_points: string[];
 };
 
+export type ReviewTask = {
+  id: string;
+  quiz_id: string;
+  book_id: string;
+  book_title: string;
+  title: string;
+  attempt_number: number;
+  status: "in_progress" | "submitted";
+  difficulty: string;
+  duration_minutes: number;
+  total_score: number | null;
+  max_score: number;
+  elapsed_seconds: number | null;
+  submitted_at: string | null;
+  next_review_date: string | null;
+  created_at: string;
+  questions: Question[];
+  answers: AnswerResult[];
+  weak_points: string[];
+};
+
 export type HistoryItem = {
   id: string;
+  quiz_id: string;
+  book_id: string;
+  book_title: string;
   title: string;
   difficulty: string;
-  status: string;
+  status: "in_progress" | "submitted";
   total_score: number | null;
   max_score: number;
   duration_minutes: number;
@@ -229,3 +294,5 @@ export type HistoryItem = {
   submitted_at: string | null;
   next_review_date: string | null;
 };
+
+export type ReviewTaskSummary = HistoryItem & { attempt_number: number };

@@ -1,127 +1,81 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, CheckCircle2, Clock3, Send } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Clock3, FileQuestion, Play } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { ErrorState, EvidenceList } from "@/components/ui";
-import { ApiError, getQuiz, submitQuiz } from "@/lib/api";
+import { ErrorState } from "@/components/ui";
+import { ApiError, getQuiz, startReview } from "@/lib/api";
 import type { Question, Quiz } from "@/lib/types";
 
-type DraftAnswer = { selected: string[]; text: string };
+const questionTypeLabels: Record<Question["question_type"], string> = {
+  single: "单项选择题",
+  multiple: "多项选择题",
+  short: "问答题",
+};
 
-function questionTypeLabel(type: Question["question_type"]) {
-  return { single: "单项选择", multiple: "多项选择", short: "问答" }[type];
-}
-
-export default function QuizPage() {
+export default function QuizOverviewPage() {
   const params = useParams<{ quizId: string }>();
   const router = useRouter();
   const [quiz, setQuiz] = useState<Quiz | null>(null);
-  const [answers, setAnswers] = useState<Record<string, DraftAnswer>>({});
-  const [current, setCurrent] = useState(0);
-  const [elapsed, setElapsed] = useState(0);
+  const [starting, setStarting] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     getQuiz(params.quizId)
-      .then((data) => {
-        if (data.status === "submitted") router.replace(`/quizzes/${data.id}/result`);
-        setQuiz(data);
-        setAnswers(Object.fromEntries(data.questions.map((question) => [question.id, { selected: [], text: "" }])));
-      })
-      .catch((reason: unknown) => setError(reason instanceof ApiError ? reason.message : "测试加载失败"))
+      .then(setQuiz)
+      .catch((reason: unknown) => setError(reason instanceof ApiError ? reason.message : "试卷加载失败"))
       .finally(() => setLoading(false));
-  }, [params.quizId, router]);
+  }, [params.quizId]);
 
-  useEffect(() => {
-    if (!quiz || quiz.status === "submitted") return;
-    const timer = window.setInterval(() => setElapsed((value) => value + 1), 1000);
-    return () => window.clearInterval(timer);
+  const counts = useMemo(() => {
+    if (!quiz) return [];
+    return (["single", "multiple", "short"] as const)
+      .map((type) => ({ type, count: quiz.questions.filter((question) => question.question_type === type).length }))
+      .filter((item) => item.count > 0);
   }, [quiz]);
 
-  const question = quiz?.questions[current];
-  const answeredCount = useMemo(() => Object.values(answers).filter((answer) => answer.selected.length > 0 || answer.text.trim().length > 0).length, [answers]);
-  const totalSeconds = (quiz?.duration_minutes || 15) * 60;
-  const remaining = Math.max(0, totalSeconds - elapsed);
-  const timerText = `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`;
-
-  function selectOption(question: Question, optionId: string) {
-    setAnswers((currentAnswers) => {
-      const previous = currentAnswers[question.id];
-      const selected = question.question_type === "single"
-        ? [optionId]
-        : previous.selected.includes(optionId)
-          ? previous.selected.filter((id) => id !== optionId)
-          : [...previous.selected, optionId];
-      return { ...currentAnswers, [question.id]: { ...previous, selected } };
-    });
-  }
-
-  async function handleSubmit() {
+  async function handleStart() {
     if (!quiz) return;
-    const unanswered = quiz.questions.length - answeredCount;
-    if (unanswered && !window.confirm(`还有 ${unanswered} 道题未作答，仍然提交吗？`)) return;
-    setSubmitting(true);
+    setStarting(true);
     setError("");
     try {
-      await submitQuiz(quiz.id, {
-        elapsed_seconds: elapsed,
-        answers: quiz.questions.map((item) => ({ question_id: item.id, selected_answers: answers[item.id].selected, text_answer: answers[item.id].text })),
-      });
-      router.push(`/quizzes/${quiz.id}/result`);
+      const review = await startReview(quiz.id);
+      router.push(`/reviews/${review.id}`);
     } catch (reason: unknown) {
-      setError(reason instanceof ApiError ? reason.message : "提交失败，请稍后重试");
-      setSubmitting(false);
+      setError(reason instanceof ApiError ? reason.message : "复习任务创建失败");
+      setStarting(false);
     }
   }
 
-  if (loading) return <div className="page-wrap"><div className="loading-state">正在装订试卷……</div></div>;
-  if (!quiz || !question) return <div className="page-wrap"><ErrorState message={error || "未找到这套测试"} /></div>;
+  if (loading) return <div className="page-wrap"><div className="loading-state">正在打开复习试卷……</div></div>;
+  if (!quiz) return <div className="page-wrap"><ErrorState message={error || "未找到这套复习试卷"} /></div>;
 
-  const draft = answers[question.id] || { selected: [], text: "" };
   return (
     <div className="page-wrap">
+      <Link className="back-link" href={`/books/${quiz.book_id}`}><ArrowLeft size={14} />返回《{quiz.book_title}》</Link>
       {error && <div className="toast-error">{error}</div>}
-      <div className="quiz-layout">
-        <aside className="quiz-sidebar">
-          <div className="quiz-sidebar-card">
-            <div className="quiz-sidebar-title">{quiz.title}</div>
-            <div className="quiz-sidebar-meta">{quiz.book_title} · {quiz.questions.length} 道题</div>
-            <div className={`quiz-timer ${remaining < 120 ? "warning" : ""}`}><Clock3 size={16} />{timerText}</div>
-            <div className="question-nav">{quiz.questions.map((item, index) => {
-              const draftItem = answers[item.id];
-              const done = draftItem && (draftItem.selected.length > 0 || draftItem.text.trim());
-              return <button aria-label={`前往第${index + 1}题`} className={`${done ? "done" : ""} ${index === current ? "current" : ""}`} key={item.id} onClick={() => setCurrent(index)} type="button">{index + 1}</button>;
-            })}</div>
-            <p className="quiz-sidebar-meta" style={{ marginTop: 13 }}>已答 {answeredCount} / {quiz.questions.length}</p>
+      <header className="page-header">
+        <div><div className="eyebrow">Review paper</div><h1 className="page-title">{quiz.title}</h1><p className="page-description">从这套试卷开始一次新的复习任务。同一套试卷可以反复作答，每次结果都会单独记录。</p></div>
+        <button className="button button-primary" disabled={starting} onClick={() => void handleStart()} type="button"><Play size={15} />{starting ? "正在准备……" : "开始本次复习"}</button>
+      </header>
+
+      <div className="quiz-choice-layout">
+        <section className="content-panel">
+          <div className="section-title"><h2>试卷内容</h2><span>原文依据默认折叠</span></div>
+          <div className="quiz-choice-items">
+            {counts.map(({ type, count }) => <div className="quiz-choice-item" key={type}><div className="count-icon"><FileQuestion size={17} /></div><div><strong>{questionTypeLabels[type]}</strong><span>{count} 道</span></div></div>)}
           </div>
+          <div className="quiz-choice-note"><CheckCircle2 size={16} />每道题都保留对应的 PDF 页码和原文依据，提交后还可以查看 AI 参考答案与评分反馈。</div>
+        </section>
+        <aside className="quiz-settings-summary">
+          <div className="eyebrow">本套试卷</div>
+          <strong>{quiz.questions.length} 道题</strong>
+          <p>选择开始后会创建一次独立的复习任务。你可以中途离开，之后从复习记录继续。</p>
+          <dl><div><dt>目标时长</dt><dd><Clock3 size={13} />{quiz.duration_minutes} 分钟</dd></div><div><dt>难度</dt><dd>{quiz.difficulty === "easy" ? "基础" : quiz.difficulty === "hard" ? "深入" : "适中"}</dd></div><div><dt>答题次数</dt><dd>每次单独记录</dd></div></dl>
         </aside>
-
-        <main>
-          <div className="quiz-main-header"><div><Link className="back-link" href={`/books/${quiz.book_id}`} style={{ marginBottom: 8 }}><ArrowLeft size={13} />暂时离开</Link><h1>{quiz.book_title}</h1></div><span className="quiz-progress-label">第 {current + 1} / {quiz.questions.length} 题</span></div>
-          <div className="progress-track"><div className="progress-fill" style={{ width: `${((current + 1) / quiz.questions.length) * 100}%` }} /></div>
-          <article className="question-card" style={{ marginTop: 15 }}>
-            <header className="question-card-header"><span className="question-number">QUESTION {String(current + 1).padStart(2, "0")}</span><span className="question-type">{questionTypeLabel(question.question_type)} · {question.max_score} 分</span></header>
-            <h2 className="question-prompt">{question.prompt}</h2>
-            <p className="question-hint">知识点：{question.knowledge_point}{question.question_type === "multiple" ? " · 本题有多个正确答案" : ""}</p>
-
-            {question.question_type !== "short" ? <div className="option-list">{question.options.map((option) => {
-              const selected = draft.selected.includes(option.id);
-              return <label className={`option-label ${selected ? "selected" : ""}`} key={option.id}><input checked={selected} name={question.id} onChange={() => selectOption(question, option.id)} type={question.question_type === "single" ? "radio" : "checkbox"} /><span className="option-id">{option.id}</span><span className="option-text">{option.text}</span></label>;
-            })}</div> : <textarea className="answer-textarea" onChange={(event) => setAnswers((currentAnswers) => ({ ...currentAnswers, [question.id]: { ...currentAnswers[question.id], text: event.target.value } }))} placeholder="请用自己的语言回答，不要求逐字复述原文……" value={draft.text} />}
-
-            <EvidenceList evidence={question.source_evidence} />
-          </article>
-          <footer className="quiz-footer">
-            <button className="button button-secondary" disabled={current === 0} onClick={() => setCurrent((index) => index - 1)} type="button"><ArrowLeft size={15} />上一题</button>
-            {current < quiz.questions.length - 1 ? <button className="button button-primary" onClick={() => setCurrent((index) => index + 1)} type="button">下一题<ArrowRight size={15} /></button> : <button className="button button-primary" disabled={submitting} onClick={() => void handleSubmit()} type="button"><Send size={15} />{submitting ? "评分中……" : "提交测试"}</button>}
-          </footer>
-          {answeredCount === quiz.questions.length && current < quiz.questions.length - 1 && <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}><button className="button button-quiet" onClick={() => void handleSubmit()} type="button"><CheckCircle2 size={15} />全部作答，直接提交</button></div>}
-        </main>
       </div>
     </div>
   );
