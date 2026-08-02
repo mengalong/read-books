@@ -239,7 +239,10 @@ def submit_quiz(
         selected_answers = item.selected_answers if item else []
         text_answer = item.text_answer if item else None
         if question.question_type == "short":
-            grade = current_provider(db).grade_short_answer(question, text_answer or "")
+            try:
+                grade = current_provider(db).grade_short_answer(question, text_answer or "")
+            except RuntimeError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
         else:
             grade = grade_objective(question, selected_answers)
         total_score += grade.score
