@@ -1,14 +1,18 @@
 "use client";
 
-import { BookOpenText, FileCode2, History, LibraryBig, Plus, Settings2 } from "lucide-react";
+import { BarChart3, BookOpenText, FileCode2, History, LibraryBig, Plus, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const navigation = [
   { href: "/", label: "我的书架", icon: LibraryBig },
   { href: "/books/new", label: "添加书籍", icon: Plus },
+];
+
+const systemNavigation = [
   { href: "/settings/model", label: "模型设置", icon: Settings2 },
   { href: "/settings/prompts", label: "提示词管理", icon: FileCode2 },
+  { href: "/settings/token-usage", label: "Token 用量", icon: BarChart3 },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -33,10 +37,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Link>
             );
           })}
+          <div className="nav-group-label">系统管理</div>
+          {systemNavigation.map(({ href, label, icon: Icon }) => {
+            const active = pathname.startsWith(href);
+            return (
+              <Link className={active ? "active" : ""} href={href} key={href}>
+                <Icon size={17} strokeWidth={1.8} />
+                {label}
+              </Link>
+            );
+          })}
           {pathname.includes("/history") && (
             <Link className="active" href={pathname}>
               <History size={17} strokeWidth={1.8} />
-              测试历史
+              复习记录
             </Link>
           )}
         </nav>

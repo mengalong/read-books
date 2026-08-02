@@ -129,6 +129,15 @@ a {
   color: #efb665;
 }
 
+.nav-group-label {
+  color: #71877f;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  margin: 18px 13px 1px;
+  text-transform: uppercase;
+}
+
 .sidebar-note {
   border-top: 1px solid #3b4a47;
   color: #91a39c;
@@ -144,6 +153,204 @@ a {
   font-size: 12px;
   font-weight: 600;
   margin-bottom: 3px;
+}
+
+.usage-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 25px;
+}
+
+.usage-panel {
+  padding: 22px 24px 25px;
+}
+
+.usage-panel .section-title h2 {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+}
+
+.usage-filter-row {
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 4px;
+  margin: 0 -24px;
+  overflow-x: auto;
+  padding: 0 24px;
+}
+
+.usage-filter-row button {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 11px 9px 10px;
+  white-space: nowrap;
+}
+
+.usage-filter-row button.active {
+  border-bottom-color: var(--green);
+  color: var(--green);
+  font-weight: 700;
+}
+
+.usage-task-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 15px;
+}
+
+.usage-task {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.usage-task summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 15px;
+  justify-content: space-between;
+  list-style: none;
+  min-height: 65px;
+  padding: 11px 15px;
+}
+
+.usage-task summary::-webkit-details-marker {
+  display: none;
+}
+
+.usage-task-title,
+.usage-task-summary,
+.usage-task-meta,
+.usage-task-links {
+  align-items: center;
+  display: flex;
+}
+
+.usage-task-title {
+  color: var(--green);
+  gap: 10px;
+  min-width: 0;
+}
+
+.usage-task-title > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.usage-task-title strong {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-task-title small,
+.usage-stage-table small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.usage-task-summary {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 12px;
+  gap: 15px;
+}
+
+.usage-task-detail {
+  border-top: 1px solid var(--line);
+  padding: 0 15px 15px;
+}
+
+.usage-task-meta {
+  color: var(--muted);
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 13px;
+  padding: 13px 0;
+}
+
+.usage-task-links {
+  gap: 10px;
+  margin-left: auto;
+}
+
+.usage-task-links a {
+  color: var(--green);
+  font-weight: 700;
+}
+
+.usage-stage-table-wrap {
+  overflow-x: auto;
+}
+
+.usage-stage-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 760px;
+  width: 100%;
+}
+
+.usage-stage-table th,
+.usage-stage-table td {
+  border-top: 1px solid var(--line-soft);
+  padding: 10px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.usage-stage-table th {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.usage-stage-table td:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.usage-number {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.usage-status.success {
+  color: var(--green);
+}
+
+.usage-status.failed {
+  color: var(--red);
+  display: block;
+  max-width: 220px;
+}
+
+.empty-usage {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 60px 20px 45px;
+  text-align: center;
+}
+
+.empty-usage svg {
+  color: var(--line-strong);
+  margin-bottom: 4px;
+}
+
+.empty-usage strong {
+  color: var(--ink);
+  font-size: 14px;
 }
 
 .app-main {

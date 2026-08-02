@@ -14,6 +14,7 @@ import type {
   Quiz,
   QuizResult,
   ReadingStatus,
+  TokenUsageReport,
 } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
@@ -206,4 +207,9 @@ export function previewPrompt(
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function getTokenUsage(taskType?: string) {
+  const suffix = taskType ? `?task_type=${encodeURIComponent(taskType)}` : "";
+  return apiFetch<TokenUsageReport>(`/settings/token-usage${suffix}`);
 }

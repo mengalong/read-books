@@ -48,6 +48,50 @@ export type PromptPreview = {
   available_variables: string[];
 };
 
+export type TokenUsageStage = {
+  id: string;
+  phase: string;
+  call_number: number;
+  model_name: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  status: "success" | "failed";
+  error_message: string | null;
+  latency_ms: number;
+  created_at: string;
+};
+
+export type TokenUsageTask = {
+  task_id: string;
+  task_type: string;
+  task_label: string;
+  status: "success" | "failed";
+  book_id: string | null;
+  quiz_id: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  unreported_calls: number;
+  started_at: string;
+  finished_at: string;
+  stages: TokenUsageStage[];
+};
+
+export type TokenUsageReport = {
+  summary: {
+    task_count: number;
+    total_calls: number;
+    successful_calls: number;
+    failed_calls: number;
+    unreported_calls: number;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+  };
+  tasks: TokenUsageTask[];
+};
+
 export type PreGenerationResponse = {
   status: "disabled" | "pending" | "processing" | "completed" | "failed";
   message: string;

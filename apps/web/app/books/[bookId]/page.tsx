@@ -104,8 +104,8 @@ export default function BookDetailPage() {
           </div>
         </div>
         <div className="detail-actions">
-          <Link className="button button-secondary" href={`/books/${book.id}/history`}><History size={15} />测试历史</Link>
-          <Link className="button button-primary" href={completed && !preGenerating ? `/books/${book.id}/quiz/new` : "#"} aria-disabled={!completed || preGenerating} onClick={(event) => { if (!completed || preGenerating) event.preventDefault(); }}><Play size={15} />{preGenerating ? "预生成中" : "开始测试"}</Link>
+          <Link className="button button-secondary" href={`/books/${book.id}/history`}><History size={15} />复习记录</Link>
+          <Link className="button button-primary" href={completed && !preGenerating ? `/books/${book.id}/quiz/new` : "#"} aria-disabled={!completed || preGenerating} onClick={(event) => { if (!completed || preGenerating) event.preventDefault(); }}><Play size={15} />{preGenerating ? "题目准备中" : "开始复习"}</Link>
           {completed > 0 && book.pre_generation_status !== "completed" && <button className="button button-secondary" disabled={startingPreGeneration || book.pre_generation_status === "pending" || book.pre_generation_status === "processing"} onClick={() => void handleStartPreGeneration()} type="button"><Sparkles size={15} />{book.pre_generation_status === "failed" ? "重新预生成" : book.pre_generation_status === "pending" || book.pre_generation_status === "processing" ? "正在生成……" : "开启预生成"}</button>}
           {completed > 0 && book.pre_generation_status === "completed" && book.pre_generation_quiz_id && <Link className="button button-secondary" href={`/quizzes/${book.pre_generation_quiz_id}`}><CheckCircle2 size={15} />打开预生成测试</Link>}
         </div>
