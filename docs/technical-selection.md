@@ -1,4 +1,4 @@
-# 读书复习测试系统技术选型 v0.4
+# 读书复习测试系统技术选型 v0.5
 
 ## 1. 选型结论
 
@@ -75,10 +75,12 @@ conda activate read-books
 - `/`：书架
 - `/books/new`：新增书籍
 - `/books/[bookId]`：书籍详情、PDF 上传与解析状态
-- `/books/[bookId]/quiz/new`：生成测试
-- `/quizzes/[quizId]`：答题页
-- `/quizzes/[quizId]/result`：结果页
-- `/books/[bookId]/history`：测试历史
+- `/books/[bookId]/quiz/new`：创建并查看异步出题任务
+- `/quizzes/[quizId]`：试卷概览与开始复习
+- `/reviews/[reviewId]`：一次复习任务的答题页
+- `/reviews/[reviewId]/result`：一次复习任务的结果页
+- `/reviews`：全局复习记录
+- `/books/[bookId]/history`：单本书复习记录
 
 ### 4.2 Tailwind CSS + lucide-react
 
@@ -103,12 +105,12 @@ conda activate read-books
 
 - 路由、依赖注入、请求校验和 OpenAPI 生成都很适合做这种工具型产品。
 - `UploadFile` 支持文件上传，适合处理 PDF。
-- `BackgroundTasks` 可以把上传后解析、索引生成这类工作放到响应之后执行。
+- 持久化任务表配合后台线程，可以让 PDF 解析和逐题出题在请求返回后继续执行，并在服务重启时恢复未完成任务。
 - Python 生态在 PDF 解析、文本处理和后续 AI 调用上更顺手。
 
 后端主要职责：
 
-- 书籍、PDF、题目、答题记录的 API。
+- 书籍、PDF、出题任务、试卷和复习任务的 API。
 - PDF 上传、存储、解析状态管理。
 - PDF 文本抽取和分块。
 - 测试生成、提交评分、结果汇总。
@@ -128,9 +130,16 @@ conda activate read-books
 - `GET /books/:bookId/pdfs`
 - `GET /books/:bookId/chunks`
 - `POST /books/:bookId/quizzes`
+- `GET /quiz-generation-tasks/:taskId`
+- `GET /books/:bookId/quizzes`
 - `GET /quizzes/:quizId`
-- `POST /quizzes/:quizId/submit`
-- `GET /quizzes/:quizId/result`
+- `POST /quizzes/:quizId/reviews`
+- `GET /reviews`
+- `GET /reviews/:reviewId`
+- `POST /reviews/:reviewId/submit`
+- `GET /reviews/:reviewId/result`
+- `POST /reviews/:reviewId/reopen`
+- `DELETE /reviews/:reviewId`
 - `GET /books/:bookId/history`
 
 前端可以直接消费 FastAPI 的 OpenAPI 文档，必要时再生成 TypeScript 客户端或类型定义。
@@ -224,7 +233,7 @@ interface QuizAiProvider {
 
 真实出题时，后端先选择本次候选 `ContentChunk`，只向模型提供片段 ID、页码和原文内容。模型返回后必须通过题量、题型、选项、正确答案、参考答案、评分要点和来源片段 ID 校验；PDF 文件名、页码与原文摘录由后端根据数据库记录重新构造，不采信模型生成的来源信息。客观题继续由后端确定性评分，只有问答题提交时调用模型。
 
-真实模型长响应的默认请求超时为 180 秒。单次出题候选片段数量按题量控制为 `max(题目总数 + 2, 8)`，降低无必要的上下文和读取超时；请求读取超时会返回明确的配置建议，不会保存半成品题目。
+真实模型长响应的默认请求超时为 180 秒。整套试卷不再使用一次长请求，而是按题型逐题调用模型；每次调用只要求一道题，候选片段数量控制为 `max(本次题目数 + 2, 4)`。每题完成后提交任务进度，全部成功后再保存完整试卷；请求读取超时会记录失败阶段和错误信息，不会保存半成品试卷。
 
 ### 8.2 配置项
 
@@ -279,7 +288,7 @@ export type AppConfig = {
 
 真实 Provider 每次发起模型请求都会写入 `model_usage_records`，记录任务 ID、任务类型、阶段、调用序号、模型名称、耗时、成功状态和接口返回的 `prompt_tokens`/`completion_tokens`（兼容 `input_tokens`/`output_tokens`）等元数据。记录不保存提示词、PDF 原文、用户答案或 API Key。
 
-一次手动出题或后台预出题是一个任务，首次生成和结构修正重试分别作为不同阶段；一次提交中的多个问答题评分共享提交任务 ID，并按调用序号展开。连接测试也作为独立任务记录，便于排查模型连通性。接口没有返回 usage 时对应 Token 为空，统计页面显示“未报告”，不将未知值假定为零。
+一次手动出题或后台预出题是一个任务，各道题的首次生成和结构修正重试分别按调用序号记录；一次提交中的多个问答题评分共享提交任务 ID，并按调用序号展开。连接测试也作为独立任务记录，便于排查模型连通性。接口没有返回 usage 时对应 Token 为空，统计页面显示“未报告”，不将未知值假定为零。
 
 预生成采用分层配置边界：书籍实体维护是否开启、当前状态、失败信息和结果题目 ID；平台或未来租户设置维护默认题量、题型、目标时长、并发和资源预算；书籍级参数可以覆盖租户默认值。未来增加 `tenant_id` 后，任务和用量记录沿用租户维度查询，避免把书籍运行状态塞进全局模型配置表。
 
@@ -321,6 +330,9 @@ Mock 不是随便造页面假数据，而是要模拟真实链路的数据结构
 - 客观题评分。
 - 问答题评分结果归一化。
 - 配置读取与 mock/real provider 切换。
+- 异步出题任务创建、逐题生成、进度完成和失败恢复。
+- 同一试卷创建多次复习任务。
+- 历史任务重答复用原任务 ID，删除任务不删除试卷。
 
 ### 10.2 端到端测试
 
@@ -329,8 +341,10 @@ Mock 不是随便造页面假数据，而是要模拟真实链路的数据结构
 - 创建书籍。
 - 上传 PDF 并看到解析状态。
 - 生成测试。
+- 在生成期间离开页面，并从书籍详情查看任务进度。
+- 从试卷列表选择同一套试卷创建多次复习任务。
 - 完成单选、多选、问答。
-- 查看结果页和原文依据。
+- 查看结果页、原文依据和全局复习记录。
 
 ## 11. 部署与运行
 
@@ -348,6 +362,7 @@ Mock 不是随便造页面假数据，而是要模拟真实链路的数据结构
 - 备份策略。
 - 文件存储迁移到对象存储。
 - SQLite 迁移到 PostgreSQL。
+- 将进程内后台线程替换为支持租户隔离、并发上限、重试和超时控制的任务队列与独立 Worker。
 
 ## 12. 暂不选择的方案
 
