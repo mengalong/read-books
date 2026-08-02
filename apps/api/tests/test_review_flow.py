@@ -6,6 +6,7 @@ from sqlalchemy import select
 from app.database import SessionLocal
 from app.models import Book, ContentChunk, ModelConfiguration, PdfDocument, Question
 from app.services.pdf_parser import parse_pdf_document
+from app.services.quiz_provider import HttpQuizAiProvider, MockQuizAiProvider
 
 
 def create_source_book(client, title: str = "测试书籍") -> tuple[str, str]:
@@ -125,6 +126,59 @@ def test_generate_submit_and_avoid_recent_sources(client):
     history = client.get(f"/api/books/{book_id}/history")
     assert history.status_code == 200
     assert len(history.json()) == 2
+
+
+def test_quiz_generation_switches_between_configured_and_mock_provider(client, monkeypatch):
+    book_id, _ = create_source_book(client, "Provider 模式测试书")
+    payload = {
+        "duration_minutes": 15,
+        "difficulty": "medium",
+        "single_count": 1,
+        "multiple_count": 0,
+        "short_count": 0,
+    }
+    original_mock_generate = MockQuizAiProvider.generate_questions
+    calls = {"http": 0, "mock": 0}
+
+    def fake_http_generate(self, **kwargs):
+        calls["http"] += 1
+        return original_mock_generate(MockQuizAiProvider(), **kwargs)
+
+    def tracked_mock_generate(self, **kwargs):
+        calls["mock"] += 1
+        return original_mock_generate(self, **kwargs)
+
+    monkeypatch.setattr(HttpQuizAiProvider, "generate_questions", fake_http_generate)
+    monkeypatch.setattr(MockQuizAiProvider, "generate_questions", tracked_mock_generate)
+
+    configured = client.put(
+        "/api/settings/model",
+        json={
+            "provider_mode": "openai_compatible",
+            "base_url": "https://models.example.com/v1",
+            "model_name": "review-model",
+            "api_key": "provider-test-secret",
+        },
+    )
+    assert configured.status_code == 200
+
+    real_mode_quiz = client.post(f"/api/books/{book_id}/quizzes", json=payload)
+    assert real_mode_quiz.status_code == 201
+    assert calls == {"http": 1, "mock": 0}
+
+    switched = client.put(
+        "/api/settings/model",
+        json={
+            "provider_mode": "mock",
+            "base_url": "https://models.example.com/v1",
+            "model_name": "review-model",
+        },
+    )
+    assert switched.status_code == 200
+
+    mock_mode_quiz = client.post(f"/api/books/{book_id}/quizzes", json=payload)
+    assert mock_mode_quiz.status_code == 201
+    assert calls == {"http": 1, "mock": 1}
 
 
 def test_pdf_parser_keeps_page_numbers(client, tmp_path: Path):

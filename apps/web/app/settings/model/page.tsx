@@ -181,7 +181,7 @@ export default function ModelSettingsPage() {
 
         {providerMode === "openai_compatible" && (
           <div className="provider-notice" role="status">
-            当前版本支持保存参数和测试连接，真实模型的出题与评分协议尚未接入。
+            已支持 OpenAI 兼容模型出题和问答评分，建议启用前先完成连接测试。
           </div>
         )}
 
