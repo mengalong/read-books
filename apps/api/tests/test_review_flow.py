@@ -166,3 +166,51 @@ def test_pdf_parser_keeps_page_numbers(client, tmp_path: Path):
         assert parsed_pdf.page_count == 2
         assert {chunk.page_number for chunk in chunks} == {1, 2}
 
+
+def test_pdf_parser_uses_ocr_for_unreadable_text(client, tmp_path: Path, monkeypatch):
+    response = client.post(
+        "/api/books",
+        json={"title": "PDF OCR 测试", "author": "测试作者"},
+    )
+    book_id = response.json()["id"]
+    file_path = tmp_path / "unreadable.pdf"
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "cid text")
+    document.save(file_path)
+    document.close()
+
+    with SessionLocal() as db:
+        pdf = PdfDocument(
+            book_id=book_id,
+            file_name=file_path.name,
+            file_path=str(file_path),
+            file_size=file_path.stat().st_size,
+            parse_status="pending",
+        )
+        db.add(pdf)
+        db.commit()
+        pdf_id = pdf.id
+
+    ocr_text = "红楼梦中的人物关系和情节发展构成了这段可用于复习测试的中文原文。"
+    ocr_calls: list[str] = []
+
+    def fake_extract_with_ocr(source_path: str) -> list[tuple[int, str]]:
+        ocr_calls.append(source_path)
+        return [(1, ocr_text)]
+
+    monkeypatch.setattr(
+        "app.services.pdf_parser.extract_with_ocr",
+        fake_extract_with_ocr,
+    )
+    parse_pdf_document(pdf_id)
+
+    with SessionLocal() as db:
+        parsed_pdf = db.get(PdfDocument, pdf_id)
+        chunks = db.scalars(
+            select(ContentChunk).where(ContentChunk.pdf_id == pdf_id)
+        ).all()
+        assert parsed_pdf is not None
+        assert parsed_pdf.parse_status == "completed"
+        assert ocr_calls == [str(file_path)]
+        assert [chunk.content for chunk in chunks] == [ocr_text]

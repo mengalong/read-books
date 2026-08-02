@@ -6,6 +6,7 @@
 # Python
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
 .ruff_cache/
 .coverage
@@ -15,6 +16,7 @@ htmlcov/
 node_modules/
 .next/
 out/
+*.tsbuildinfo
 playwright-report/
 test-results/
 

@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     upload_dir: Path = PROJECT_ROOT / "data/uploads"
     parsed_dir: Path = PROJECT_ROOT / "data/parsed"
     seed_demo_data: bool = True
+    ocr_enabled: bool = True
+    ocr_command: str = "swift"
+    ocr_script: Path = PROJECT_ROOT / "scripts/pdf_ocr.swift"
 
     mock_mode: bool = True
     llm_base_url: str | None = None
@@ -41,6 +44,8 @@ class Settings(BaseSettings):
             self.upload_dir = PROJECT_ROOT / self.upload_dir
         if not self.parsed_dir.is_absolute():
             self.parsed_dir = PROJECT_ROOT / self.parsed_dir
+        if not self.ocr_script.is_absolute():
+            self.ocr_script = PROJECT_ROOT / self.ocr_script
         return self
 
     def ensure_directories(self) -> None:

@@ -26,4 +26,4 @@ test-api:
 	conda run -n read-books pytest apps/api/tests
 
 test-web:
-	npm --prefix apps/web run lint
+	npm --prefix apps/web run build

@@ -9,7 +9,7 @@
 - 后端：FastAPI + Python 3.12+
 - 文件上传：FastAPI `UploadFile` + `python-multipart`，流式写入本地磁盘
 - 数据库：SQLite + SQLAlchemy 2.0 + Alembic
-- PDF 解析：PyMuPDF，按页抽取文本并保留页码
+- PDF 解析：PyMuPDF，按页抽取文本并保留页码；对乱码、扫描版或受复制权限限制的 PDF，使用 macOS Vision OCR 兜底
 - 出题与评分：先使用 Mock LLM Provider，预留真实 LLM Provider
 - 检索：MVP 使用关键词/覆盖权重检索，后续替换为向量检索
 - Python 虚拟环境：Conda 环境 `read-books`，Python 3.12+
@@ -169,23 +169,27 @@ data/app.db
 
 ## 7. PDF 处理选型
 
-### 7.1 PyMuPDF
+### 7.1 PyMuPDF 与文本质量检测
 
 第一版使用 PyMuPDF 进行服务端 PDF 文本抽取：
 
 - 按页处理，天然支持保存页码。
 - 可以直接得到页面文本项，便于构建来源片段。
-- 不处理扫描版 OCR，扫描 PDF 在第一版显示“暂不支持 OCR”。
+- 先使用 PyMuPDF 读取原生文字，并按页检查中文/拉丁文字可读比例。
+- 对《红楼梦》这类页面可视文字正常、但字体没有 ToUnicode 映射的 PDF，原生结果会是乱码；系统不会把乱码直接送入出题流程。
+- 当原生文字质量不足时，开发环境默认调用 `scripts/pdf_ocr.swift` 使用 macOS Vision 按页识别中文。
+- OCR 结果仍不足时，解析状态为失败，前端不允许生成题目。
 
 PDF 处理流程：
 
 1. 上传接口流式保存 PDF 文件。
 2. 创建 `PdfDocument` 记录，状态为 `pending`。
 3. 后端启动解析任务，状态改为 `processing`。
-4. 使用 PyMuPDF 按页抽取文本。
-5. 清洗文本并按页/段落/长度切分为 `ContentChunk`。
-6. 更新页数、片段数和解析状态。
-7. 解析失败时保存错误信息，并在前端展示。
+4. 使用 PyMuPDF 按页抽取文本并检查可读性。
+5. 如果原生文字质量不足，转入本地 OCR，并继续保留 PDF 页码。
+6. 清洗文本并按页/段落/长度切分为 `ContentChunk`。
+7. 更新页数、片段数和解析状态。
+8. 解析失败时保存错误信息，并在前端展示。
 
 ### 7.2 大 PDF 策略
 
@@ -195,6 +199,7 @@ PDF 处理流程：
 - 解析使用异步任务，不在上传请求中同步解析完整 PDF。
 - 前端轮询解析状态。
 - 解析失败必须显示可理解的失败原因。
+- 文本解析和 OCR 解析均需经过最低质量检查，不能把乱码当作有效原文。
 - 后续如遇超大 PDF 性能问题，再加入任务队列、断点解析或后台 worker。
 
 ## 8. AI 与 Mock 策略
@@ -321,7 +326,7 @@ Mock 不是随便造页面假数据，而是要模拟真实链路的数据结构
 - 不用 serverless 作为第一目标：大文件上传、本地文件和 SQLite 不适合直接放在 serverless 里。
 - 不用 PostgreSQL 起步：单用户阶段 SQLite 更简单。
 - 不直接接真实 LLM 起步：先用 Mock 跑通产品闭环，降低早期开发和调试成本。
-- 不做 OCR：扫描版 PDF 复杂度高，第一版先明确提示不支持。
+- 不提供 OCR 编辑校对工作台：PDF 原生文字质量不足时，仅自动调用本地 Vision OCR 兜底。
 
 ## 13. 参考资料
 

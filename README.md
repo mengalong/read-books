@@ -48,9 +48,11 @@ MOCK_MODE=true
 SEED_DEMO_DATA=true
 ```
 
-当项目根目录存在 PDF 时，开发启动会自动建立对应书籍并后台解析；本地 PDF、SQLite 数据库和上传目录均不会提交到 Git。
+当项目根目录存在 PDF 时，开发启动会自动建立对应书籍并后台解析；如果 PDF 原生文字是乱码或受到复制权限限制，会在 macOS 上自动调用 Vision OCR 兜底。原文片段仍然保留 PDF 页码。本地 PDF、SQLite 数据库和上传目录均不会提交到 Git。
 
 真实模型配置已经预留：`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`、`LLM_TIMEOUT_MS` 和 `LLM_TEMPERATURE`。第一版尚未实现具体模型协议，关闭 Mock 模式会返回明确的未配置提示。
+
+OCR 配置为 `OCR_ENABLED` 和 `OCR_COMMAND`。当前 OCR 脚本使用 macOS Vision，适合本地开发；其他操作系统若没有对应命令，解析会失败并阻止无依据出题。
 
 ## 测试
 

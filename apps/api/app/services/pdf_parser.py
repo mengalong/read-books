@@ -1,5 +1,7 @@
 import re
 import logging
+import json
+import subprocess
 from pathlib import Path
 
 import fitz
@@ -7,10 +9,13 @@ from sqlalchemy import delete
 
 from app.database import SessionLocal
 from app.models import ContentChunk, PdfDocument
+from app.config import get_settings
 
 MIN_EXTRACTED_CHARS = 200
 MAX_CHUNK_CHARS = 1_200
+MIN_READABLE_PAGE_RATIO = 0.1
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 def normalize_text(text: str) -> str:
@@ -46,6 +51,44 @@ def chunk_page_text(text: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]:
     return chunks
 
 
+def is_readable_page(text: str) -> bool:
+    cjk_count = len(re.findall(r"[\u4e00-\u9fff]", text))
+    latin_count = len(re.findall(r"[A-Za-z]", text))
+    return cjk_count >= 20 or latin_count >= max(20, len(text) // 4)
+
+
+def extract_with_ocr(file_path: str) -> list[tuple[int, str]]:
+    if not settings.ocr_enabled:
+        raise ValueError("PDF 原文编码无法可靠读取，且 OCR 解析未启用")
+    if not settings.ocr_script.exists():
+        raise ValueError("PDF 原文编码无法可靠读取，当前环境没有 OCR 解析脚本")
+
+    result = subprocess.run(
+        [settings.ocr_command, str(settings.ocr_script), file_path],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=settings.ocr_script.parent.parent,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "未知错误"
+        raise ValueError(f"PDF OCR 解析失败：{detail}")
+
+    pages: list[tuple[int, str]] = []
+    for line in result.stdout.splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        text = normalize_text(str(item.get("text", "")))
+        if text:
+            pages.append((int(item["page"]), text))
+    if not pages or sum(len(text) for _, text in pages) < MIN_EXTRACTED_CHARS:
+        raise ValueError("PDF OCR 未识别出足够的文字，暂时无法生成可靠题目")
+    return pages
+
+
 def parse_pdf_document(pdf_id: str) -> None:
     with SessionLocal() as db:
         pdf = db.get(PdfDocument, pdf_id)
@@ -57,20 +100,36 @@ def parse_pdf_document(pdf_id: str) -> None:
         db.commit()
 
         try:
-            parsed: list[tuple[int, str]] = []
+            direct_pages: list[tuple[int, str]] = []
+            page_count = 0
+            permissions = 0
             with fitz.open(pdf.file_path) as document:
                 if document.needs_pass and not document.authenticate(""):
                     raise ValueError("PDF 受密码保护，首版无法读取其原文")
                 page_count = document.page_count
+                permissions = document.permissions
                 for page_index, page in enumerate(document):
                     text = normalize_text(page.get_text("text"))
-                    parsed.extend(
-                        (page_index + 1, chunk) for chunk in chunk_page_text(text) if chunk
-                    )
+                    direct_pages.append((page_index + 1, text))
 
-            total_chars = sum(len(content) for _, content in parsed)
-            if total_chars < MIN_EXTRACTED_CHARS:
-                raise ValueError("PDF 可提取文字过少，文件可能是扫描版，首版暂不支持 OCR")
+            readable_page_count = sum(is_readable_page(text) for _, text in direct_pages)
+            required_readable_pages = (
+                1 if page_count < 10 else max(3, int(page_count * MIN_READABLE_PAGE_RATIO))
+            )
+            direct_is_usable = (
+                bool(permissions & fitz.PDF_PERM_COPY)
+                and sum(len(text) for _, text in direct_pages) >= MIN_EXTRACTED_CHARS
+                and readable_page_count >= required_readable_pages
+            )
+            pages = direct_pages if direct_is_usable else extract_with_ocr(pdf.file_path)
+            parsed = [
+                (page_number, chunk)
+                for page_number, text in pages
+                for chunk in chunk_page_text(text)
+                if chunk
+            ]
+            if not parsed:
+                raise ValueError("PDF 未提取出足够的文字，暂时无法生成可靠题目")
 
             db.execute(delete(ContentChunk).where(ContentChunk.pdf_id == pdf.id))
             for sequence, (page_number, content) in enumerate(parsed, start=1):
