@@ -10,7 +10,7 @@
 - 文件上传：FastAPI `UploadFile` + `python-multipart`，流式写入本地磁盘
 - 数据库：SQLite + SQLAlchemy 2.0 + Alembic
 - PDF 解析：PyMuPDF，按页抽取文本并保留页码；对乱码、扫描版或受复制权限限制的 PDF，使用 macOS Vision OCR 兜底
-- 出题与评分：先使用 Mock LLM Provider；网页端先落地模型连接配置，真实 LLM Provider 后续接入
+- 出题与评分：使用统一 Provider 接口，同时支持 Mock LLM Provider 和 OpenAI 兼容 HTTP Provider
 - 检索：MVP 使用关键词/覆盖权重检索，后续替换为向量检索
 - Python 虚拟环境：Conda 环境 `read-books`，Python 3.12+
 - 配置：`.env` + Pydantic Settings
@@ -237,6 +237,7 @@ interface QuizAiProvider {
 - `PUT /api/settings/prompts/{prompt_type}`：校验变量后保存新版本并启用。
 - `POST /api/settings/prompts/{prompt_type}/preview`：使用示例数据渲染模板，供保存前检查。
 - `POST /api/settings/prompts/{prompt_type}/reset`：以系统默认模板保存一个新版本。
+- `GET /api/settings/token-usage`：按任务类型读取模型调用汇总，并展开每个任务的出题、格式修正、问答评分或连接测试阶段。
 
 已保存的单用户配置存放在 SQLite 的 `model_configurations` 表中，并优先于环境变量。尚未保存网页配置时，后端回退到 `.env` 的默认值。读取接口不返回 API Key 明文，前端只根据 `api_key_configured` 显示固定 16 位掩码。页面开关启用已配置模型后，新生成的测试和问答题评分会使用该配置；关闭后立即回到 Mock Provider。
 
@@ -274,7 +275,15 @@ export type AppConfig = {
 
 提示词模板保存在 SQLite 的 `prompt_templates` 表中，出题和问答评分分别维护版本。模板只能使用后端提供的白名单变量，例如 `{{source_material}}`、`{{difficulty}}`、`{{user_answer}}` 和 `{{grading_rubric}}`。版本切换只影响模型表达和任务约束，后端仍强制校验题目结构、分数范围和原文来源。
 
-### 8.4 Mock 数据原则
+### 8.4 模型 Token 用量记录
+
+真实 Provider 每次发起模型请求都会写入 `model_usage_records`，记录任务 ID、任务类型、阶段、调用序号、模型名称、耗时、成功状态和接口返回的 `prompt_tokens`/`completion_tokens`（兼容 `input_tokens`/`output_tokens`）等元数据。记录不保存提示词、PDF 原文、用户答案或 API Key。
+
+一次手动出题或后台预出题是一个任务，首次生成和结构修正重试分别作为不同阶段；一次提交中的多个问答题评分共享提交任务 ID，并按调用序号展开。连接测试也作为独立任务记录，便于排查模型连通性。接口没有返回 usage 时对应 Token 为空，统计页面显示“未报告”，不将未知值假定为零。
+
+预生成采用分层配置边界：书籍实体维护是否开启、当前状态、失败信息和结果题目 ID；平台或未来租户设置维护默认题量、题型、目标时长、并发和资源预算；书籍级参数可以覆盖租户默认值。未来增加 `tenant_id` 后，任务和用量记录沿用租户维度查询，避免把书籍运行状态塞进全局模型配置表。
+
+### 8.5 Mock 数据原则
 
 Mock 不是随便造页面假数据，而是要模拟真实链路的数据结构：
 
