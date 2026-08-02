@@ -170,7 +170,10 @@ def test_http_provider_rejects_unknown_source(monkeypatch):
     chunks = make_chunks()
     payload = generated_payload([chunk.id for chunk in chunks])
     payload["questions"][0]["source_chunk_ids"] = ["invented-source"]
-    install_chat_responses(monkeypatch, [json.dumps(payload, ensure_ascii=False)])
+    requests = install_chat_responses(
+        monkeypatch,
+        [json.dumps(payload, ensure_ascii=False), json.dumps(payload, ensure_ascii=False)],
+    )
     provider = HttpQuizAiProvider(make_configuration())
 
     with pytest.raises(RuntimeError, match="引用了未提供的原文片段"):
@@ -184,6 +187,142 @@ def test_http_provider_rejects_unknown_source(monkeypatch):
             generation_number=0,
             recent_chunk_ids=set(),
         )
+    assert len(requests) == 2
+
+
+def test_http_provider_accepts_common_field_aliases(monkeypatch):
+    chunks = make_chunks()
+    payload = generated_payload([chunk.id for chunk in chunks])
+    first = payload["questions"][0]
+    first["question"] = first.pop("prompt")
+    first["analysis"] = first.pop("explanation")
+    first["topic"] = first.pop("knowledge_point")
+    requests = install_chat_responses(monkeypatch, [json.dumps(payload, ensure_ascii=False)])
+    provider = HttpQuizAiProvider(make_configuration())
+
+    questions = provider.generate_questions(
+        chunks=chunks,
+        file_names={"pdf-1": "复习材料.pdf"},
+        single_count=1,
+        multiple_count=1,
+        short_count=1,
+        difficulty="medium",
+        generation_number=0,
+        recent_chunk_ids=set(),
+    )
+
+    assert questions[0].prompt == "主动回忆的关键动作是什么？"
+    assert questions[0].explanation == "原文强调合上书本后主动提取。"
+    assert questions[0].knowledge_point == "主动回忆"
+    assert len(requests) == 1
+
+
+def test_http_provider_fills_optional_text_from_valid_source(monkeypatch):
+    chunks = make_chunks()
+    payload = generated_payload([chunk.id for chunk in chunks])
+    payload["questions"][0].pop("explanation")
+    payload["questions"][0].pop("knowledge_point")
+    install_chat_responses(monkeypatch, [json.dumps(payload, ensure_ascii=False)])
+    provider = HttpQuizAiProvider(make_configuration())
+
+    questions = provider.generate_questions(
+        chunks=chunks,
+        file_names={"pdf-1": "复习材料.pdf"},
+        single_count=1,
+        multiple_count=1,
+        short_count=1,
+        difficulty="medium",
+        generation_number=0,
+        recent_chunk_ids=set(),
+    )
+
+    assert questions[0].explanation == HttpQuizAiProvider.DEFAULT_EXPLANATION
+    assert questions[0].knowledge_point == "主动回忆要求读者合上书本"
+
+
+def test_http_provider_repairs_invalid_json_once(monkeypatch):
+    chunks = make_chunks()
+    payload = generated_payload([chunk.id for chunk in chunks])
+    requests = install_chat_responses(
+        monkeypatch,
+        ["这里不是 JSON", json.dumps(payload, ensure_ascii=False)],
+    )
+    provider = HttpQuizAiProvider(make_configuration())
+
+    questions = provider.generate_questions(
+        chunks=chunks,
+        file_names={"pdf-1": "复习材料.pdf"},
+        single_count=1,
+        multiple_count=1,
+        short_count=1,
+        difficulty="medium",
+        generation_number=0,
+        recent_chunk_ids=set(),
+    )
+
+    assert len(questions) == 3
+    assert len(requests) == 2
+    repair_prompt = requests[1]["json"]["messages"][1]["content"]
+    assert "真实模型返回的内容不是有效 JSON" in repair_prompt
+    assert "这里不是 JSON" in repair_prompt
+    assert "SOURCE_MATERIAL" in repair_prompt
+
+
+def test_http_provider_repairs_structural_error_once(monkeypatch):
+    chunks = make_chunks()
+    invalid_payload = generated_payload([chunk.id for chunk in chunks])
+    invalid_payload["questions"][0].pop("prompt")
+    valid_payload = generated_payload([chunk.id for chunk in chunks])
+    requests = install_chat_responses(
+        monkeypatch,
+        [
+            json.dumps(invalid_payload, ensure_ascii=False),
+            json.dumps(valid_payload, ensure_ascii=False),
+        ],
+    )
+    provider = HttpQuizAiProvider(make_configuration())
+
+    questions = provider.generate_questions(
+        chunks=chunks,
+        file_names={"pdf-1": "复习材料.pdf"},
+        single_count=1,
+        multiple_count=1,
+        short_count=1,
+        difficulty="medium",
+        generation_number=0,
+        recent_chunk_ids=set(),
+    )
+
+    assert questions[0].prompt == "主动回忆的关键动作是什么？"
+    assert len(requests) == 2
+
+
+def test_http_provider_rejects_invalid_repair_without_third_request(monkeypatch):
+    chunks = make_chunks()
+    invalid_payload = generated_payload([chunk.id for chunk in chunks])
+    invalid_payload["questions"][0]["source_chunk_ids"] = ["invented-source"]
+    requests = install_chat_responses(
+        monkeypatch,
+        [
+            "not-json",
+            json.dumps(invalid_payload, ensure_ascii=False),
+        ],
+    )
+    provider = HttpQuizAiProvider(make_configuration())
+
+    with pytest.raises(RuntimeError, match="修正失败.*引用了未提供的原文片段"):
+        provider.generate_questions(
+            chunks=chunks,
+            file_names={"pdf-1": "复习材料.pdf"},
+            single_count=1,
+            multiple_count=1,
+            short_count=1,
+            difficulty="medium",
+            generation_number=0,
+            recent_chunk_ids=set(),
+        )
+
+    assert len(requests) == 2
 
 
 def test_http_provider_uses_custom_generation_prompt(monkeypatch):
