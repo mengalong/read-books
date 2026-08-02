@@ -218,9 +218,11 @@ interface QuizAiProvider {
 第一版实现两个 Provider：
 
 - `MockQuizAiProvider`：默认启用，用固定规则和样例数据生成题目/评分。
-- `HttpQuizAiProvider`：保留统一 Provider 边界和配置对象，当前明确返回未启用提示，后续接真实大模型。
+- `HttpQuizAiProvider`：调用 OpenAI 兼容的 `/chat/completions`，负责真实模型出题和问答题语义评分。
 
 业务代码只依赖 `QuizAiProvider`，不直接依赖具体模型。
+
+真实出题时，后端先选择本次候选 `ContentChunk`，只向模型提供片段 ID、页码和原文内容。模型返回后必须通过题量、题型、选项、正确答案、参考答案、评分要点和来源片段 ID 校验；PDF 文件名、页码与原文摘录由后端根据数据库记录重新构造，不采信模型生成的来源信息。客观题继续由后端确定性评分，只有问答题提交时调用模型。
 
 ### 8.2 配置项
 
@@ -230,7 +232,7 @@ interface QuizAiProvider {
 - `PUT /api/settings/model`：保存连接参数和是否使用已配置模型的开关；未修改的固定长度掩码不作为密钥提交，输入新 API Key 后覆盖后台原值。
 - `POST /api/settings/model/test`：使用当前表单参数调用 OpenAI 兼容的 `/chat/completions`，校验 HTTP 状态和响应结构，并返回耗时、测试时间和 `choices[0].message.content` 文本；成功/失败结果持久化到 `model_configurations`，前端另外展示脱敏后的等价 `curl` 命令。
 
-已保存的单用户配置存放在 SQLite 的 `model_configurations` 表中，并优先于环境变量。尚未保存网页配置时，后端回退到 `.env` 的默认值。读取接口不返回 API Key 明文，前端只根据 `api_key_configured` 显示固定 16 位掩码。当前页面支持提前录入并测试真实服务参数，但真实出题与评分协议适配尚未启用。
+已保存的单用户配置存放在 SQLite 的 `model_configurations` 表中，并优先于环境变量。尚未保存网页配置时，后端回退到 `.env` 的默认值。读取接口不返回 API Key 明文，前端只根据 `api_key_configured` 显示固定 16 位掩码。页面开关启用已配置模型后，新生成的测试和问答题评分会使用该配置；关闭后立即回到 Mock Provider。
 
 配置文件和环境变量预留：
 
@@ -271,7 +273,7 @@ Mock 不是随便造页面假数据，而是要模拟真实链路的数据结构
 - 问答题必须有 `referenceAnswer` 和 `gradingRubric`。
 - 评分结果必须有 `matchedPoints` 和 `missingPoints`。
 
-这样后续切换真实模型时，页面和数据库结构不需要重做。
+因此切换模型模式时，页面、题目和数据库结构不需要变化。
 
 ## 9. 检索与出题策略
 
