@@ -204,6 +204,10 @@ class ModelConfigurationResponse(ApiModel):
     timeout_ms: int
     temperature: float
     api_key_configured: bool
+    last_test_status: str | None = None
+    last_test_message: str | None = None
+    last_tested_at: datetime | None = None
+    last_test_latency_ms: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -221,4 +225,5 @@ class ModelConnectionTestResponse(BaseModel):
     message: str
     latency_ms: int
     model_name: str
-    model_response: str
+    model_response: str | None = None
+    tested_at: datetime

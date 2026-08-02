@@ -10,6 +10,10 @@ export type ModelConfiguration = {
   timeout_ms: number;
   temperature: number;
   api_key_configured: boolean;
+  last_test_status: "success" | "failed" | null;
+  last_test_message: string | null;
+  last_tested_at: string | null;
+  last_test_latency_ms: number | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -20,6 +24,7 @@ export type ModelConnectionTestResult = {
   latency_ms: number;
   model_name: string;
   model_response: string;
+  tested_at: string;
 };
 export type QuestionType = "single" | "multiple" | "short";
 

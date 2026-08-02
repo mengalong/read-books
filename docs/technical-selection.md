@@ -228,7 +228,7 @@ interface QuizAiProvider {
 
 - `GET /api/settings/model`：读取当前生效配置，但只返回 `api_key_configured`，不返回 API Key 明文。
 - `PUT /api/settings/model`：保存连接参数和是否使用已配置模型的开关；未修改的固定长度掩码不作为密钥提交，输入新 API Key 后覆盖后台原值。
-- `POST /api/settings/model/test`：使用当前表单参数调用 OpenAI 兼容的 `/chat/completions`，校验 HTTP 状态和响应结构，并返回耗时和 `choices[0].message.content` 文本；前端另外展示脱敏后的等价 `curl` 命令。
+- `POST /api/settings/model/test`：使用当前表单参数调用 OpenAI 兼容的 `/chat/completions`，校验 HTTP 状态和响应结构，并返回耗时、测试时间和 `choices[0].message.content` 文本；成功/失败结果持久化到 `model_configurations`，前端另外展示脱敏后的等价 `curl` 命令。
 
 已保存的单用户配置存放在 SQLite 的 `model_configurations` 表中，并优先于环境变量。尚未保存网页配置时，后端回退到 `.env` 的默认值。读取接口不返回 API Key 明文，前端只根据 `api_key_configured` 显示固定 16 位掩码。当前页面支持提前录入并测试真实服务参数，但真实出题与评分协议适配尚未启用。
 

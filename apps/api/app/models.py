@@ -165,3 +165,7 @@ class ModelConfiguration(TimestampMixin, Base):
     model_name: Mapped[str] = mapped_column(String(200), default="")
     timeout_ms: Mapped[int] = mapped_column(Integer, default=60_000)
     temperature: Mapped[float] = mapped_column(Float, default=0.2)
+    last_test_status: Mapped[str | None] = mapped_column(String(20))
+    last_test_message: Mapped[str | None] = mapped_column(Text)
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_test_latency_ms: Mapped[int | None] = mapped_column(Integer)

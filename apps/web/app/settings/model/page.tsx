@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, EyeOff, KeyRound, LoaderCircle, PlugZap, Save, ServerCog } from "lucide-react";
+import { AlertCircle, CircleCheck, Clock3, Eye, EyeOff, KeyRound, LoaderCircle, PlugZap, Save, ServerCog } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 
 import { ErrorState } from "@/components/ui";
@@ -28,7 +28,8 @@ export default function ModelSettingsPage() {
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; message: string; latencyMs?: number; modelResponse?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string; latencyMs: number; modelResponse?: string; testedAt: string } | null>(null);
+  const [testError, setTestError] = useState("");
   const [curlPreview, setCurlPreview] = useState("");
 
   useEffect(() => {
@@ -77,6 +78,7 @@ export default function ModelSettingsPage() {
     setTesting(true);
     setError("");
     setTestResult(null);
+    setTestError("");
     setCurlPreview(buildCurlPreview());
     try {
       const result = await testModelConnection({
@@ -86,12 +88,25 @@ export default function ModelSettingsPage() {
         clear_api_key: false,
         timeout_ms: timeoutMs,
       });
-      setTestResult({ ok: result.ok, message: result.message, latencyMs: result.latency_ms, modelResponse: result.model_response });
+      setTestResult({ ok: result.ok, message: result.message, latencyMs: result.latency_ms, modelResponse: result.model_response || undefined, testedAt: result.tested_at });
+      setTestError(result.ok ? "" : result.message);
+      setConfiguration((current) => current ? {
+        ...current,
+        last_test_status: result.ok ? "success" : "failed",
+        last_test_message: result.message,
+        last_tested_at: result.tested_at,
+        last_test_latency_ms: result.latency_ms,
+      } : current);
     } catch (reason: unknown) {
-      setError(reason instanceof ApiError ? reason.message : "模型接口测试失败");
+      setTestError(reason instanceof ApiError ? reason.message : "模型接口测试失败");
     } finally {
       setTesting(false);
     }
+  }
+
+  function formatTestTime(value: string | null) {
+    if (!value) return "尚未测试连接";
+    return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
   }
 
   function buildCurlPreview() {
@@ -134,6 +149,14 @@ export default function ModelSettingsPage() {
 
       {error && <ErrorState message={error} />}
       <form className="form-panel model-settings-form" onSubmit={(event) => void handleSubmit(event)}>
+        <div className={`model-link-status ${configuration?.last_test_status || "untested"}`}>
+          {configuration?.last_test_status === "success" ? <CircleCheck size={19} /> : configuration?.last_test_status === "failed" ? <AlertCircle size={18} /> : <Clock3 size={18} />}
+          <div>
+            <strong>模型链接状态</strong>
+            <span>{configuration?.last_test_status === "success" ? "最近一次测试连接成功" : configuration?.last_test_status === "failed" ? "最近一次测试连接失败" : "尚未测试连接"}</span>
+            {configuration?.last_tested_at && <small>{formatTestTime(configuration.last_tested_at)}{configuration.last_test_latency_ms === null ? "" : ` · ${configuration.last_test_latency_ms} ms`}</small>}
+          </div>
+        </div>
         <div className="settings-block model-provider-block">
           <div className="model-switch-copy">
             <label htmlFor="use-configured-model">出题与评分模式</label>
@@ -215,6 +238,7 @@ export default function ModelSettingsPage() {
         </div>
         {curlPreview && (
           <div className="curl-preview">
+            {testError && <div className="connection-error"><AlertCircle size={15} />{testError}</div>}
             <div className="curl-preview-title">本次测试命令 <span>API Key 已脱敏</span></div>
             <pre>{curlPreview}</pre>
             {testResult?.modelResponse && (

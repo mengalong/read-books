@@ -631,6 +631,42 @@ p {
   margin-top: 24px;
 }
 
+.model-link-status {
+  align-items: flex-start;
+  background: #f7faf8;
+  border: 1px solid #e3ebe6;
+  border-radius: 5px;
+  color: var(--muted);
+  display: flex;
+  gap: 10px;
+  padding: 12px 13px;
+}
+
+.model-link-status.success {
+  color: var(--green);
+}
+
+.model-link-status.failed {
+  color: var(--red);
+}
+
+.model-link-status > div {
+  display: grid;
+  gap: 3px;
+}
+
+.model-link-status strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.model-link-status span,
+.model-link-status small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .provider-notice {
   background: #fff8e8;
   border-left: 3px solid #c58a22;
@@ -717,6 +753,17 @@ p {
   border-radius: 5px;
   margin-top: 18px;
   overflow: hidden;
+}
+
+.connection-error {
+  align-items: flex-start;
+  background: #512d29;
+  color: #ffcfc5;
+  display: flex;
+  font-size: 11px;
+  gap: 7px;
+  line-height: 1.55;
+  padding: 10px 12px;
 }
 
 .curl-preview-title {

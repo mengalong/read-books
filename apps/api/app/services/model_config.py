@@ -17,6 +17,10 @@ class EffectiveModelConfiguration:
     model_name: str
     timeout_ms: int
     temperature: float
+    last_test_status: str | None = None
+    last_test_message: str | None = None
+    last_tested_at: datetime | None = None
+    last_test_latency_ms: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -43,6 +47,10 @@ def get_effective_model_configuration(
         model_name=stored.model_name,
         timeout_ms=stored.timeout_ms,
         temperature=stored.temperature,
+        last_test_status=stored.last_test_status,
+        last_test_message=stored.last_test_message,
+        last_tested_at=stored.last_tested_at,
+        last_test_latency_ms=stored.last_test_latency_ms,
         created_at=stored.created_at,
         updated_at=stored.updated_at,
     )

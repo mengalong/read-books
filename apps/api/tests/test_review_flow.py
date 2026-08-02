@@ -400,3 +400,47 @@ def test_model_connection_validates_required_fields(client):
     )
     assert missing_model.status_code == 422
     assert missing_model.json()["detail"] == "请先填写模型名称"
+
+
+def test_model_connection_records_failed_result(client, monkeypatch):
+    class FakeResponse:
+        is_success = False
+        status_code = 401
+        text = ""
+
+        @staticmethod
+        def json():
+            return {"error": {"message": "鉴权失败"}}
+
+    class FakeClient:
+        def __init__(self, timeout: float):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def post(self, *args, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.routers.settings.httpx.Client", FakeClient)
+    response = client.post(
+        "/api/settings/model/test",
+        json={
+            "base_url": "https://models.example.com/v1",
+            "model_name": "review-model",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    assert response.json()["message"] == "模型接口返回 401：鉴权失败"
+    assert response.json()["tested_at"]
+    with SessionLocal() as db:
+        stored = db.get(ModelConfiguration, "default")
+        assert stored is not None
+        assert stored.last_test_status == "failed"
+        assert stored.last_test_message == "模型接口返回 401：鉴权失败"
+        assert stored.last_tested_at is not None

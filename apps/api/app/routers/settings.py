@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from time import perf_counter
 
 import httpx
@@ -32,6 +33,10 @@ def to_response(db: Session) -> ModelConfigurationResponse:
         timeout_ms=configuration.timeout_ms,
         temperature=configuration.temperature,
         api_key_configured=bool(configuration.api_key),
+        last_test_status=configuration.last_test_status,
+        last_test_message=configuration.last_test_message,
+        last_tested_at=configuration.last_tested_at,
+        last_test_latency_ms=configuration.last_test_latency_ms,
         created_at=configuration.created_at,
         updated_at=configuration.updated_at,
     )
@@ -90,6 +95,20 @@ def model_error_message(response: httpx.Response) -> str:
     return response.text.strip()[:300] or f"HTTP {response.status_code}"
 
 
+def record_test_result(db: Session, status: str, message: str, latency_ms: int) -> datetime:
+    tested_at = datetime.now(timezone.utc)
+    stored = db.get(ModelConfiguration, DEFAULT_CONFIGURATION_ID)
+    if stored is None:
+        stored = ModelConfiguration(id=DEFAULT_CONFIGURATION_ID)
+        db.add(stored)
+    stored.last_test_status = status
+    stored.last_test_message = message[:500]
+    stored.last_tested_at = tested_at
+    stored.last_test_latency_ms = latency_ms
+    db.commit()
+    return tested_at
+
+
 @router.post("/model/test", response_model=ModelConnectionTestResponse)
 def test_model_connection(
     payload: ModelConnectionTestRequest, db: Session = Depends(get_db)
@@ -131,30 +150,70 @@ def test_model_connection(
                 },
             )
     except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail=f"模型接口连接失败：{exc}") from exc
+        latency_ms = round((perf_counter() - started_at) * 1_000)
+        message = f"模型接口连接失败：{exc}"
+        tested_at = record_test_result(db, "failed", message, latency_ms)
+        return ModelConnectionTestResponse(
+            ok=False,
+            message=message,
+            latency_ms=latency_ms,
+            model_name=model_name,
+            tested_at=tested_at,
+        )
 
     latency_ms = round((perf_counter() - started_at) * 1_000)
     if not response.is_success:
-        raise HTTPException(
-            status_code=502,
-            detail=f"模型接口返回 {response.status_code}：{model_error_message(response)}",
+        message = f"模型接口返回 {response.status_code}：{model_error_message(response)}"
+        tested_at = record_test_result(db, "failed", message, latency_ms)
+        return ModelConnectionTestResponse(
+            ok=False,
+            message=message,
+            latency_ms=latency_ms,
+            model_name=model_name,
+            tested_at=tested_at,
         )
     try:
         body = response.json()
-    except ValueError as exc:
-        raise HTTPException(status_code=502, detail="模型接口未返回有效 JSON") from exc
+    except ValueError:
+        message = "模型接口未返回有效 JSON"
+        tested_at = record_test_result(db, "failed", message, latency_ms)
+        return ModelConnectionTestResponse(
+            ok=False,
+            message=message,
+            latency_ms=latency_ms,
+            model_name=model_name,
+            tested_at=tested_at,
+        )
     if not isinstance(body, dict) or not isinstance(body.get("choices"), list) or not body["choices"]:
-        raise HTTPException(status_code=502, detail="模型接口响应不符合 OpenAI 兼容格式")
+        message = "模型接口响应不符合 OpenAI 兼容格式"
+        tested_at = record_test_result(db, "failed", message, latency_ms)
+        return ModelConnectionTestResponse(
+            ok=False,
+            message=message,
+            latency_ms=latency_ms,
+            model_name=model_name,
+            tested_at=tested_at,
+        )
     first_choice = body["choices"][0]
     message = first_choice.get("message") if isinstance(first_choice, dict) else None
     model_response = message.get("content") if isinstance(message, dict) else None
     if not isinstance(model_response, str) or not model_response.strip():
-        raise HTTPException(status_code=502, detail="模型接口响应中没有可展示的文本内容")
+        message = "模型接口响应中没有可展示的文本内容"
+        tested_at = record_test_result(db, "failed", message, latency_ms)
+        return ModelConnectionTestResponse(
+            ok=False,
+            message=message,
+            latency_ms=latency_ms,
+            model_name=model_name,
+            tested_at=tested_at,
+        )
 
+    tested_at = record_test_result(db, "success", "模型接口连接成功", latency_ms)
     return ModelConnectionTestResponse(
         ok=True,
         message="模型接口连接成功",
         latency_ms=latency_ms,
         model_name=model_name,
         model_response=model_response[:2_000],
+        tested_at=tested_at,
     )
