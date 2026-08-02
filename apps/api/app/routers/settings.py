@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from time import perf_counter
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -16,10 +16,21 @@ from app.schemas import (
     PromptPreviewResponse,
     PromptTemplateResponse,
     PromptTemplateUpdate,
+    TokenUsageReportResponse,
+    TokenUsageStageResponse,
+    TokenUsageSummaryResponse,
+    TokenUsageTaskResponse,
 )
 from app.services.model_config import (
     DEFAULT_CONFIGURATION_ID,
     get_effective_model_configuration,
+)
+from app.services.model_usage import (
+    ModelUsageEvent,
+    get_model_usage_report,
+    new_usage_context,
+    record_model_usage,
+    token_counts,
 )
 from app.services.prompt_config import (
     PROMPT_TYPES,
@@ -171,6 +182,45 @@ def preview_prompt(
     )
 
 
+@router.get("/token-usage", response_model=TokenUsageReportResponse)
+def get_token_usage(
+    task_type: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> TokenUsageReportResponse:
+    summary, tasks = get_model_usage_report(db, task_type=task_type, limit=limit)
+    return TokenUsageReportResponse(
+        summary=TokenUsageSummaryResponse(
+            task_count=summary.task_count,
+            total_calls=summary.total_calls,
+            successful_calls=summary.successful_calls,
+            failed_calls=summary.failed_calls,
+            unreported_calls=summary.unreported_calls,
+            input_tokens=summary.input_tokens,
+            output_tokens=summary.output_tokens,
+            total_tokens=summary.total_tokens,
+        ),
+        tasks=[
+            TokenUsageTaskResponse(
+                task_id=task.task_id,
+                task_type=task.task_type,
+                task_label=task.task_label,
+                status=task.status,
+                book_id=task.book_id,
+                quiz_id=task.quiz_id,
+                input_tokens=task.input_tokens,
+                output_tokens=task.output_tokens,
+                total_tokens=task.total_tokens,
+                unreported_calls=task.unreported_calls,
+                started_at=task.started_at,
+                finished_at=task.finished_at,
+                stages=[TokenUsageStageResponse.model_validate(stage) for stage in task.stages],
+            )
+            for task in tasks
+        ],
+    )
+
+
 def model_error_message(response: httpx.Response) -> str:
     try:
         body = response.json()
@@ -225,6 +275,29 @@ def test_model_connection(
         f"{base_url.rstrip('/')}/chat/completions"
     )
     started_at = perf_counter()
+    usage_context = new_usage_context(
+        "model_connection_test", f"测试模型连接 · {model_name}"
+    )
+
+    def record_connection_usage(
+        status: str, body: object = None, error_message: str | None = None
+    ) -> None:
+        input_tokens, output_tokens, total_tokens = token_counts(body)
+        record_model_usage(
+            ModelUsageEvent(
+                context=usage_context,
+                phase="connection_test",
+                call_number=1,
+                model_name=model_name,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                status=status,
+                error_message=error_message[:500] if error_message else None,
+                latency_ms=round((perf_counter() - started_at) * 1_000),
+            )
+        )
+
     try:
         with httpx.Client(timeout=payload.timeout_ms / 1_000) as client:
             response = client.post(
@@ -241,6 +314,7 @@ def test_model_connection(
     except httpx.RequestError as exc:
         latency_ms = round((perf_counter() - started_at) * 1_000)
         message = f"模型接口连接失败：{exc}"
+        record_connection_usage("failed", error_message=message)
         tested_at = record_test_result(db, "failed", message, latency_ms)
         return ModelConnectionTestResponse(
             ok=False,
@@ -252,7 +326,13 @@ def test_model_connection(
 
     latency_ms = round((perf_counter() - started_at) * 1_000)
     if not response.is_success:
+        body = None
         message = f"模型接口返回 {response.status_code}：{model_error_message(response)}"
+        try:
+            body = response.json()
+        except ValueError:
+            pass
+        record_connection_usage("failed", body, message)
         tested_at = record_test_result(db, "failed", message, latency_ms)
         return ModelConnectionTestResponse(
             ok=False,
@@ -265,6 +345,7 @@ def test_model_connection(
         body = response.json()
     except ValueError:
         message = "模型接口未返回有效 JSON"
+        record_connection_usage("failed", error_message=message)
         tested_at = record_test_result(db, "failed", message, latency_ms)
         return ModelConnectionTestResponse(
             ok=False,
@@ -275,6 +356,7 @@ def test_model_connection(
         )
     if not isinstance(body, dict) or not isinstance(body.get("choices"), list) or not body["choices"]:
         message = "模型接口响应不符合 OpenAI 兼容格式"
+        record_connection_usage("failed", body, message)
         tested_at = record_test_result(db, "failed", message, latency_ms)
         return ModelConnectionTestResponse(
             ok=False,
@@ -288,6 +370,7 @@ def test_model_connection(
     model_response = message.get("content") if isinstance(message, dict) else None
     if not isinstance(model_response, str) or not model_response.strip():
         message = "模型接口响应中没有可展示的文本内容"
+        record_connection_usage("failed", body, message)
         tested_at = record_test_result(db, "failed", message, latency_ms)
         return ModelConnectionTestResponse(
             ok=False,
@@ -297,6 +380,7 @@ def test_model_connection(
             tested_at=tested_at,
         )
 
+    record_connection_usage("success", body)
     tested_at = record_test_result(db, "success", "模型接口连接成功", latency_ms)
     return ModelConnectionTestResponse(
         ok=True,

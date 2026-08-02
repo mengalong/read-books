@@ -4,13 +4,20 @@ import json
 import random
 import re
 from dataclasses import dataclass
-from typing import Any, Protocol
+from time import perf_counter
+from typing import Any, Callable, Protocol
 
 import httpx
 
 from app.config import Settings
 from app.models import ContentChunk, Question
 from app.services.model_config import EffectiveModelConfiguration
+from app.services.model_usage import (
+    ModelUsageContext,
+    ModelUsageEvent,
+    record_model_usage,
+    token_counts,
+)
 from app.services.prompt_config import (
     DEFAULT_PROMPTS,
     PromptTemplateDefinition,
@@ -322,9 +329,14 @@ class HttpQuizAiProvider:
         self,
         configuration: EffectiveModelConfiguration,
         prompt_templates: dict[str, PromptTemplateDefinition] | None = None,
+        usage_context: ModelUsageContext | None = None,
+        usage_recorder: Callable[[ModelUsageEvent], None] | None = None,
     ):
         self.configuration = configuration
         self.prompt_templates = prompt_templates or DEFAULT_PROMPTS
+        self.usage_context = usage_context
+        self.usage_recorder = usage_recorder or record_model_usage
+        self._call_number = 0
 
     def _endpoint(self) -> str:
         base_url = self.configuration.base_url.strip()
@@ -335,7 +347,45 @@ class HttpQuizAiProvider:
         normalized = base_url.rstrip("/")
         return normalized if normalized.endswith("/chat/completions") else f"{normalized}/chat/completions"
 
-    def _chat_completion(self, messages: list[dict[str, str]], max_tokens: int) -> str:
+    def _record_usage(
+        self,
+        phase: str,
+        call_number: int,
+        started_at: float,
+        status: str,
+        body: Any = None,
+        error_message: str | None = None,
+    ) -> None:
+        if self.usage_context is None:
+            return
+        input_tokens, output_tokens, total_tokens = token_counts(body)
+        event = ModelUsageEvent(
+            context=self.usage_context,
+            phase=phase,
+            call_number=call_number,
+            model_name=self.configuration.model_name.strip(),
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            status=status,
+            error_message=error_message[:500] if error_message else None,
+            latency_ms=round((perf_counter() - started_at) * 1_000),
+        )
+        try:
+            self.usage_recorder(event)
+        except Exception:
+            # Token logging must never turn an otherwise usable model response into a failure.
+            return
+
+    def _chat_completion(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+        phase: str = "model_call",
+    ) -> str:
+        started_at = perf_counter()
+        self._call_number += 1
+        call_number = self._call_number
         headers = {"Content-Type": "application/json"}
         if self.configuration.api_key:
             headers["Authorization"] = f"Bearer {self.configuration.api_key}"
@@ -354,18 +404,25 @@ class HttpQuizAiProvider:
                 )
         except httpx.ReadTimeout as exc:
             timeout_seconds = round(self.configuration.timeout_ms / 1_000)
-            raise RuntimeError(
+            message = (
                 f"真实模型接口读取超时：模型在 {timeout_seconds} 秒内未完成响应，请在模型设置中提高请求超时。"
-            ) from exc
+            )
+            self._record_usage(phase, call_number, started_at, "failed", error_message=message)
+            raise RuntimeError(message) from exc
         except httpx.TimeoutException as exc:
             timeout_seconds = round(self.configuration.timeout_ms / 1_000)
-            raise RuntimeError(
+            message = (
                 f"真实模型接口请求超时：当前超时为 {timeout_seconds} 秒，请在模型设置中提高请求超时。"
-            ) from exc
+            )
+            self._record_usage(phase, call_number, started_at, "failed", error_message=message)
+            raise RuntimeError(message) from exc
         except httpx.RequestError as exc:
-            raise RuntimeError(f"真实模型接口连接失败：{exc}") from exc
+            message = f"真实模型接口连接失败：{exc}"
+            self._record_usage(phase, call_number, started_at, "failed", error_message=message)
+            raise RuntimeError(message) from exc
 
         if not response.is_success:
+            body: Any = None
             detail = ""
             try:
                 body = response.json()
@@ -377,18 +434,31 @@ class HttpQuizAiProvider:
             except ValueError:
                 detail = response.text.strip()
             detail = detail[:300] or f"HTTP {response.status_code}"
-            raise RuntimeError(f"真实模型接口返回 {response.status_code}：{detail}")
+            error_message = f"真实模型接口返回 {response.status_code}：{detail}"
+            self._record_usage(
+                phase, call_number, started_at, "failed", body, error_message
+            )
+            raise RuntimeError(error_message)
 
         try:
             body = response.json()
         except ValueError as exc:
-            raise RuntimeError("真实模型接口未返回有效 JSON") from exc
+            error_message = "真实模型接口未返回有效 JSON"
+            self._record_usage(
+                phase, call_number, started_at, "failed", error_message=error_message
+            )
+            raise RuntimeError(error_message) from exc
         choices = body.get("choices") if isinstance(body, dict) else None
         first_choice = choices[0] if isinstance(choices, list) and choices else None
         message = first_choice.get("message") if isinstance(first_choice, dict) else None
         content = message.get("content") if isinstance(message, dict) else None
         if not isinstance(content, str) or not content.strip():
-            raise RuntimeError("真实模型响应中没有可用的文本内容")
+            error_message = "真实模型响应中没有可用的文本内容"
+            self._record_usage(
+                phase, call_number, started_at, "failed", body, error_message
+            )
+            raise RuntimeError(error_message)
+        self._record_usage(phase, call_number, started_at, "success", body)
         return content
 
     def _candidate_chunks(
@@ -657,7 +727,9 @@ class HttpQuizAiProvider:
             },
         ]
         max_tokens = max(2_000, total * 700)
-        content = self._chat_completion(messages, max_tokens=max_tokens)
+        content = self._chat_completion(
+            messages, max_tokens=max_tokens, phase="quiz_generation"
+        )
         try:
             return self._validate_questions(
                 parse_json_object(content),
@@ -671,6 +743,7 @@ class HttpQuizAiProvider:
             repaired_content = self._chat_completion(
                 self._repair_generation_messages(messages, content, str(first_error)),
                 max_tokens=max_tokens,
+                phase="quiz_generation_repair",
             )
             try:
                 return self._validate_questions(
@@ -715,6 +788,7 @@ class HttpQuizAiProvider:
                 },
             ],
             max_tokens=1_200,
+            phase="short_answer_grading",
         )
         payload = parse_json_object(content)
         score = payload.get("score")
@@ -739,6 +813,7 @@ def get_quiz_provider(
     settings: Settings,
     configuration: EffectiveModelConfiguration | None = None,
     prompt_templates: dict[str, PromptTemplateDefinition] | None = None,
+    usage_context: ModelUsageContext | None = None,
 ) -> QuizAiProvider:
     if configuration is None:
         configuration = EffectiveModelConfiguration(
@@ -751,4 +826,4 @@ def get_quiz_provider(
         )
     if configuration.provider_mode == "mock":
         return MockQuizAiProvider()
-    return HttpQuizAiProvider(configuration, prompt_templates)
+    return HttpQuizAiProvider(configuration, prompt_templates, usage_context=usage_context)

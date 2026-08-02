@@ -4,6 +4,7 @@ import pytest
 
 from app.models import ContentChunk, Question
 from app.services.model_config import EffectiveModelConfiguration
+from app.services.model_usage import new_usage_context
 from app.services.prompt_config import DEFAULT_PROMPTS, PromptTemplateDefinition
 from app.services.quiz_provider import HttpQuizAiProvider
 
@@ -164,6 +165,34 @@ def test_http_provider_generates_validated_questions(monkeypatch):
     assert requests[0]["headers"]["Authorization"] == "Bearer provider-secret"
     assert requests[0]["timeout"] == 30
     assert "chunk-1" in requests[0]["json"]["messages"][1]["content"]
+
+
+def test_http_provider_reports_usage_for_each_model_call(monkeypatch):
+    chunks = make_chunks()
+    payload = generated_payload([chunk.id for chunk in chunks])
+    install_chat_responses(monkeypatch, [json.dumps(payload, ensure_ascii=False)])
+    events = []
+    provider = HttpQuizAiProvider(
+        make_configuration(),
+        usage_context=new_usage_context("manual_quiz_generation", "生成测试"),
+        usage_recorder=events.append,
+    )
+
+    provider.generate_questions(
+        chunks=chunks,
+        file_names={"pdf-1": "复习材料.pdf"},
+        single_count=1,
+        multiple_count=1,
+        short_count=1,
+        difficulty="medium",
+        generation_number=0,
+        recent_chunk_ids=set(),
+    )
+
+    assert len(events) == 1
+    assert events[0].phase == "quiz_generation"
+    assert events[0].call_number == 1
+    assert events[0].status == "success"
 
 
 def test_http_provider_rejects_unknown_source(monkeypatch):

@@ -262,3 +262,49 @@ class PromptPreviewResponse(BaseModel):
     rendered_system_prompt: str
     rendered_user_prompt: str
     available_variables: list[str]
+
+
+class TokenUsageStageResponse(ApiModel):
+    id: str
+    phase: str
+    call_number: int
+    model_name: str
+    input_tokens: int | None
+    output_tokens: int | None
+    total_tokens: int | None
+    status: Literal["success", "failed"]
+    error_message: str | None
+    latency_ms: int
+    created_at: datetime
+
+
+class TokenUsageTaskResponse(BaseModel):
+    task_id: str
+    task_type: str
+    task_label: str
+    status: Literal["success", "failed"]
+    book_id: str | None
+    quiz_id: str | None
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    unreported_calls: int
+    started_at: datetime
+    finished_at: datetime
+    stages: list[TokenUsageStageResponse]
+
+
+class TokenUsageSummaryResponse(BaseModel):
+    task_count: int
+    total_calls: int
+    successful_calls: int
+    failed_calls: int
+    unreported_calls: int
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+
+
+class TokenUsageReportResponse(BaseModel):
+    summary: TokenUsageSummaryResponse
+    tasks: list[TokenUsageTaskResponse]

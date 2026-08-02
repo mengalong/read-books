@@ -184,3 +184,26 @@ class PromptTemplate(TimestampMixin, Base):
     user_prompt: Mapped[str] = mapped_column(Text)
     version: Mapped[int] = mapped_column(Integer, default=1)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
+class ModelUsageRecord(Base):
+    __tablename__ = "model_usage_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    task_id: Mapped[str] = mapped_column(String(36), index=True)
+    task_type: Mapped[str] = mapped_column(String(40), index=True)
+    task_label: Mapped[str] = mapped_column(String(240))
+    phase: Mapped[str] = mapped_column(String(50), index=True)
+    call_number: Mapped[int] = mapped_column(Integer, default=1)
+    model_name: Mapped[str] = mapped_column(String(200))
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    total_tokens: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    book_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    quiz_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )

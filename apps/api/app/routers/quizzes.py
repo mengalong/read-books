@@ -18,16 +18,17 @@ from app.schemas import (
 )
 from app.services.quiz_provider import GradeResult, get_quiz_provider
 from app.services.model_config import get_effective_model_configuration
+from app.services.model_usage import attach_quiz_to_usage, new_usage_context
 from app.services.prompt_config import get_effective_prompt_templates
 
 router = APIRouter(tags=["quizzes"])
 settings = get_settings()
 
 
-def current_provider(db: Session):
+def current_provider(db: Session, usage_context=None):
     configuration = get_effective_model_configuration(db, settings)
     prompts = get_effective_prompt_templates(db)
-    return get_quiz_provider(settings, configuration, prompts)
+    return get_quiz_provider(settings, configuration, prompts, usage_context)
 
 
 def get_quiz_or_404(db: Session, quiz_id: str) -> Quiz:
@@ -92,11 +93,14 @@ def generate_quiz(
         raise HTTPException(status_code=404, detail="未找到这本书")
     if book.pre_generation_status in {"pending", "processing"}:
         raise HTTPException(status_code=409, detail="该书正在后台预生成测试，请等待本次任务完成")
-    return _generate_quiz(book_id, payload, db)
+    return _generate_quiz(book_id, payload, db, task_type="manual_quiz_generation")
 
 
 def _generate_quiz(
-    book_id: str, payload: QuizGenerateRequest, db: Session
+    book_id: str,
+    payload: QuizGenerateRequest,
+    db: Session,
+    task_type: str = "manual_quiz_generation",
 ) -> QuizResponse:
     book = db.get(Book, book_id)
     if not book:
@@ -136,8 +140,13 @@ def _generate_quiz(
     ).all()
     recent_chunk_ids = {chunk_id for row in recent_chunk_rows for chunk_id in row}
 
+    usage_context = new_usage_context(
+        task_type,
+        f"《{book.title}》生成复习题" if task_type == "manual_quiz_generation" else f"《{book.title}》后台预出题",
+        book_id=book.id,
+    )
     try:
-        generated = current_provider(db).generate_questions(
+        generated = current_provider(db, usage_context).generate_questions(
             chunks=chunks,
             file_names=file_names,
             single_count=payload.single_count,
@@ -184,6 +193,7 @@ def _generate_quiz(
             )
         )
     db.commit()
+    attach_quiz_to_usage(usage_context.task_id, quiz.id)
     quiz = get_quiz_or_404(db, quiz.id)
     return to_quiz_response(quiz)
 
@@ -248,13 +258,20 @@ def submit_quiz(
         raise HTTPException(status_code=422, detail="提交内容包含不属于这套测试的题目")
 
     total_score = 0.0
+    usage_context = new_usage_context(
+        "quiz_submission",
+        f"提交《{quiz.book.title}》复习作答",
+        book_id=quiz.book_id,
+        quiz_id=quiz.id,
+    )
+    provider = current_provider(db, usage_context)
     for question in quiz.questions:
         item = submitted.get(question.id)
         selected_answers = item.selected_answers if item else []
         text_answer = item.text_answer if item else None
         if question.question_type == "short":
             try:
-                grade = current_provider(db).grade_short_answer(question, text_answer or "")
+                grade = provider.grade_short_answer(question, text_answer or "")
             except RuntimeError as exc:
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
         else:

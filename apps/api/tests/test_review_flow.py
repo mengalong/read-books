@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from app.database import SessionLocal
 from app.models import Book, ContentChunk, ModelConfiguration, PdfDocument, Question
+from app.services.model_usage import ModelUsageEvent, new_usage_context, record_model_usage
 from app.services.pdf_parser import parse_pdf_document
 from app.services.pre_generation import recover_pre_generation_tasks
 from app.services.quiz_provider import HttpQuizAiProvider, MockQuizAiProvider
@@ -53,6 +54,59 @@ def create_source_book(client, title: str = "测试书籍") -> tuple[str, str]:
             )
         db.commit()
         return book_id, pdf.id
+
+
+def test_token_usage_report_groups_calls_by_task(client):
+    context = new_usage_context("token_report_test", "Token 统计测试")
+    record_model_usage(
+        ModelUsageEvent(
+            context=context,
+            phase="quiz_generation",
+            call_number=1,
+            model_name="usage-model",
+            input_tokens=120,
+            output_tokens=30,
+            total_tokens=150,
+            status="success",
+            error_message=None,
+            latency_ms=240,
+        )
+    )
+    record_model_usage(
+        ModelUsageEvent(
+            context=context,
+            phase="quiz_generation_repair",
+            call_number=2,
+            model_name="usage-model",
+            input_tokens=None,
+            output_tokens=None,
+            total_tokens=None,
+            status="failed",
+            error_message="返回格式错误",
+            latency_ms=180,
+        )
+    )
+
+    response = client.get("/api/settings/token-usage?task_type=token_report_test")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"] == {
+        "task_count": 1,
+        "total_calls": 2,
+        "successful_calls": 1,
+        "failed_calls": 1,
+        "unreported_calls": 1,
+        "input_tokens": 120,
+        "output_tokens": 30,
+        "total_tokens": 150,
+    }
+    assert len(body["tasks"]) == 1
+    assert body["tasks"][0]["status"] == "failed"
+    assert [stage["phase"] for stage in body["tasks"][0]["stages"]] == [
+        "quiz_generation",
+        "quiz_generation_repair",
+    ]
 
 
 def test_health_and_book_crud(client):

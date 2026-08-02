@@ -120,6 +120,7 @@ def run_pre_generation(book_id: str) -> None:
                     short_count=2,
                 ),
                 db,
+                task_type="pre_generation",
             )
             book = db.get(Book, book_id)
             book.pre_generation_status = "completed"
