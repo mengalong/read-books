@@ -56,7 +56,7 @@ function UsageTask({ task }: { task: TokenUsageTask }) {
           {task.status === "success" ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
           <span>
             <strong>{task.task_label}</strong>
-            <small>{TASK_LABELS[task.task_type] || task.task_type} · {formatTime(task.started_at)}</small>
+            <small>{task.display_name || "历史未归属用户"} · {TASK_LABELS[task.task_type] || task.task_type} · {formatTime(task.started_at)}</small>
           </span>
         </span>
         <span className="usage-task-summary">
@@ -68,6 +68,7 @@ function UsageTask({ task }: { task: TokenUsageTask }) {
         <div className="usage-task-meta">
           <span>输入 {formatTokens(task.input_tokens)}</span>
           <span>输出 {formatTokens(task.output_tokens)}</span>
+          {task.username && <span>用户 {task.username}</span>}
           {task.unreported_calls > 0 && <span>{task.unreported_calls} 次未报告用量</span>}
           <TaskLinks task={task} />
         </div>
@@ -96,6 +97,7 @@ function UsageTask({ task }: { task: TokenUsageTask }) {
 export default function TokenUsagePage() {
   const [report, setReport] = useState<TokenUsageReport | null>(null);
   const [taskType, setTaskType] = useState("");
+  const [userId, setUserId] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -105,14 +107,14 @@ export default function TokenUsagePage() {
     else setRefreshing(true);
     setError("");
     try {
-      setReport(await getTokenUsage(taskType || undefined));
+      setReport(await getTokenUsage(taskType || undefined, userId || undefined));
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "Token 用量加载失败");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [taskType]);
+  }, [taskType, userId]);
 
   useEffect(() => { void load(true); }, [load]);
 
@@ -150,6 +152,11 @@ export default function TokenUsagePage() {
         <div className="metric"><div className="metric-label">输入 Token</div><div className="metric-value">{formatTokens(summary.input_tokens)}</div></div>
         <div className="metric"><div className="metric-label">输出 Token</div><div className="metric-value">{formatTokens(summary.output_tokens)}</div></div>
       </div>
+
+      <section className="content-panel usage-user-panel">
+        <div className="section-title"><div><h2>用户用量</h2><span>按用户汇总当前任务类型下的模型消耗</span></div><label className="usage-user-filter">查看用户<select aria-label="按用户筛选 Token 用量" onChange={(event) => setUserId(event.target.value)} value={userId}><option value="">全部用户</option>{report?.users.map((user) => <option key={user.user_id} value={user.user_id}>{user.display_name}（{user.username}）</option>)}</select></label></div>
+        <div className="usage-user-list">{report?.users.map((user) => <button className={userId === user.user_id ? "active" : ""} key={user.user_id} onClick={() => setUserId(userId === user.user_id ? "" : user.user_id)} type="button"><span><strong>{user.display_name}</strong><small>{user.username} · {user.task_count} 项任务 / {user.total_calls} 次调用</small></span><b>{formatTokens(user.total_tokens)}<small> tokens</small></b></button>)}{!report?.users.length && <span className="meta-text">尚无已归属用户的用量记录</span>}</div>
+      </section>
 
       <section className="content-panel usage-panel">
         <div className="section-title">

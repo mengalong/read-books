@@ -156,6 +156,66 @@ a {
   margin-bottom: 3px;
 }
 
+.sidebar-account {
+  align-items: center;
+  border-top: 1px solid #3b4a47;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 32px minmax(0, 1fr) 30px;
+  margin: 17px 8px 0;
+  padding: 17px 4px 0;
+}
+
+.account-avatar {
+  align-items: center;
+  background: #e7f0ec;
+  border-radius: 50%;
+  color: var(--green);
+  display: flex;
+  font-size: 13px;
+  font-weight: 750;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+
+.account-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.account-copy strong {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-copy small {
+  color: #91a39c;
+  font-size: 10px;
+}
+
+.sidebar-account button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: #91a39c;
+  cursor: pointer;
+  display: flex;
+  height: 30px;
+  justify-content: center;
+  padding: 0;
+  width: 30px;
+}
+
+.sidebar-account button:hover {
+  background: #314340;
+  color: #fff;
+}
+
 .usage-metrics {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-bottom: 25px;
@@ -354,9 +414,221 @@ a {
   font-size: 14px;
 }
 
+.usage-user-panel {
+  margin-bottom: 16px;
+  padding: 20px 24px;
+}
+
+.usage-user-panel .section-title h2 {
+  font-size: 15px;
+}
+
+.usage-user-filter {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 11px;
+  gap: 8px;
+}
+
+.usage-user-filter select {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  min-height: 34px;
+  padding: 0 28px 0 9px;
+}
+
+.usage-user-list {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.usage-user-list button {
+  align-items: center;
+  background: #f8faf8;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 62px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.usage-user-list button:hover,
+.usage-user-list button.active {
+  border-color: #9bb5aa;
+  background: var(--green-soft);
+}
+
+.usage-user-list button > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.usage-user-list strong {
+  font-size: 12px;
+}
+
+.usage-user-list small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.usage-user-list b {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .app-main {
   flex: 1;
   min-width: 0;
+}
+
+.auth-layout {
+  min-height: 100vh;
+}
+
+.auth-loading {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 13px;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.auth-loading.auth-error {
+  flex-direction: column;
+  gap: 16px;
+}
+
+.auth-panel-wrap {
+  align-items: center;
+  background: #f4f7f4;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 32px 20px;
+}
+
+.auth-panel {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  box-shadow: 0 18px 50px rgba(32, 43, 42, 0.08);
+  max-width: 430px;
+  padding: 34px;
+  width: 100%;
+}
+
+.auth-brand {
+  align-items: center;
+  display: flex;
+  gap: 11px;
+  margin-bottom: 34px;
+}
+
+.auth-brand > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.auth-brand strong {
+  font-size: 16px;
+}
+
+.auth-brand small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.auth-icon {
+  align-items: center;
+  background: var(--green-soft);
+  border-radius: 6px;
+  color: var(--green);
+  display: flex;
+  height: 42px;
+  justify-content: center;
+  margin-bottom: 27px;
+  width: 42px;
+}
+
+.auth-heading h1 {
+  font-size: 26px;
+  line-height: 1.25;
+}
+
+.auth-heading p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+  margin-top: 8px;
+}
+
+.auth-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 27px;
+}
+
+.auth-form label {
+  color: #52615d;
+  font-size: 12px;
+  font-weight: 650;
+  margin-top: 7px;
+}
+
+.auth-form input {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  min-height: 43px;
+  outline: none;
+  padding: 0 12px;
+}
+
+.auth-form input:focus {
+  border-color: #84a99a;
+  box-shadow: 0 0 0 3px rgba(47, 107, 95, 0.1);
+}
+
+.auth-form-error {
+  background: var(--red-soft);
+  border-radius: 4px;
+  color: #a94332;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 7px;
+  padding: 9px 11px;
+}
+
+.auth-submit {
+  margin-top: 13px;
+  width: 100%;
+}
+
+.auth-submit svg:last-child {
+  margin-left: auto;
+}
+
+.auth-footnote {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+  margin-top: 26px;
+  padding-top: 17px;
+  text-align: center;
 }
 
 .page-wrap {
@@ -700,6 +972,12 @@ p {
   gap: 4px;
 }
 
+.book-owner-tag {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
 .pdf-status-tag.has-pdf {
   background: var(--green-soft);
   color: var(--green);
@@ -773,6 +1051,150 @@ p {
 
 .form-panel {
   max-width: 780px;
+}
+
+.user-management-grid {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 310px);
+  margin-bottom: 18px;
+}
+
+.user-management-grid > .content-panel {
+  max-width: none;
+}
+
+.credential-panel {
+  background: var(--green-soft);
+  border: 1px solid #c7ddd2;
+  border-radius: 7px;
+  display: grid;
+  gap: 11px;
+  padding: 20px;
+}
+
+.credential-heading {
+  align-items: flex-start;
+  color: var(--green);
+  display: flex;
+  gap: 9px;
+}
+
+.credential-heading > div {
+  display: grid;
+  gap: 4px;
+}
+
+.credential-heading strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.credential-heading span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.credential-value {
+  background: #fff;
+  border: 1px solid #d7e6dd;
+  border-radius: 4px;
+  display: grid;
+  gap: 5px;
+  padding: 9px 10px;
+}
+
+.credential-value small,
+.user-table small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.credential-value code {
+  color: var(--ink);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.optional {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.user-list-panel {
+  max-width: none;
+}
+
+.user-table-wrap {
+  overflow-x: auto;
+}
+
+.user-table {
+  border-collapse: collapse;
+  min-width: 760px;
+  width: 100%;
+}
+
+.user-table th,
+.user-table td {
+  border-top: 1px solid var(--line);
+  padding: 13px 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.user-table th {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.user-table td:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.user-table td {
+  color: #52615d;
+  font-size: 12px;
+}
+
+.role-badge {
+  align-items: center;
+  background: #f1f5f2;
+  border-radius: 3px;
+  color: var(--green);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 5px;
+  padding: 5px 7px;
+  white-space: nowrap;
+}
+
+.status-active {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.status-disabled {
+  background: #f1f3f2;
+  color: var(--muted);
+}
+
+.user-table .table-actions {
+  display: flex;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.user-table .button {
+  font-size: 11px;
+  min-height: 31px;
+  padding: 0 7px;
 }
 
 .compact-header {
@@ -2473,6 +2895,14 @@ p {
   .quiz-settings-summary {
     position: static;
   }
+
+  .usage-user-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .user-management-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -2512,6 +2942,10 @@ p {
     display: none;
   }
 
+  .sidebar-account {
+    margin: 13px 4px 0;
+  }
+
   .page-wrap {
     padding: 28px 16px 45px;
   }
@@ -2536,6 +2970,20 @@ p {
   .form-grid,
   .prompt-management-grid {
     grid-template-columns: 1fr;
+  }
+
+  .usage-user-list {
+    grid-template-columns: 1fr;
+  }
+
+  .usage-user-panel .section-title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .auth-panel {
+    padding: 27px 21px;
   }
 
   .quiz-library-row {

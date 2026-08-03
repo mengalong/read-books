@@ -27,9 +27,11 @@ router = APIRouter(prefix="/books", tags=["books"])
 settings = get_settings()
 
 
-def get_book_or_404(db: Session, book_id: str, identity: AuthIdentity) -> Book:
+def get_book_or_404(
+    db: Session, book_id: str, identity: AuthIdentity, *, for_write: bool = False
+) -> Book:
     statement = select(Book).where(Book.id == book_id)
-    if identity.user.role != "admin":
+    if identity.user.role != "admin" or for_write:
         statement = statement.where(Book.workspace_id == identity.workspace.id)
     book = db.scalar(statement)
     if not book:
@@ -88,7 +90,7 @@ def update_book(
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> BookDetail:
-    book = get_book_or_404(db, book_id, identity)
+    book = get_book_or_404(db, book_id, identity, for_write=True)
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(book, key, value)
     db.commit()
@@ -102,7 +104,7 @@ def delete_book(
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> None:
-    book = get_book_or_404(db, book_id, identity)
+    book = get_book_or_404(db, book_id, identity, for_write=True)
     file_paths = [pdf.file_path for pdf in book.pdfs if not pdf.file_path.startswith("demo://")]
     db.delete(book)
     db.commit()
@@ -119,7 +121,7 @@ async def upload_pdf(
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> PdfResponse:
-    get_book_or_404(db, book_id, identity)
+    get_book_or_404(db, book_id, identity, for_write=True)
     original_name = Path(file.filename or "book.pdf").name
     if not original_name.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="请选择 PDF 文件")
@@ -172,7 +174,7 @@ def start_book_pre_generation(
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> PreGenerationResponse:
-    get_book_or_404(db, book_id, identity)
+    get_book_or_404(db, book_id, identity, for_write=True)
     try:
         return start_pre_generation(db, book_id, created_by_user_id=identity.user.id)
     except ValueError as exc:
@@ -216,7 +218,7 @@ def delete_pdf(
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> None:
-    get_book_or_404(db, book_id, identity)
+    get_book_or_404(db, book_id, identity, for_write=True)
     pdf = db.get(PdfDocument, pdf_id)
     if not pdf or pdf.book_id != book_id:
         raise HTTPException(status_code=404, detail="未找到这个 PDF")

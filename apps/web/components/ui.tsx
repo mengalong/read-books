@@ -1,4 +1,4 @@
-import { AlertCircle, ChevronRight, FileText, FileX2 } from "lucide-react";
+import { AlertCircle, ChevronRight, FileText, FileX2, UserRound } from "lucide-react";
 import Link from "next/link";
 
 import type { BookSummary, SourceEvidence, SourceMode } from "@/lib/types";
@@ -37,6 +37,7 @@ export function BookCard({ book }: { book: BookSummary }) {
           {hasPdf ? <FileText size={12} /> : <FileX2 size={12} />}
           {hasPdf ? "已上传 PDF" : "未上传 PDF"}
         </span>
+        {book.owner_display_name && <span className="tag book-owner-tag"><UserRound size={12} />归属：{book.owner_display_name}</span>}
         {book.tags.slice(0, 3).map((tag) => <span className="tag" key={tag}>{tag}</span>)}
       </div>
       <div className="book-card-bottom">

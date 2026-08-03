@@ -50,6 +50,8 @@ export type PromptPreview = {
 
 export type TokenUsageStage = {
   id: string;
+  user_id: string | null;
+  workspace_id: string | null;
   phase: string;
   call_number: number;
   model_name: string;
@@ -66,6 +68,10 @@ export type TokenUsageTask = {
   task_id: string;
   task_type: string;
   task_label: string;
+  user_id: string | null;
+  username: string | null;
+  display_name: string | null;
+  workspace_id: string | null;
   status: "success" | "failed";
   book_id: string | null;
   quiz_id: string | null;
@@ -89,7 +95,44 @@ export type TokenUsageReport = {
     output_tokens: number;
     total_tokens: number;
   };
+  users: {
+    user_id: string;
+    username: string;
+    display_name: string;
+    task_count: number;
+    total_calls: number;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+  }[];
   tasks: TokenUsageTask[];
+};
+
+export type CurrentUser = {
+  id: string;
+  username: string;
+  display_name: string;
+  role: "admin" | "user";
+  status: "active" | "disabled";
+  must_change_password: boolean;
+  last_login_at: string | null;
+  workspace: { id: string; name: string };
+};
+
+export type AdminUser = CurrentUser & {
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdminUserCreateResult = {
+  user: AdminUser;
+  temporary_password: string;
+};
+
+export type PasswordResetResult = {
+  user_id: string;
+  temporary_password: string;
+  must_change_password: boolean;
 };
 
 export type PreGenerationResponse = {
@@ -115,6 +158,9 @@ export type BookStats = {
 
 export type BookSummary = {
   id: string;
+  workspace_id: string | null;
+  owner_user_id: string | null;
+  owner_display_name: string | null;
   title: string;
   author: string;
   description: string;

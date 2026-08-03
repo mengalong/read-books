@@ -24,11 +24,10 @@ settings = get_settings()
 async def lifespan(_: FastAPI):
     settings.ensure_directories()
     Base.metadata.create_all(bind=engine)
-    with SessionLocal() as db:
-        ensure_initial_admin(db, settings)
     if settings.seed_demo_data:
         with SessionLocal() as db:
             seed_demo_data(db)
+            ensure_initial_admin(db, settings)
             pending_pdf_ids = list(
                 db.scalars(
                     select(PdfDocument.id).where(
@@ -36,8 +35,18 @@ async def lifespan(_: FastAPI):
                     )
                 ).all()
             )
-        for pdf_id in pending_pdf_ids:
-            threading.Thread(target=parse_pdf_document, args=(pdf_id,), daemon=True).start()
+    else:
+        with SessionLocal() as db:
+            ensure_initial_admin(db, settings)
+            pending_pdf_ids = list(
+                db.scalars(
+                    select(PdfDocument.id).where(
+                        PdfDocument.parse_status.in_(["pending", "processing"])
+                    )
+                ).all()
+            )
+    for pdf_id in pending_pdf_ids:
+        threading.Thread(target=parse_pdf_document, args=(pdf_id,), daemon=True).start()
     with SessionLocal() as db:
         pending_generation_task_ids = recover_generation_tasks(db)
     for task_id in pending_generation_task_ids:

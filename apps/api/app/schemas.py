@@ -40,6 +40,9 @@ class BookStats(ApiModel):
 
 class BookSummary(ApiModel):
     id: str
+    workspace_id: str | None = None
+    owner_user_id: str | None = None
+    owner_display_name: str | None = None
     title: str
     author: str
     description: str

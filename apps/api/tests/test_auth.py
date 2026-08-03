@@ -129,6 +129,9 @@ def test_workspace_data_is_private_for_users_and_visible_to_admin(client):
     ).status_code == 200
     assert client.get(f"/api/books/{book_id}").status_code == 200
     assert any(item["id"] == book_id for item in client.get("/api/books").json())
+    assert client.patch(f"/api/books/{book_id}", json={"title": "越权修改"}).status_code == 404
+    assert client.delete(f"/api/books/{book_id}").status_code == 404
+    assert client.get(f"/api/books/{book_id}").json()["title"] == "隔离工作空间的书"
 
     client.post("/api/auth/logout")
     assert client.post(

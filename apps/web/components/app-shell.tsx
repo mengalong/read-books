@@ -1,8 +1,12 @@
 "use client";
 
-import { BarChart3, BookOpenText, FileCode2, History, LibraryBig, Plus, Settings2 } from "lucide-react";
+import { BarChart3, BookOpenText, FileCode2, History, LibraryBig, LogOut, Plus, Settings2, Users } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+
+import { ApiError, getCurrentUser, logout } from "@/lib/api";
+import type { CurrentUser } from "@/lib/types";
 
 const navigation = [
   { href: "/", label: "我的书架", icon: LibraryBig },
@@ -14,10 +18,60 @@ const systemNavigation = [
   { href: "/settings/model", label: "模型设置", icon: Settings2 },
   { href: "/settings/prompts", label: "提示词管理", icon: FileCode2 },
   { href: "/settings/token-usage", label: "Token 用量", icon: BarChart3 },
+  { href: "/settings/users", label: "用户管理", icon: Users },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const authPage = pathname === "/login" || pathname === "/change-password";
+
+  const loadUser = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const current = await getCurrentUser();
+      setUser(current);
+      if (current.role !== "admin" && pathname.startsWith("/settings")) {
+        router.replace("/");
+      } else if (current.must_change_password && pathname !== "/change-password") {
+        router.replace("/change-password");
+      } else if (!current.must_change_password && authPage) {
+        router.replace("/");
+      }
+    } catch (reason: unknown) {
+      setUser(null);
+      if (reason instanceof ApiError && reason.status === 401) {
+        if (pathname !== "/login") router.replace("/login");
+      } else {
+        setError(reason instanceof ApiError ? reason.message : "账户状态加载失败");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [authPage, pathname, router]);
+
+  useEffect(() => { void loadUser(); }, [loadUser]);
+
+  async function handleLogout() {
+    try {
+      await logout();
+    } finally {
+      setUser(null);
+      router.replace("/login");
+    }
+  }
+
+  if (loading) return <div className="auth-loading">正在确认账户状态……</div>;
+  if (authPage) return <div className="auth-layout">{children}</div>;
+  if (!user) {
+    return error ? (
+      <div className="auth-loading auth-error"><span>{error}</span><button className="button button-secondary" onClick={() => void loadUser()} type="button">重新连接</button></div>
+    ) : <div className="auth-loading">正在前往登录页面……</div>;
+  }
   return (
     <div className="app-layout">
       <aside className="app-sidebar">
@@ -38,20 +92,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Link>
             );
           })}
-          <div className="nav-group-label">系统管理</div>
-          {systemNavigation.map(({ href, label, icon: Icon }) => {
-            const active = pathname.startsWith(href);
-            return (
-              <Link className={active ? "active" : ""} href={href} key={href}>
-                <Icon size={17} strokeWidth={1.8} />
-                {label}
-              </Link>
-            );
-          })}
+          {user.role === "admin" && <>
+            <div className="nav-group-label">系统管理</div>
+            {systemNavigation.map(({ href, label, icon: Icon }) => {
+              const active = pathname.startsWith(href);
+              return (
+                <Link className={active ? "active" : ""} href={href} key={href}>
+                  <Icon size={17} strokeWidth={1.8} />
+                  {label}
+                </Link>
+              );
+            })}
+          </>}
         </nav>
         <div className="sidebar-note">
           <strong><BookOpenText size={13} /> 原文优先</strong>
           上传 PDF 时保留页码与原文依据；没有电子版时可使用模型知识兜底。
+        </div>
+        <div className="sidebar-account">
+          <span className="account-avatar">{user.display_name.slice(0, 1)}</span>
+          <span className="account-copy"><strong>{user.display_name}</strong><small>{user.role === "admin" ? "管理员" : user.username}</small></span>
+          <button aria-label="退出登录" onClick={() => void handleLogout()} title="退出登录" type="button"><LogOut size={16} /></button>
         </div>
       </aside>
       <main className="app-main">{children}</main>

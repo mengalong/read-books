@@ -43,6 +43,7 @@ def to_book_summary(db: Session, book: Book) -> BookSummary:
         )
         .order_by(QuizGenerationTask.created_at.desc())
     )
+    owner = book.workspace.created_by_user if book.workspace else book.created_by_user
     return BookSummary(
         **BookSummary.model_validate(book).model_dump(
             exclude={
@@ -52,8 +53,12 @@ def to_book_summary(db: Session, book: Book) -> BookSummary:
                 "active_generation_completed_questions",
                 "active_generation_total_questions",
                 "active_generation_phase",
+                "owner_user_id",
+                "owner_display_name",
             }
         ),
+        owner_user_id=owner.id if owner else None,
+        owner_display_name=owner.display_name if owner else None,
         stats=get_book_stats(db, book.id),
         active_generation_task_id=active_task.id if active_task else None,
         active_generation_status=active_task.status if active_task else None,

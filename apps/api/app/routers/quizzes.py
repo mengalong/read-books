@@ -38,9 +38,11 @@ def current_provider(db: Session, usage_context=None):
     return get_quiz_provider(settings, configuration, prompts, usage_context)
 
 
-def get_quiz_or_404(db: Session, quiz_id: str, identity: AuthIdentity) -> Quiz:
+def get_quiz_or_404(
+    db: Session, quiz_id: str, identity: AuthIdentity, *, for_write: bool = False
+) -> Quiz:
     conditions = [Quiz.id == quiz_id]
-    if identity.user.role != "admin":
+    if identity.user.role != "admin" or for_write:
         conditions.append(Book.workspace_id == identity.workspace.id)
     quiz = db.scalar(
         select(Quiz)
@@ -53,9 +55,11 @@ def get_quiz_or_404(db: Session, quiz_id: str, identity: AuthIdentity) -> Quiz:
     return quiz
 
 
-def get_review_or_404(db: Session, review_id: str, identity: AuthIdentity) -> ReviewTask:
+def get_review_or_404(
+    db: Session, review_id: str, identity: AuthIdentity, *, for_write: bool = False
+) -> ReviewTask:
     conditions = [ReviewTask.id == review_id]
-    if identity.user.role != "admin":
+    if identity.user.role != "admin" or for_write:
         conditions.append(Book.workspace_id == identity.workspace.id)
     review = db.scalar(
         select(ReviewTask)
@@ -247,12 +251,9 @@ def generate_quiz(
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> QuizGenerationTaskResponse:
     try:
-        if identity.user.role != "admin":
-            book = db.scalar(
-                select(Book).where(Book.id == book_id, Book.workspace_id == identity.workspace.id)
-            )
-        else:
-            book = db.get(Book, book_id)
+        book = db.scalar(
+            select(Book).where(Book.id == book_id, Book.workspace_id == identity.workspace.id)
+        )
         if book is None:
             raise ValueError("未找到这本书")
         task = start_generation_task(
@@ -301,7 +302,7 @@ def delete_quiz(
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> None:
-    quiz = get_quiz_or_404(db, quiz_id, identity)
+    quiz = get_quiz_or_404(db, quiz_id, identity, for_write=True)
     if not quiz:
         raise HTTPException(status_code=404, detail="未找到这套复习试卷")
 
@@ -383,7 +384,7 @@ def start_review(
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> ReviewTaskResponse:
-    quiz = get_quiz_or_404(db, quiz_id, identity)
+    quiz = get_quiz_or_404(db, quiz_id, identity, for_write=True)
     attempt_number = (
         db.scalar(select(func.max(ReviewTask.attempt_number)).where(ReviewTask.quiz_id == quiz_id)) or 0
     ) + 1
@@ -448,7 +449,7 @@ def reopen_review(
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> ReviewTaskResponse:
-    review = get_review_or_404(db, review_id, identity)
+    review = get_review_or_404(db, review_id, identity, for_write=True)
     for answer in list(review.answers):
         db.delete(answer)
     review.status = "in_progress"
@@ -466,7 +467,7 @@ def delete_review(
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> None:
-    review = get_review_or_404(db, review_id, identity)
+    review = get_review_or_404(db, review_id, identity, for_write=True)
     db.delete(review)
     db.commit()
 
@@ -478,7 +479,7 @@ def submit_review(
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> ReviewTaskResponse:
-    review = get_review_or_404(db, review_id, identity)
+    review = get_review_or_404(db, review_id, identity, for_write=True)
     if review.status == "submitted":
         raise HTTPException(status_code=409, detail="这次复习已经提交，请先选择重新答题")
     submitted = {answer.question_id: answer for answer in payload.answers}
@@ -577,7 +578,7 @@ def legacy_submit_quiz(
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> ReviewTaskResponse:
-    get_quiz_or_404(db, quiz_id, identity)
+    get_quiz_or_404(db, quiz_id, identity, for_write=True)
     statement = select(ReviewTask).where(
         ReviewTask.quiz_id == quiz_id, ReviewTask.status == "in_progress"
     )

@@ -18,6 +18,10 @@ import type {
   ReviewTask,
   ReviewTaskSummary,
   TokenUsageReport,
+  CurrentUser,
+  AdminUser,
+  AdminUserCreateResult,
+  PasswordResetResult,
 } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
@@ -36,6 +40,7 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   try {
     response = await fetch(`${API_BASE}${path}`, {
       ...options,
+      credentials: "include",
       headers: {
         ...(options?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
         ...options?.headers,
@@ -49,7 +54,8 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
     let message = `请求失败（${response.status}）`;
     try {
       const detail = await response.json();
-      message = detail.detail || message;
+      if (typeof detail.detail === "string") message = detail.detail;
+      else if (detail.detail && typeof detail.detail.message === "string") message = detail.detail.message;
     } catch {
       // Keep the HTTP status message when the server did not return JSON.
     }
@@ -284,7 +290,64 @@ export function previewPrompt(
   });
 }
 
-export function getTokenUsage(taskType?: string) {
-  const suffix = taskType ? `?task_type=${encodeURIComponent(taskType)}` : "";
+export function getTokenUsage(taskType?: string, userId?: string) {
+  const params = new URLSearchParams();
+  if (taskType) params.set("task_type", taskType);
+  if (userId) params.set("user_id", userId);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<TokenUsageReport>(`/settings/token-usage${suffix}`);
+}
+
+export function getCurrentUser() {
+  return apiFetch<CurrentUser>("/auth/me");
+}
+
+export function login(username: string, password: string) {
+  return apiFetch<CurrentUser>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export function logout() {
+  return apiFetch<void>("/auth/logout", { method: "POST" });
+}
+
+export function changePassword(currentPassword: string, newPassword: string) {
+  return apiFetch<CurrentUser>("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+}
+
+export function getAdminUsers() {
+  return apiFetch<AdminUser[]>("/admin/users");
+}
+
+export function createAdminUser(payload: {
+  username: string;
+  display_name: string;
+  role: "admin" | "user";
+  temporary_password?: string;
+}) {
+  return apiFetch<AdminUserCreateResult>("/admin/users", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateAdminUser(
+  userId: string,
+  payload: { display_name?: string; role?: "admin" | "user"; status?: "active" | "disabled" },
+) {
+  return apiFetch<AdminUser>(`/admin/users/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function resetAdminUserPassword(userId: string) {
+  return apiFetch<PasswordResetResult>(`/admin/users/${userId}/reset-password`, {
+    method: "POST",
+  });
 }
