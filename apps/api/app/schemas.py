@@ -400,3 +400,58 @@ class TokenUsageSummaryResponse(BaseModel):
 class TokenUsageReportResponse(BaseModel):
     summary: TokenUsageSummaryResponse
     tasks: list[TokenUsageTaskResponse]
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=80)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class WorkspaceResponse(ApiModel):
+    id: str
+    name: str
+
+
+class CurrentUserResponse(ApiModel):
+    id: str
+    username: str
+    display_name: str
+    role: Literal["admin", "user"]
+    status: Literal["active", "disabled"]
+    must_change_password: bool
+    last_login_at: datetime | None
+    workspace: WorkspaceResponse
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class AdminUserCreateRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=80)
+    display_name: str = Field(min_length=1, max_length=120)
+    temporary_password: str | None = Field(default=None, min_length=8, max_length=128)
+    role: Literal["admin", "user"] = "user"
+
+
+class AdminUserUpdateRequest(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    role: Literal["admin", "user"] | None = None
+    status: Literal["active", "disabled"] | None = None
+
+
+class AdminUserResponse(CurrentUserResponse):
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminUserCreateResponse(BaseModel):
+    user: AdminUserResponse
+    temporary_password: str
+
+
+class PasswordResetResponse(BaseModel):
+    user_id: str
+    temporary_password: str
+    must_change_password: bool = True

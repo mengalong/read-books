@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     session_cookie_name: str = "huijuan_session"
     session_ttl_hours: int = 24 * 7
     session_cookie_secure: bool = False
+    login_max_failed_attempts: int = 5
+    login_lock_minutes: int = 15
     ocr_enabled: bool = True
     ocr_command: str = "swift"
     ocr_script: Path = PROJECT_ROOT / "scripts/pdf_ocr.swift"

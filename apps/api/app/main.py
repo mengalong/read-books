@@ -8,10 +8,12 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.database import Base, SessionLocal, engine
 from app.models import PdfDocument
+from app.routers.auth import router as auth_router
 from app.routers.books import router as books_router
 from app.routers.quizzes import router as quizzes_router
 from app.routers.settings import router as settings_router
 from app.services.demo_data import seed_demo_data
+from app.services.auth import ensure_initial_admin
 from app.services.pdf_parser import parse_pdf_document
 from app.services.quiz_generation import recover_generation_tasks, run_generation_task
 
@@ -22,6 +24,8 @@ settings = get_settings()
 async def lifespan(_: FastAPI):
     settings.ensure_directories()
     Base.metadata.create_all(bind=engine)
+    with SessionLocal() as db:
+        ensure_initial_admin(db, settings)
     if settings.seed_demo_data:
         with SessionLocal() as db:
             seed_demo_data(db)
@@ -59,6 +63,7 @@ app.add_middleware(
 app.include_router(books_router, prefix="/api")
 app.include_router(quizzes_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
 
 
 @app.get("/api/health")
