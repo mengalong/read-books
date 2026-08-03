@@ -89,3 +89,4 @@ make test-api
 - [需求设计](docs/reading-review-system-requirements.md)
 - [技术选型](docs/technical-selection.md)
 - [开发状态](docs/development-status.md)
+- [多用户模式改造计划](docs/multi-user-mode-plan.md)
