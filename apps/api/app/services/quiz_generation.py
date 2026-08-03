@@ -25,6 +25,26 @@ from app.services.quiz_provider import get_quiz_provider
 settings = get_settings()
 
 
+def resolve_source_mode(db: Session, book_id: str) -> str:
+    completed_chunk = db.scalar(
+        select(ContentChunk.id)
+        .join(PdfDocument, PdfDocument.id == ContentChunk.pdf_id)
+        .where(ContentChunk.book_id == book_id, PdfDocument.parse_status == "completed")
+        .limit(1)
+    )
+    if completed_chunk:
+        return "pdf"
+
+    has_pdf = db.scalar(select(PdfDocument.id).where(PdfDocument.book_id == book_id).limit(1))
+    if has_pdf:
+        raise ValueError("已有 PDF，但尚未完成解析；请等待解析完成或检查解析失败原因")
+
+    configuration = get_effective_model_configuration(db, settings)
+    if configuration.provider_mode == "mock":
+        raise ValueError("没有 PDF 时需要启用已配置的大模型，当前模拟接口不支持书籍知识出题")
+    return "model_knowledge"
+
+
 def validate_generation_request(
     db: Session, book_id: str, payload: QuizGenerateRequest, task_type: str
 ) -> Book:
@@ -48,14 +68,9 @@ def validate_generation_request(
         "processing",
     }:
         raise ValueError("该书正在后台预生成测试，请等待本次任务完成")
-    has_chunks = db.scalar(
-        select(ContentChunk.id)
-        .join(PdfDocument, PdfDocument.id == ContentChunk.pdf_id)
-        .where(ContentChunk.book_id == book_id, PdfDocument.parse_status == "completed")
-        .limit(1)
-    )
-    if not has_chunks:
-        raise ValueError("还没有可用于出题的 PDF 原文，请先完成解析")
+    source_mode = resolve_source_mode(db, book_id)
+    if source_mode == "model_knowledge" and (payload.page_start or payload.page_end):
+        raise ValueError("没有 PDF 时不能指定页码范围")
     return book
 
 
@@ -63,10 +78,12 @@ def create_generation_task(
     db: Session, book_id: str, payload: QuizGenerateRequest, task_type: str
 ) -> QuizGenerationTask:
     validate_generation_request(db, book_id, payload, task_type)
+    source_mode = resolve_source_mode(db, book_id)
     task = QuizGenerationTask(
         book_id=book_id,
         task_type=task_type,
         status="pending",
+        source_mode=source_mode,
         total_questions=payload.single_count + payload.multiple_count + payload.short_count,
         current_phase="等待开始",
         difficulty=payload.difficulty,
@@ -175,13 +192,17 @@ def run_generation_task(task_id: str) -> None:
         if not task or task.status not in {"pending", "processing"}:
             return
         task.status = "processing"
-        task.current_phase = "正在准备原文片段"
+        task.current_phase = (
+            "正在准备原文片段" if task.source_mode == "pdf" else "正在准备书籍信息"
+        )
         db.commit()
 
         try:
             book = db.get(Book, task.book_id)
             chunks = _get_chunks(db, task)
-            if not book or not chunks:
+            if not book:
+                raise RuntimeError("未找到这本书")
+            if task.source_mode == "pdf" and not chunks:
                 raise RuntimeError("没有可用于出题的 PDF 原文")
             file_names = dict(
                 db.execute(
@@ -222,6 +243,9 @@ def run_generation_task(task_id: str) -> None:
                     generation_number=generation_number + position - 1,
                     recent_chunk_ids=recent_chunk_ids,
                     duration_minutes=task.duration_minutes,
+                    book_title=book.title,
+                    author=book.author,
+                    source_mode=task.source_mode,
                 )
                 if len(result) != 1:
                     raise RuntimeError(f"第 {position} 道题生成结果数量不正确")
@@ -238,6 +262,7 @@ def run_generation_task(task_id: str) -> None:
                 difficulty=task.difficulty,
                 duration_minutes=task.duration_minutes,
                 status="ready",
+                source_mode=task.source_mode,
                 max_score=sum(item.max_score for item in generated),
                 generation_task_id=task.id,
             )

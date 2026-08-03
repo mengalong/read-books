@@ -9,7 +9,7 @@ from app.models import Book, ContentChunk, ModelConfiguration, PdfDocument, Ques
 from app.services.model_usage import ModelUsageEvent, new_usage_context, record_model_usage
 from app.services.pdf_parser import parse_pdf_document
 from app.services.pre_generation import recover_pre_generation_tasks
-from app.services.quiz_provider import HttpQuizAiProvider, MockQuizAiProvider
+from app.services.quiz_provider import GeneratedQuestion, HttpQuizAiProvider, MockQuizAiProvider
 
 
 def create_source_book(client, title: str = "测试书籍") -> tuple[str, str]:
@@ -362,7 +362,66 @@ def test_quiz_generation_switches_between_configured_and_mock_provider(client, m
     assert calls == {"http": 1, "mock": 1}
 
 
-def test_pre_generation_is_idempotent_and_requires_completed_source(client, monkeypatch):
+def test_book_without_pdf_uses_model_knowledge_mode_with_real_provider(client, monkeypatch):
+    created = client.post(
+        "/api/books",
+        json={"title": "解忧杂货店", "author": "东野圭吾"},
+    )
+    assert created.status_code == 201
+    book_id = created.json()["id"]
+
+    configured = client.put(
+        "/api/settings/model",
+        json={
+            "provider_mode": "openai_compatible",
+            "base_url": "https://models.example.com/v1",
+            "model_name": "review-model",
+            "api_key": "provider-test-secret",
+        },
+    )
+    assert configured.status_code == 200
+
+    def fake_http_generate(self, **kwargs):
+        assert kwargs["source_mode"] == "model_knowledge"
+        assert kwargs["book_title"] == "解忧杂货店"
+        return [
+            GeneratedQuestion(
+                question_type="single",
+                prompt="浪矢杂货店主要通过什么方式回应来信？",
+                options=[
+                    {"id": "A", "text": "书信咨询"},
+                    {"id": "B", "text": "电话咨询"},
+                    {"id": "C", "text": "面对面授课"},
+                    {"id": "D", "text": "广播节目"},
+                ],
+                correct_answers=["A"],
+                explanation="题目依据模型对作品设定的知识生成。",
+                knowledge_point="浪矢杂货店",
+                estimated_seconds=45,
+                reference_answer=None,
+                grading_rubric=[],
+                source_chunk_ids=[],
+                source_evidence=[],
+                max_score=6,
+            )
+        ]
+
+    monkeypatch.setattr(HttpQuizAiProvider, "generate_questions", fake_http_generate)
+    generated = client.post(
+        f"/api/books/{book_id}/quizzes",
+        json={"single_count": 1, "multiple_count": 0, "short_count": 0},
+    )
+    assert generated.status_code == 202
+    task = wait_for_generation(client, generated.json()["id"])
+    assert task["source_mode"] == "model_knowledge"
+
+    quiz = client.get(f"/api/quizzes/{task['quiz_id']}")
+    assert quiz.status_code == 200
+    assert quiz.json()["source_mode"] == "model_knowledge"
+    assert quiz.json()["questions"][0]["source_evidence"] == []
+
+
+def test_pre_generation_is_idempotent_and_requires_available_source(client, monkeypatch):
     book_id, _ = create_source_book(client, "预生成测试书")
     started: list[tuple[object, tuple[str, ...]]] = []
 
@@ -411,9 +470,16 @@ def test_pre_generation_is_idempotent_and_requires_completed_source(client, monk
         json={"title": "没有原文的书", "author": "测试作者"},
     )
     assert without_pdf.status_code == 201
+    switched_to_mock = client.put(
+        "/api/settings/model",
+        json={"provider_mode": "mock", "base_url": "", "model_name": ""},
+    )
+    assert switched_to_mock.status_code == 200
     unavailable = client.post(f"/api/books/{without_pdf.json()['id']}/pre-generation")
     assert unavailable.status_code == 409
-    assert unavailable.json()["detail"] == "请先上传并完成解析 PDF，再开启预生成"
+    assert unavailable.json()["detail"] == (
+        "没有 PDF 时需要启用已配置的大模型，当前模拟接口不支持书籍知识出题"
+    )
 
 
 def test_pdf_parser_keeps_page_numbers(client, tmp_path: Path):

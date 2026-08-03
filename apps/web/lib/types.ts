@@ -101,6 +101,7 @@ export type PreGenerationResponse = {
 };
 
 export type QuestionType = "single" | "multiple" | "short";
+export type SourceMode = "pdf" | "model_knowledge";
 
 export type BookStats = {
   pdf_count: number;
@@ -157,6 +158,7 @@ export type QuizSummary = {
   difficulty: string;
   duration_minutes: number;
   status: string;
+  source_mode: SourceMode;
   question_count: number;
   single_count: number;
   multiple_count: number;
@@ -214,6 +216,7 @@ export type Quiz = {
   difficulty: string;
   duration_minutes: number;
   status: "ready" | "submitted";
+  source_mode: SourceMode;
   total_score: number | null;
   max_score: number;
   elapsed_seconds: number | null;
@@ -228,6 +231,7 @@ export type QuizGenerationTask = {
   book_id: string;
   task_type: string;
   status: "pending" | "processing" | "completed" | "failed";
+  source_mode: SourceMode;
   total_questions: number;
   completed_questions: number;
   current_question_position: number | null;
@@ -268,6 +272,7 @@ export type ReviewTask = {
   title: string;
   attempt_number: number;
   status: "in_progress" | "submitted";
+  source_mode: SourceMode;
   difficulty: string;
   duration_minutes: number;
   total_score: number | null;

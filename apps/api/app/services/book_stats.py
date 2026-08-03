@@ -86,6 +86,7 @@ def to_quiz_summary(db: Session, quiz: Quiz) -> QuizSummary:
         difficulty=quiz.difficulty,
         duration_minutes=quiz.duration_minutes,
         status=quiz.status,
+        source_mode=quiz.source_mode,
         question_count=len(quiz.questions),
         single_count=question_counts["single"],
         multiple_count=question_counts["multiple"],

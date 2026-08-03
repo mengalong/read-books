@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { BookCover, EmptyState, ErrorState, NextReview, StatusBadge, formatPdfMeta } from "@/components/ui";
+import { BookCover, EmptyState, ErrorState, NextReview, SourceModeNotice, StatusBadge, formatPdfMeta } from "@/components/ui";
 import { ApiError, deletePdf, deleteQuiz, getBook, getChunks, startPreGeneration, uploadPdf } from "@/lib/api";
 import { formatDate, formatDateTime, scorePercentage } from "@/lib/format";
 import type { BookDetail, Chunk, PdfDocument, QuizSummary } from "@/lib/types";
@@ -52,6 +52,9 @@ export default function BookDetailPage() {
   const pending = book?.pdfs.filter((pdf) => pdf.parse_status !== "completed").length || 0;
   const preGenerating = book?.pre_generation_status === "pending" || book?.pre_generation_status === "processing";
   const generating = Boolean(book?.active_generation_task_id);
+  const noPdf = Boolean(book && book.pdfs.length === 0);
+  const canGenerate = Boolean(book && (completed > 0 || noPdf) && !generating);
+  const canPreGenerate = Boolean(book && (completed > 0 || noPdf));
   const previewChunks = useMemo(() => chunks.slice(0, 4), [chunks]);
 
   async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
@@ -127,11 +130,13 @@ export default function BookDetailPage() {
         </div>
         <div className="detail-actions">
           <Link className="button button-secondary" href={`/books/${book.id}/history`}><History size={15} />复习记录</Link>
-          <Link className="button button-primary" href={completed && !generating ? `/books/${book.id}/quiz/new` : "#"} aria-disabled={!completed || generating} onClick={(event) => { if (!completed || generating) event.preventDefault(); }}><Sparkles size={15} />{generating ? "正在后台出题" : "生成新试卷"}</Link>
-          {completed > 0 && book.pre_generation_status !== "completed" && <button className="button button-secondary" disabled={startingPreGeneration || generating} onClick={() => void handleStartPreGeneration()} type="button"><Sparkles size={15} />{book.pre_generation_status === "failed" ? "重新预生成" : preGenerating ? "正在生成……" : "开启预生成"}</button>}
-          {completed > 0 && book.pre_generation_status === "completed" && book.pre_generation_quiz_id && <Link className="button button-secondary" href={`/quizzes/${book.pre_generation_quiz_id}`}><CheckCircle2 size={15} />打开预生成测试</Link>}
+          <Link className="button button-primary" href={canGenerate ? `/books/${book.id}/quiz/new` : "#"} aria-disabled={!canGenerate} onClick={(event) => { if (!canGenerate) event.preventDefault(); }}><Sparkles size={15} />{generating ? "正在后台出题" : "生成新试卷"}</Link>
+          {canPreGenerate && book.pre_generation_status !== "completed" && <button className="button button-secondary" disabled={startingPreGeneration || generating} onClick={() => void handleStartPreGeneration()} type="button"><Sparkles size={15} />{book.pre_generation_status === "failed" ? "重新预生成" : preGenerating ? "正在生成……" : "开启预生成"}</button>}
+          {canPreGenerate && book.pre_generation_status === "completed" && book.pre_generation_quiz_id && <Link className="button button-secondary" href={`/quizzes/${book.pre_generation_quiz_id}`}><CheckCircle2 size={15} />打开预生成测试</Link>}
         </div>
       </section>
+
+      {noPdf && !generating && <SourceModeNotice sourceMode="model_knowledge" />}
 
       {book.active_generation_task_id && <div className="generation-progress processing">
         <div className="generation-progress-heading"><div><span className="eyebrow">出题任务</span><strong>{book.active_generation_phase || "正在后台生成题目"}</strong></div><LoaderCircle className="spin" size={21} /></div>
@@ -162,6 +167,7 @@ export default function BookDetailPage() {
             <div className="quiz-library-main">
               <strong>{quiz.title}</strong>
               <span>难度：{difficultyLabels[quiz.difficulty] || quiz.difficulty} · {quiz.question_count} 道题 · {quiz.duration_minutes} 分钟 · 创建于 {formatDateTime(quiz.created_at)}</span>
+              <span>出题依据：{quiz.source_mode === "model_knowledge" ? "模型知识（无 PDF 原文）" : "已解析 PDF 原文"}</span>
               <span>题目构成：单选 {quiz.single_count} · 多选 {quiz.multiple_count} · 问答 {quiz.short_count}</span>
             </div>
             <div className="quiz-library-stats"><span>已复习 {quiz.review_count} 次</span><strong>{latestPercent === null ? "暂无成绩" : `最近得分率 ${latestPercent}%`}</strong></div>
@@ -192,7 +198,7 @@ export default function BookDetailPage() {
               <StatusBadge status={pdf.parse_status} />
               <button aria-label={`删除${pdf.file_name}`} className="button button-quiet" onClick={() => void handleDelete(pdf)} title="删除 PDF" type="button"><Trash2 size={15} /></button>
             </div>)}
-            {book.pdfs.length === 0 && <EmptyState title="还没有 PDF" detail="上传读过的原文后，系统才能基于内容生成测试。" />}
+            {book.pdfs.length === 0 && <EmptyState title="还没有 PDF" detail="可以上传读过的原文以获得页码和逐句依据；当前也可以使用已配置模型的知识生成测试。" />}
           </div>
           <div className="upload-zone">
             <UploadCloud size={23} />

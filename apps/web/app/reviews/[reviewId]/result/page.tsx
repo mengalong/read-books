@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { ErrorState, EvidenceList } from "@/components/ui";
+import { ErrorState, EvidenceList, SourceModeNotice } from "@/components/ui";
 import { ApiError, getReviewResult, reopenReview } from "@/lib/api";
 import { formatDate, formatDuration, formatScore, scorePercentage } from "@/lib/format";
 import type { ReviewTask } from "@/lib/types";
@@ -44,13 +44,14 @@ export default function ReviewResultPage() {
     <div className="page-wrap">
       <Link className="back-link" href={`/books/${result.book_id}`}><ArrowLeft size={14} />返回《{result.book_title}》</Link>
       {error && <div className="toast-error">{error}</div>}
+      <SourceModeNotice sourceMode={result.source_mode} compact />
       <section className="result-header">
         <div className={`result-score ${isLowScore ? "low" : ""}`}><div className="score-number"><strong>{formatScore(result.total_score)}</strong><span>/ {formatScore(result.max_score)}</span></div><div className="score-copy"><div className="eyebrow">Review complete</div><h1>{percent >= 80 ? "掌握得不错，继续保持" : percent >= 60 ? "已经记住一部分" : "找到需要重读的地方了"}</h1><p>{result.title} · 第 {result.attempt_number} 次复习 · 用时 {formatDuration(result.elapsed_seconds)}<br />得分 {formatScore(result.total_score)} / {formatScore(result.max_score)} · 得分率 {percent}%</p></div></div>
         <div className="result-next-review"><CalendarClock size={16} style={{ verticalAlign: "-3px", marginRight: 6 }} /><strong>下次建议复习</strong>{formatDate(result.next_review_date)}</div>
       </section>
 
       {result.weak_points.length > 0 && <div className="weak-points"><strong>本次薄弱点：</strong>{result.weak_points.join("、")}</div>}
-      <div className="section-title"><h2>逐题复盘</h2><span>原文依据已全部展开</span></div>
+      <div className="section-title"><h2>逐题复盘</h2><span>{result.source_mode === "model_knowledge" ? "模型知识说明已全部展开" : "原文依据已全部展开"}</span></div>
       {result.questions.map((question, index) => {
         const answer = answerMap.get(question.id);
         if (!answer) return null;
@@ -62,7 +63,7 @@ export default function ReviewResultPage() {
           <div className="result-answer-row"><div><strong>你的答案：</strong>{selectedText}</div><div><strong>{question.question_type === "short" ? "AI 参考答案" : "正确答案"}：</strong>{correctText}</div></div>
           <div className="result-feedback">{answer.is_correct ? <Check size={14} style={{ verticalAlign: "-3px", marginRight: 5 }} /> : <CircleX size={14} style={{ verticalAlign: "-3px", marginRight: 5 }} />}{answer.feedback} {question.explanation}</div>
           {question.question_type === "short" && <div className="rubric-list">{question.grading_rubric.map((rubric) => <div className={`rubric-row ${answer.matched_points.includes(rubric.point) ? "hit" : ""}`} key={rubric.point}>{answer.matched_points.includes(rubric.point) ? "已覆盖" : "待补充"}：{rubric.point}</div>)}</div>}
-          <EvidenceList evidence={question.source_evidence} open />
+          <EvidenceList evidence={question.source_evidence} open sourceMode={result.source_mode} />
         </article>;
       })}
 

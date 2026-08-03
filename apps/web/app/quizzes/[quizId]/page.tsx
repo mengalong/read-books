@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { ErrorState } from "@/components/ui";
+import { ErrorState, SourceModeNotice } from "@/components/ui";
 import { ApiError, getQuiz, startReview } from "@/lib/api";
 import type { Question, Quiz } from "@/lib/types";
 
@@ -57,6 +57,7 @@ export default function QuizOverviewPage() {
     <div className="page-wrap">
       <Link className="back-link" href={`/books/${quiz.book_id}`}><ArrowLeft size={14} />返回《{quiz.book_title}》</Link>
       {error && <div className="toast-error">{error}</div>}
+      <SourceModeNotice sourceMode={quiz.source_mode} />
       <header className="page-header">
         <div><div className="eyebrow">Review paper</div><h1 className="page-title">{quiz.title}</h1><p className="page-description">从这套试卷开始一次新的复习任务。同一套试卷可以反复作答，每次结果都会单独记录。</p></div>
         <button className="button button-primary" disabled={starting} onClick={() => void handleStart()} type="button"><Play size={15} />{starting ? "正在准备……" : "开始本次复习"}</button>
@@ -68,7 +69,7 @@ export default function QuizOverviewPage() {
           <div className="quiz-choice-items">
             {counts.map(({ type, count }) => <div className="quiz-choice-item" key={type}><div className="count-icon"><FileQuestion size={17} /></div><div><strong>{questionTypeLabels[type]}</strong><span>{count} 道</span></div></div>)}
           </div>
-          <div className="quiz-choice-note"><CheckCircle2 size={16} />每道题都保留对应的 PDF 页码和原文依据，提交后还可以查看 AI 参考答案与评分反馈。</div>
+          <div className="quiz-choice-note"><CheckCircle2 size={16} />{quiz.source_mode === "model_knowledge" ? "本套试卷基于模型知识生成，没有 PDF 页码和逐句原文依据；提交后仍可查看 AI 参考答案与评分反馈。" : "每道题都保留对应的 PDF 页码和原文依据，提交后还可以查看 AI 参考答案与评分反馈。"}</div>
         </section>
         <aside className="quiz-settings-summary">
           <div className="eyebrow">本套试卷</div>

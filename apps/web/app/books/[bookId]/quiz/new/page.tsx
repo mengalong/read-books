@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { ErrorState } from "@/components/ui";
+import { ErrorState, SourceModeNotice } from "@/components/ui";
 import { ApiError, generateQuiz, getBook, getGenerationTask } from "@/lib/api";
 import type { BookDetail, QuizGenerationTask } from "@/lib/types";
 
@@ -84,13 +84,17 @@ export default function NewQuizPage() {
   if (loading) return <div className="page-wrap"><div className="loading-state">正在准备测试设置……</div></div>;
   if (!book) return <div className="page-wrap"><ErrorState message={error || "未找到这本书"} /></div>;
 
+  const sourceMode = book.pdfs.length === 0 ? "model_knowledge" : "pdf" as const;
+  const hasPdfSource = book.stats.completed_pdf_count > 0;
+
   return (
     <div className="page-wrap">
       <Link className="back-link" href={`/books/${book.id}`}><ArrowLeft size={14} />返回《{book.title}》</Link>
       <header className="page-header" style={{ marginBottom: 25 }}>
-        <div><div className="eyebrow">Create review</div><h1 className="page-title">生成一套复习测试</h1><p className="page-description">{book.title} · 已有 {book.stats.chunk_count} 个原文片段可用于出题</p></div>
+        <div><div className="eyebrow">Create review</div><h1 className="page-title">生成一套复习测试</h1><p className="page-description">{book.title} · {hasPdfSource ? `已有 ${book.stats.chunk_count} 个原文片段可用于出题` : "未上传 PDF，将使用模型知识兜底"}</p></div>
       </header>
       {error && <div className="toast-error">{error}</div>}
+      <SourceModeNotice sourceMode={sourceMode} />
       {generationTask && <section className={`generation-progress ${generationTask.status}`}>
         <div className="generation-progress-heading">
           <div>
@@ -118,14 +122,14 @@ export default function NewQuizPage() {
 
           <div className="settings-block"><label htmlFor="duration"><Clock3 size={14} style={{ verticalAlign: "-3px", marginRight: 5 }} />目标时长</label><select id="duration" value={duration} onChange={(event) => setDuration(Number(event.target.value))}><option value={10}>10 分钟</option><option value={15}>15 分钟</option><option value={20}>20 分钟</option><option value={30}>30 分钟</option></select></div>
 
-          <div className="settings-block"><label>页码范围（可选）</label><div className="page-range"><input min={1} onChange={(event) => setPageStart(event.target.value)} placeholder="起始页" type="number" value={pageStart} /><span>至</span><input min={1} onChange={(event) => setPageEnd(event.target.value)} placeholder="结束页" type="number" value={pageEnd} /></div></div>
+          {hasPdfSource && <div className="settings-block"><label>页码范围（可选）</label><div className="page-range"><input min={1} onChange={(event) => setPageStart(event.target.value)} placeholder="起始页" type="number" value={pageStart} /><span>至</span><input min={1} onChange={(event) => setPageEnd(event.target.value)} placeholder="结束页" type="number" value={pageEnd} /></div></div>}
 
           <div className="form-actions"><Link className="button button-secondary" href={`/books/${book.id}`}>返回书籍</Link><button className="button button-primary" disabled={generating || ["pending", "processing"].includes(generationTask?.status || "") || Object.values(counts).every((count) => count === 0)} onClick={() => void handleGenerate()} type="button"><Sparkles size={15} />{generating ? "正在创建任务……" : ["pending", "processing"].includes(generationTask?.status || "") ? "正在后台出题" : "生成复习试卷"}</button></div>
         </section>
         <aside className="quiz-settings-summary">
           <div className="eyebrow">本次测试</div>
           <strong>{Object.values(counts).reduce((sum, count) => sum + count, 0)} 道题</strong>
-          <p>系统会优先选择近期没有考过的原文片段。每道题都附带页码依据，答题时默认折叠。</p>
+          <p>{hasPdfSource ? "系统会优先选择近期没有考过的原文片段。每道题都附带页码依据，答题时默认折叠。" : "系统会根据书名、作者和模型知识生成题目，不会伪造 PDF 页码或原文引文。"}</p>
           <dl><div><dt>目标时长</dt><dd>{duration} 分钟</dd></div><div><dt>预计用时</dt><dd>{estimatedMinutes} 分钟</dd></div><div><dt>评分方式</dt><dd>自动评分</dd></div></dl>
         </aside>
       </div>

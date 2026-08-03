@@ -81,6 +81,7 @@ class QuizSummary(BaseModel):
     difficulty: str
     duration_minutes: int
     status: str
+    source_mode: Literal["pdf", "model_knowledge"] = "pdf"
     question_count: int
     single_count: int = 0
     multiple_count: int = 0
@@ -136,6 +137,7 @@ class QuizGenerationTaskResponse(BaseModel):
     book_id: str
     task_type: str
     status: Literal["pending", "processing", "completed", "failed"]
+    source_mode: Literal["pdf", "model_knowledge"]
     total_questions: int
     completed_questions: int
     current_question_position: int | None
@@ -176,6 +178,7 @@ class QuizResponse(ApiModel):
     difficulty: str
     duration_minutes: int
     status: str
+    source_mode: Literal["pdf", "model_knowledge"]
     total_score: float | None
     max_score: float
     elapsed_seconds: int | None
@@ -221,6 +224,7 @@ class ReviewTaskResponse(BaseModel):
     title: str
     attempt_number: int
     status: Literal["in_progress", "submitted"]
+    source_mode: Literal["pdf", "model_knowledge"]
     difficulty: str
     duration_minutes: int
     total_score: float | None

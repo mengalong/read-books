@@ -7,11 +7,12 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import Book, ContentChunk, PdfDocument, QuizGenerationTask
+from app.models import Book, QuizGenerationTask
 from app.schemas import PreGenerationResponse, QuizGenerateRequest
 from app.services.quiz_generation import (
     recover_generation_tasks,
     run_generation_task,
+    resolve_source_mode,
     start_generation_task,
 )
 
@@ -62,14 +63,7 @@ def begin_pre_generation(db: Session, book_id: str) -> PreGenerationStart:
     if book.pre_generation_status == "completed" and book.pre_generation_quiz_id:
         return PreGenerationStart(pre_generation_response(book), False)
 
-    has_chunks = db.scalar(
-        select(ContentChunk.id)
-        .join(PdfDocument, PdfDocument.id == ContentChunk.pdf_id)
-        .where(ContentChunk.book_id == book_id, PdfDocument.parse_status == "completed")
-        .limit(1)
-    )
-    if not has_chunks:
-        raise ValueError("请先上传并完成解析 PDF，再开启预生成")
+    resolve_source_mode(db, book_id)
 
     claimed = db.execute(
         update(Book)

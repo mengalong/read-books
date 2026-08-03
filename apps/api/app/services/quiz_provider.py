@@ -62,6 +62,9 @@ class QuizAiProvider(Protocol):
         generation_number: int,
         recent_chunk_ids: set[str],
         duration_minutes: int = 15,
+        book_title: str = "",
+        author: str = "",
+        source_mode: str = "pdf",
     ) -> list[GeneratedQuestion]: ...
 
     def grade_short_answer(self, question: Question, answer: str) -> GradeResult: ...
@@ -153,9 +156,12 @@ class MockQuizAiProvider:
         generation_number: int,
         recent_chunk_ids: set[str],
         duration_minutes: int = 15,
+        book_title: str = "",
+        author: str = "",
+        source_mode: str = "pdf",
     ) -> list[GeneratedQuestion]:
         if not chunks:
-            return []
+            raise RuntimeError("没有 PDF 时需要启用已配置的大模型，当前模拟接口不支持书籍知识出题")
 
         fresh = [chunk for chunk in chunks if chunk.id not in recent_chunk_ids]
         repeated = [chunk for chunk in chunks if chunk.id in recent_chunk_ids]
@@ -383,7 +389,7 @@ class HttpQuizAiProvider:
         "explanation": ("explanation", "analysis", "rationale", "解析"),
         "knowledge_point": ("knowledge_point", "topic", "知识点"),
     }
-    DEFAULT_EXPLANATION = "答案与评分依据均来自所引用的原文片段。"
+    DEFAULT_EXPLANATION = "答案与评分依据均来自所提供的 PDF 原文片段。"
 
     def __init__(
         self,
@@ -567,6 +573,9 @@ class HttpQuizAiProvider:
         short_count: int,
         difficulty: str,
         duration_minutes: int,
+        book_title: str,
+        author: str,
+        source_mode: str,
     ) -> dict[str, str]:
         source_material = [
             {
@@ -577,6 +586,13 @@ class HttpQuizAiProvider:
             for chunk in candidates
         ]
         return {
+            "book_title": book_title or "未提供",
+            "author": author or "未提供",
+            "source_mode": (
+                "pdf（必须基于已解析 PDF 原文）"
+                if source_mode == "pdf"
+                else "model_knowledge（仅使用模型对该书的内化知识，不提供 PDF 原文依据）"
+            ),
             "difficulty": difficulty,
             "single_count": str(single_count),
             "multiple_count": str(multiple_count),
@@ -641,6 +657,8 @@ class HttpQuizAiProvider:
         single_count: int,
         multiple_count: int,
         short_count: int,
+        source_mode: str,
+        book_title: str,
     ) -> list[GeneratedQuestion]:
         raw_questions = payload.get("questions")
         total = single_count + multiple_count + short_count
@@ -658,19 +676,29 @@ class HttpQuizAiProvider:
                 raise RuntimeError(f"真实模型第 {position} 道题返回了不支持的题型")
             actual_counts[question_type] += 1
             source_ids = raw.get("source_chunk_ids")
-            if not isinstance(source_ids, list) or not source_ids:
-                raise RuntimeError(f"真实模型第 {position} 道题缺少原文片段来源")
+            if not isinstance(source_ids, list):
+                raise RuntimeError(f"真实模型第 {position} 道题的原文片段来源格式不正确")
             if not all(isinstance(source_id, str) and source_id.strip() for source_id in source_ids):
                 raise RuntimeError(f"真实模型第 {position} 道题的原文片段来源格式不正确")
             unique_source_ids = list(dict.fromkeys(source_ids))
+            if source_mode == "pdf" and not unique_source_ids:
+                raise RuntimeError(f"真实模型第 {position} 道题缺少原文片段来源")
+            if source_mode == "model_knowledge" and unique_source_ids:
+                raise RuntimeError(f"真实模型第 {position} 道题不应包含 PDF 原文片段来源")
             if any(source_id not in chunks_by_id for source_id in unique_source_ids):
                 raise RuntimeError(f"真实模型第 {position} 道题引用了未提供的原文片段")
             prompt = self._question_text(raw, "prompt")
             if prompt is None:
                 raise RuntimeError(f"真实模型第 {position} 道题缺少题干字段")
-            explanation = self._question_text(raw, "explanation") or self.DEFAULT_EXPLANATION
-            knowledge = self._question_text(raw, "knowledge_point") or knowledge_point(
-                chunks_by_id[unique_source_ids[0]].content
+            explanation = self._question_text(raw, "explanation") or (
+                self.DEFAULT_EXPLANATION
+                if source_mode == "pdf"
+                else "本题依据模型对该书内容的知识生成，不对应具体 PDF 原文。"
+            )
+            knowledge = self._question_text(raw, "knowledge_point") or (
+                knowledge_point(chunks_by_id[unique_source_ids[0]].content)
+                if unique_source_ids
+                else f"《{book_title or '本书'}》内容理解"
             )
             options: list[dict[str, str]] = []
             correct_answers = raw.get("correct_answers")
@@ -717,10 +745,14 @@ class HttpQuizAiProvider:
                     correct_option_text,
                 ]
             )
-            evidence = [
-                self._source_evidence(chunks_by_id[source_id], file_names, focus_text)
-                for source_id in unique_source_ids
-            ]
+            evidence = (
+                [
+                    self._source_evidence(chunks_by_id[source_id], file_names, focus_text)
+                    for source_id in unique_source_ids
+                ]
+                if source_mode == "pdf"
+                else []
+            )
             generated.append(
                 GeneratedQuestion(
                     question_type=question_type,
@@ -781,10 +813,13 @@ class HttpQuizAiProvider:
         generation_number: int,
         recent_chunk_ids: set[str],
         duration_minutes: int = 15,
+        book_title: str = "",
+        author: str = "",
+        source_mode: str = "pdf",
     ) -> list[GeneratedQuestion]:
         total = single_count + multiple_count + short_count
         candidates = self._candidate_chunks(chunks, total, generation_number, recent_chunk_ids)
-        if len(candidates) < 1:
+        if source_mode == "pdf" and len(candidates) < 1:
             return []
         generation_values = self._generation_values(
             candidates,
@@ -793,12 +828,23 @@ class HttpQuizAiProvider:
             short_count,
             difficulty,
             duration_minutes,
+            book_title,
+            author,
+            source_mode,
         )
         messages = [
             {
                 "role": "system",
-                "content": render_prompt(
-                    self.prompt_templates["generation"].system_prompt, generation_values
+                "content": (
+                    render_prompt(
+                        self.prompt_templates["generation"].system_prompt, generation_values
+                    )
+                    + "\n\n系统来源边界：本次没有 PDF 原文，只能根据书名、作者和模型知识生成；"
+                    "source_chunk_ids 必须为空，不得编造页码、章节或引文。"
+                    if source_mode == "model_knowledge"
+                    else render_prompt(
+                        self.prompt_templates["generation"].system_prompt, generation_values
+                    )
                 ),
             },
             {
@@ -817,6 +863,8 @@ class HttpQuizAiProvider:
                 single_count,
                 multiple_count,
                 short_count,
+                source_mode,
+                book_title,
             )
         except RuntimeError as first_error:
             repaired_content = self._chat_completion(
@@ -831,6 +879,8 @@ class HttpQuizAiProvider:
                     single_count,
                     multiple_count,
                     short_count,
+                    source_mode,
+                    book_title,
                 )
             except RuntimeError as repair_error:
                 raise RuntimeError(f"真实模型出题结果修正失败：{repair_error}") from repair_error

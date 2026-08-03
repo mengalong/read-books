@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { ErrorState, EvidenceList } from "@/components/ui";
+import { ErrorState, EvidenceList, SourceModeNotice } from "@/components/ui";
 import { ApiError, getReview, submitReview } from "@/lib/api";
 import type { Question, ReviewTask } from "@/lib/types";
 
@@ -93,6 +93,7 @@ export default function ReviewPage() {
   return (
     <div className="page-wrap">
       {error && <div className="toast-error">{error}</div>}
+      <SourceModeNotice sourceMode={review.source_mode} compact />
       <div className="quiz-layout">
         <aside className="quiz-sidebar">
           <div className="quiz-sidebar-card">
@@ -119,7 +120,7 @@ export default function ReviewPage() {
               const selected = draft.selected.includes(option.id);
               return <label className={`option-label ${selected ? "selected" : ""}`} key={option.id}><input checked={selected} name={question.id} onChange={() => selectOption(question, option.id)} type={question.question_type === "single" ? "radio" : "checkbox"} /><span className="option-id">{option.id}</span><span className="option-text">{option.text}</span></label>;
             })}</div> : <textarea className="answer-textarea" onChange={(event) => setAnswers((currentAnswers) => ({ ...currentAnswers, [question.id]: { ...(currentAnswers[question.id] || { selected: [] }), text: event.target.value } }))} placeholder="请用自己的语言回答，不要求逐字复述原文……" value={draft.text} />}
-            <EvidenceList evidence={question.source_evidence} />
+            <EvidenceList evidence={question.source_evidence} sourceMode={review.source_mode} />
           </article>
           <footer className="quiz-footer">
             <button className="button button-secondary" disabled={current === 0} onClick={() => setCurrent((index) => index - 1)} type="button"><ArrowLeft size={15} />上一题</button>

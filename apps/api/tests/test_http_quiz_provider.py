@@ -177,6 +177,34 @@ def test_http_provider_generates_validated_questions(monkeypatch):
     assert "chunk-1" in requests[0]["json"]["messages"][1]["content"]
 
 
+def test_http_provider_generates_model_knowledge_questions_without_pdf(monkeypatch):
+    payload = generated_payload(["unused-source", "unused-source", "unused-source"])
+    payload["questions"] = [payload["questions"][0]]
+    payload["questions"][0]["source_chunk_ids"] = []
+    requests = install_chat_responses(monkeypatch, [json.dumps(payload, ensure_ascii=False)])
+    provider = HttpQuizAiProvider(make_configuration())
+
+    questions = provider.generate_questions(
+        chunks=[],
+        file_names={},
+        single_count=1,
+        multiple_count=0,
+        short_count=0,
+        difficulty="medium",
+        generation_number=0,
+        recent_chunk_ids=set(),
+        book_title="解忧杂货店",
+        author="东野圭吾",
+        source_mode="model_knowledge",
+    )
+
+    assert len(questions) == 1
+    assert questions[0].source_chunk_ids == []
+    assert questions[0].source_evidence == []
+    assert "解忧杂货店" in requests[0]["json"]["messages"][1]["content"]
+    assert "model_knowledge" in requests[0]["json"]["messages"][1]["content"]
+
+
 def test_http_provider_reports_usage_for_each_model_call(monkeypatch):
     chunks = make_chunks()
     payload = generated_payload([chunk.id for chunk in chunks])

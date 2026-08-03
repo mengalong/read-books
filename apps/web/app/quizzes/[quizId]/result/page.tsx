@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { ErrorState, EvidenceList } from "@/components/ui";
+import { ErrorState, EvidenceList, SourceModeNotice } from "@/components/ui";
 import { ApiError, getQuizResult } from "@/lib/api";
 import { formatDate, formatDuration, formatScore, scorePercentage } from "@/lib/format";
 import type { QuizResult } from "@/lib/types";
@@ -29,6 +29,7 @@ export default function QuizResultPage() {
   return (
     <div className="page-wrap">
       <Link className="back-link" href={`/books/${result.book_id}`}><ArrowLeft size={14} />返回《{result.book_title}》</Link>
+      <SourceModeNotice sourceMode={result.source_mode} compact />
       <section className="result-header">
         <div className={`result-score ${isLowScore ? "low" : ""}`}>
           <div className="score-number"><strong>{formatScore(result.total_score)}</strong><span>/ {formatScore(result.max_score)}</span></div>
@@ -38,7 +39,7 @@ export default function QuizResultPage() {
       </section>
 
       {result.weak_points.length > 0 && <div className="weak-points"><strong>本次薄弱点：</strong>{result.weak_points.join("、")}</div>}
-      <div className="section-title"><h2>逐题复盘</h2><span>原文依据已全部展开</span></div>
+      <div className="section-title"><h2>逐题复盘</h2><span>{result.source_mode === "model_knowledge" ? "模型知识说明已全部展开" : "原文依据已全部展开"}</span></div>
 
       {result.questions.map((question, index) => {
         const answer = answerMap.get(question.id);
@@ -54,7 +55,7 @@ export default function QuizResultPage() {
             const matched = answer.matched_points.includes(rubric.point);
             return <div className={`rubric-row ${matched ? "hit" : ""}`} key={rubric.point}>{matched ? "已覆盖" : "待补充"}：{rubric.point}</div>;
           })}</div>}
-          <EvidenceList evidence={question.source_evidence} open />
+          <EvidenceList evidence={question.source_evidence} open sourceMode={result.source_mode} />
         </article>;
       })}
 
