@@ -76,7 +76,7 @@ export default function BookshelfPage() {
       {!loading && !error && books.length === 0 && <EmptyState title="书架还是空的" detail="添加一本书并上传 PDF，开始建立属于你的复习资料。" action={<Link className="button button-primary" href="/books/new"><BookPlus size={16} />添加第一本书</Link>} />}
       {!loading && !error && books.length > 0 && <div className="book-grid">{books.map((book) => <BookCard book={book} key={book.id} />)}</div>}
 
-      <div style={{ alignItems: "center", color: "var(--muted)", display: "flex", fontSize: 12, gap: 7, marginTop: 32 }}><Sparkles size={14} color="var(--yellow)" />开发阶段使用模拟出题与评分，题目仍然只从已解析原文中生成。</div>
+      <div style={{ alignItems: "center", color: "var(--muted)", display: "flex", fontSize: 12, gap: 7, marginTop: 32 }}><Sparkles size={14} color="var(--yellow)" />开发阶段使用模拟出题与评分；没有 PDF 时需启用真实模型进行知识兜底。</div>
     </div>
   );
 }
