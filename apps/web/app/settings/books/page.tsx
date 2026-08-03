@@ -15,7 +15,9 @@ export default function AdminBookManagementPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
-  const [ownerId, setOwnerId] = useState("");
+  const [ownerId, setOwnerId] = useState(() => (
+    typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("owner_id") || ""
+  ));
   const [copySource, setCopySource] = useState<BookSummary | null>(null);
   const [targetUserId, setTargetUserId] = useState("");
   const [copyPdf, setCopyPdf] = useState(true);
@@ -24,11 +26,6 @@ export default function AdminBookManagementPage() {
   const [copying, setCopying] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-
-  useEffect(() => {
-    const initialOwnerId = new URLSearchParams(window.location.search).get("owner_id") || "";
-    setOwnerId(initialOwnerId);
-  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
