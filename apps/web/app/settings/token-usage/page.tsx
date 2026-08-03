@@ -42,7 +42,7 @@ function stageUsage(stage: TokenUsageStage) {
 function TaskLinks({ task }: { task: TokenUsageTask }) {
   return (
     <span className="usage-task-links">
-      {task.book_id && <Link href={`/books/${task.book_id}`}>查看书籍</Link>}
+      {task.book_id && <Link href={`/admin/books/${task.book_id}`}>查看书籍</Link>}
       {task.quiz_id && <Link href={`/quizzes/${task.quiz_id}`}>查看题目</Link>}
     </span>
   );

@@ -135,6 +135,14 @@ export type PasswordResetResult = {
   must_change_password: boolean;
 };
 
+export type AdminBookCopyResult = {
+  book: BookDetail;
+  source_book_id: string;
+  target_user_id: string;
+  copied_pdf_count: number;
+  copied_chunk_count: number;
+};
+
 export type PreGenerationResponse = {
   status: "disabled" | "pending" | "processing" | "completed" | "failed";
   message: string;

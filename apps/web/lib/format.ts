@@ -69,6 +69,7 @@ export function statusLabel(status: string) {
     ready: "待完成",
     in_progress: "进行中",
     submitted: "已完成",
+    not_copied: "未复制原文",
   };
   return labels[status] || status;
 }

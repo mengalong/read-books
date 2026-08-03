@@ -22,6 +22,7 @@ import type {
   AdminUser,
   AdminUserCreateResult,
   PasswordResetResult,
+  AdminBookCopyResult,
 } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
@@ -72,6 +73,32 @@ export function getBooks(search = "", status?: ReadingStatus, ownerId?: string) 
   if (ownerId) params.set("owner_id", ownerId);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<BookSummary[]>(`/books${suffix}`);
+}
+
+export function getAdminBooks(search = "", ownerId?: string) {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  if (ownerId) params.set("owner_id", ownerId);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<BookSummary[]>(`/admin/books${suffix}`);
+}
+
+export function getAdminBook(bookId: string) {
+  return apiFetch<BookDetail>(`/admin/books/${bookId}`);
+}
+
+export function getAdminBookChunks(bookId: string, pageSize = 8) {
+  return apiFetch<Chunk[]>(`/admin/books/${bookId}/chunks?page_size=${pageSize}`);
+}
+
+export function copyAdminBook(
+  bookId: string,
+  payload: { target_user_id: string; copy_pdf: boolean; copy_content: boolean },
+) {
+  return apiFetch<AdminBookCopyResult>(`/admin/books/${bookId}/copy`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getBook(bookId: string) {

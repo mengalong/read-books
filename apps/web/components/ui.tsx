@@ -18,11 +18,11 @@ export function StatusBadge({ status }: { status: string }) {
   return <span className={`status-badge status-${status}`}>{statusLabel(status)}</span>;
 }
 
-export function BookCard({ book }: { book: BookSummary }) {
+export function BookCard({ book, href }: { book: BookSummary; href?: string }) {
   const hasPdf = book.stats.pdf_count > 0;
 
   return (
-    <Link className="book-card" href={`/books/${book.id}`}>
+    <Link className="book-card" href={href || `/books/${book.id}`}>
       <div className="book-card-top">
         <BookCover book={book} />
         <div className="book-card-heading">
