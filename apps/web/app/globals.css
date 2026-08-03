@@ -1765,6 +1765,23 @@ p {
   font-weight: 500;
 }
 
+.quiz-library-actions {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+}
+
+.quiz-delete-button {
+  flex: 0 0 36px;
+  min-height: 40px;
+  padding: 0;
+}
+
+.quiz-delete-button:hover:not(:disabled) {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
 .quiz-library-stats {
   min-width: 110px;
   text-align: right;
@@ -2423,6 +2440,14 @@ p {
 
   .quiz-library-stats {
     text-align: left;
+  }
+
+  .quiz-library-actions {
+    width: 100%;
+  }
+
+  .quiz-library-actions .button-secondary {
+    flex: 1;
   }
 
   .generation-progress-meta {

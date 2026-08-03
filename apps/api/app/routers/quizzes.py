@@ -1,7 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
@@ -20,6 +20,7 @@ from app.schemas import (
 )
 from app.services.model_config import get_effective_model_configuration
 from app.services.model_usage import new_usage_context
+from app.services.book_stats import to_quiz_summary
 from app.services.prompt_config import get_effective_prompt_templates
 from app.services.quiz_generation import start_generation_task
 from app.services.quiz_provider import GradeResult, get_quiz_provider
@@ -216,6 +217,27 @@ def get_quiz(quiz_id: str, db: Session = Depends(get_db)) -> QuizResponse:
     return to_quiz_response(get_quiz_or_404(db, quiz_id))
 
 
+@router.delete("/quizzes/{quiz_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_quiz(quiz_id: str, db: Session = Depends(get_db)) -> None:
+    quiz = db.get(Quiz, quiz_id)
+    if not quiz:
+        raise HTTPException(status_code=404, detail="未找到这套复习试卷")
+
+    book = db.get(Book, quiz.book_id)
+    db.execute(
+        update(QuizGenerationTask)
+        .where(QuizGenerationTask.quiz_id == quiz.id)
+        .values(quiz_id=None)
+    )
+    if book and book.pre_generation_quiz_id == quiz.id:
+        book.pre_generation_quiz_id = None
+        book.pre_generation_enabled = False
+        book.pre_generation_status = "disabled"
+        book.pre_generation_error = None
+    db.delete(quiz)
+    db.commit()
+
+
 @router.get("/books/{book_id}/quizzes", response_model=list[QuizSummary])
 def list_book_quizzes(book_id: str, db: Session = Depends(get_db)) -> list[QuizSummary]:
     if not db.get(Book, book_id):
@@ -226,36 +248,7 @@ def list_book_quizzes(book_id: str, db: Session = Depends(get_db)) -> list[QuizS
         .where(Quiz.book_id == book_id)
         .order_by(Quiz.created_at.desc())
     ).all()
-    summaries = []
-    for quiz in quizzes:
-        review_count = db.scalar(
-            select(func.count(ReviewTask.id)).where(
-                ReviewTask.quiz_id == quiz.id, ReviewTask.status == "submitted"
-            )
-        ) or 0
-        latest = db.scalar(
-            select(ReviewTask)
-            .where(ReviewTask.quiz_id == quiz.id, ReviewTask.status == "submitted")
-            .order_by(ReviewTask.submitted_at.desc())
-            .limit(1)
-        )
-        summaries.append(
-            QuizSummary(
-                id=quiz.id,
-                book_id=quiz.book_id,
-                title=quiz.title,
-                difficulty=quiz.difficulty,
-                duration_minutes=quiz.duration_minutes,
-                status=quiz.status,
-                question_count=len(quiz.questions),
-                max_score=quiz.max_score,
-                created_at=quiz.created_at,
-                review_count=review_count,
-                latest_score=latest.total_score if latest else None,
-                last_reviewed_at=latest.submitted_at if latest else None,
-            )
-        )
-    return summaries
+    return [to_quiz_summary(db, quiz) for quiz in quizzes]
 
 
 def grade_objective(question: Question, selected: list[str]) -> GradeResult:

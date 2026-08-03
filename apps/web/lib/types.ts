@@ -158,6 +158,9 @@ export type QuizSummary = {
   duration_minutes: number;
   status: string;
   question_count: number;
+  single_count: number;
+  multiple_count: number;
+  short_count: number;
   max_score: number;
   created_at: string;
   review_count: number;

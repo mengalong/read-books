@@ -6,9 +6,15 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { BookCover, EmptyState, ErrorState, NextReview, StatusBadge, formatPdfMeta } from "@/components/ui";
-import { ApiError, deletePdf, getBook, getChunks, startPreGeneration, uploadPdf } from "@/lib/api";
+import { ApiError, deletePdf, deleteQuiz, getBook, getChunks, startPreGeneration, uploadPdf } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/format";
-import type { BookDetail, Chunk, PdfDocument } from "@/lib/types";
+import type { BookDetail, Chunk, PdfDocument, QuizSummary } from "@/lib/types";
+
+const difficultyLabels: Record<string, string> = {
+  easy: "基础",
+  medium: "适中",
+  hard: "深入",
+};
 
 export default function BookDetailPage() {
   const params = useParams<{ bookId: string }>();
@@ -18,6 +24,7 @@ export default function BookDetailPage() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [startingPreGeneration, setStartingPreGeneration] = useState(false);
+  const [deletingQuizId, setDeletingQuizId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   async function refresh(loadChunks = true) {
@@ -86,6 +93,20 @@ export default function BookDetailPage() {
     }
   }
 
+  async function handleDeleteQuiz(quiz: QuizSummary) {
+    if (!window.confirm(`确定删除“${quiz.title}”吗？该试卷下的复习记录也会一并删除，且无法恢复。`)) return;
+    setDeletingQuizId(quiz.id);
+    setError("");
+    try {
+      await deleteQuiz(quiz.id);
+      await refresh(false);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "试卷删除失败");
+    } finally {
+      setDeletingQuizId(null);
+    }
+  }
+
   if (loading) return <div className="page-wrap"><div className="loading-state">正在打开书籍……</div></div>;
   if (!book || error && !book) return <div className="page-wrap"><ErrorState message={error || "未找到这本书"} /></div>;
 
@@ -138,9 +159,25 @@ export default function BookDetailPage() {
         {book.quizzes.length === 0 ? <EmptyState title="还没有复习试卷" detail="生成完成后，试卷会保存在这里，以后可以反复作答。" action={<Link className="button button-primary" href={`/books/${book.id}/quiz/new`}><Sparkles size={15} />生成第一套试卷</Link>} /> : <div className="quiz-library-list">{book.quizzes.map((quiz) => {
           const latestPercent = quiz.latest_score === null ? null : Math.round(quiz.latest_score / quiz.max_score * 100);
           return <article className="quiz-library-row" key={quiz.id}>
-            <div className="quiz-library-main"><strong>{quiz.title}</strong><span>{quiz.question_count} 道题 · {quiz.duration_minutes} 分钟 · 创建于 {formatDateTime(quiz.created_at)}</span></div>
+            <div className="quiz-library-main">
+              <strong>{quiz.title}</strong>
+              <span>难度：{difficultyLabels[quiz.difficulty] || quiz.difficulty} · {quiz.question_count} 道题 · {quiz.duration_minutes} 分钟 · 创建于 {formatDateTime(quiz.created_at)}</span>
+              <span>题目构成：单选 {quiz.single_count} · 多选 {quiz.multiple_count} · 问答 {quiz.short_count}</span>
+            </div>
             <div className="quiz-library-stats"><span>已复习 {quiz.review_count} 次</span><strong>{latestPercent === null ? "暂无成绩" : `最近 ${latestPercent} 分`}</strong></div>
-            <Link className="button button-secondary" href={`/quizzes/${quiz.id}`}><Play size={15} />选择这套</Link>
+            <div className="quiz-library-actions">
+              <Link className="button button-secondary" href={`/quizzes/${quiz.id}`}><Play size={15} />选择这套</Link>
+              <button
+                aria-label={`删除${quiz.title}`}
+                className="button button-quiet quiz-delete-button"
+                disabled={deletingQuizId === quiz.id}
+                onClick={() => void handleDeleteQuiz(quiz)}
+                title="删除试卷"
+                type="button"
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
           </article>;
         })}</div>}
       </section>

@@ -82,6 +82,9 @@ class QuizSummary(BaseModel):
     duration_minutes: int
     status: str
     question_count: int
+    single_count: int = 0
+    multiple_count: int = 0
+    short_count: int = 0
     max_score: float
     created_at: datetime
     review_count: int = 0

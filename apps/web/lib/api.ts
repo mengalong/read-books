@@ -146,6 +146,10 @@ export function getBookQuizzes(bookId: string) {
   return apiFetch<QuizSummary[]>(`/books/${bookId}/quizzes`);
 }
 
+export function deleteQuiz(quizId: string) {
+  return apiFetch<void>(`/quizzes/${quizId}`, { method: "DELETE" });
+}
+
 export function startReview(quizId: string) {
   return apiFetch<ReviewTask>(`/quizzes/${quizId}/reviews`, { method: "POST" });
 }

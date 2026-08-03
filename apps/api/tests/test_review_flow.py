@@ -138,6 +138,82 @@ def test_health_and_book_crud(client):
     assert updated.json()["reading_status"] == "reviewing"
 
 
+def test_quiz_summary_counts_question_types_and_delete_cascades_reviews(client):
+    book_id, _ = create_source_book(client, "试卷管理测试书")
+    generated = client.post(
+        f"/api/books/{book_id}/quizzes",
+        json={
+            "duration_minutes": 15,
+            "difficulty": "hard",
+            "single_count": 1,
+            "multiple_count": 1,
+            "short_count": 1,
+        },
+    )
+    assert generated.status_code == 202
+    generation_task = wait_for_generation(client, generated.json()["id"])
+    quiz_id = generation_task["quiz_id"]
+
+    expected_summary = {
+        "difficulty": "hard",
+        "question_count": 3,
+        "single_count": 1,
+        "multiple_count": 1,
+        "short_count": 1,
+    }
+    book_detail = client.get(f"/api/books/{book_id}")
+    assert book_detail.status_code == 200
+    assert {
+        key: book_detail.json()["quizzes"][0][key] for key in expected_summary
+    } == expected_summary
+    quiz_list = client.get(f"/api/books/{book_id}/quizzes")
+    assert quiz_list.status_code == 200
+    assert {key: quiz_list.json()[0][key] for key in expected_summary} == expected_summary
+
+    review = client.post(f"/api/quizzes/{quiz_id}/reviews")
+    assert review.status_code == 200
+    review_id = review.json()["id"]
+    with SessionLocal() as db:
+        questions = db.scalars(
+            select(Question).where(Question.quiz_id == quiz_id).order_by(Question.position)
+        ).all()
+        answers = [
+            {
+                "question_id": question.id,
+                "selected_answers": question.correct_answers,
+                "text_answer": question.reference_answer
+                if question.question_type == "short"
+                else None,
+            }
+            for question in questions
+        ]
+        book = db.get(Book, book_id)
+        book.pre_generation_enabled = True
+        book.pre_generation_status = "completed"
+        book.pre_generation_quiz_id = quiz_id
+        db.commit()
+
+    submitted = client.post(
+        f"/api/reviews/{review_id}/submit",
+        json={"elapsed_seconds": 300, "answers": answers},
+    )
+    assert submitted.status_code == 200
+
+    deleted = client.delete(f"/api/quizzes/{quiz_id}")
+    assert deleted.status_code == 204
+    assert client.get(f"/api/quizzes/{quiz_id}").status_code == 404
+    assert client.get(f"/api/reviews/{review_id}").status_code == 404
+    after_delete = client.get(f"/api/books/{book_id}")
+    assert after_delete.status_code == 200
+    assert after_delete.json()["quizzes"] == []
+    assert after_delete.json()["pre_generation_enabled"] is False
+    assert after_delete.json()["pre_generation_status"] == "disabled"
+    assert after_delete.json()["pre_generation_quiz_id"] is None
+    task_after_delete = client.get(f"/api/quiz-generation-tasks/{generation_task['id']}")
+    assert task_after_delete.status_code == 200
+    assert task_after_delete.json()["quiz_id"] is None
+
+
 def test_generate_submit_and_avoid_recent_sources(client):
     book_id, _ = create_source_book(client, "复习流程测试书")
     payload = {

@@ -63,6 +63,41 @@ def to_book_summary(db: Session, book: Book) -> BookSummary:
     )
 
 
+def to_quiz_summary(db: Session, quiz: Quiz) -> QuizSummary:
+    question_counts = {"single": 0, "multiple": 0, "short": 0}
+    for question in quiz.questions:
+        if question.question_type in question_counts:
+            question_counts[question.question_type] += 1
+    review_count = db.scalar(
+        select(func.count(ReviewTask.id)).where(
+            ReviewTask.quiz_id == quiz.id, ReviewTask.status == "submitted"
+        )
+    ) or 0
+    latest_review = db.scalar(
+        select(ReviewTask)
+        .where(ReviewTask.quiz_id == quiz.id, ReviewTask.status == "submitted")
+        .order_by(ReviewTask.submitted_at.desc())
+        .limit(1)
+    )
+    return QuizSummary(
+        id=quiz.id,
+        book_id=quiz.book_id,
+        title=quiz.title,
+        difficulty=quiz.difficulty,
+        duration_minutes=quiz.duration_minutes,
+        status=quiz.status,
+        question_count=len(quiz.questions),
+        single_count=question_counts["single"],
+        multiple_count=question_counts["multiple"],
+        short_count=question_counts["short"],
+        max_score=quiz.max_score,
+        created_at=quiz.created_at,
+        review_count=review_count,
+        latest_score=latest_review.total_score if latest_review else None,
+        last_reviewed_at=latest_review.submitted_at if latest_review else None,
+    )
+
+
 def to_book_detail(db: Session, book: Book) -> BookDetail:
     summary = to_book_summary(db, book)
     pdfs = db.scalars(
@@ -76,35 +111,7 @@ def to_book_detail(db: Session, book: Book) -> BookDetail:
         .where(Quiz.book_id == book.id)
         .order_by(Quiz.created_at.desc())
     ).all()
-    quiz_summaries = []
-    for quiz in quizzes:
-        review_count = db.scalar(
-            select(func.count(ReviewTask.id)).where(
-                ReviewTask.quiz_id == quiz.id, ReviewTask.status == "submitted"
-            )
-        ) or 0
-        latest_review = db.scalar(
-            select(ReviewTask)
-            .where(ReviewTask.quiz_id == quiz.id, ReviewTask.status == "submitted")
-            .order_by(ReviewTask.submitted_at.desc())
-            .limit(1)
-        )
-        quiz_summaries.append(
-            QuizSummary(
-                id=quiz.id,
-                book_id=quiz.book_id,
-                title=quiz.title,
-                difficulty=quiz.difficulty,
-                duration_minutes=quiz.duration_minutes,
-                status=quiz.status,
-                question_count=len(quiz.questions),
-                max_score=quiz.max_score,
-                created_at=quiz.created_at,
-                review_count=review_count,
-                latest_score=latest_review.total_score if latest_review else None,
-                last_reviewed_at=latest_review.submitted_at if latest_review else None,
-            )
-        )
+    quiz_summaries = [to_quiz_summary(db, quiz) for quiz in quizzes]
     return BookDetail(
         **summary.model_dump(),
         pdfs=[PdfResponse.model_validate(pdf) for pdf in pdfs],
