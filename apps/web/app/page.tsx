@@ -3,6 +3,7 @@
 import { BookPlus, Search, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
 
 import { BookCard, EmptyState, ErrorState } from "@/components/ui";
 import { ApiError, getBooks } from "@/lib/api";
@@ -17,7 +18,8 @@ const filters: { label: string; value?: ReadingStatus }[] = [
 
 export default function BookshelfPage() {
   const [books, setBooks] = useState<BookSummary[]>([]);
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [appliedSearch, setAppliedSearch] = useState("");
   const [activeStatus, setActiveStatus] = useState<ReadingStatus | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -25,14 +27,19 @@ export default function BookshelfPage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    getBooks(search, activeStatus)
+    getBooks(appliedSearch, activeStatus)
       .then((items) => { if (!cancelled) { setBooks(items); setError(""); } })
       .catch((reason: unknown) => {
         if (!cancelled) setError(reason instanceof ApiError ? reason.message : "书架加载失败");
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [search, activeStatus]);
+  }, [appliedSearch, activeStatus]);
+
+  function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAppliedSearch(searchInput.trim());
+  }
 
   const metrics = useMemo(() => {
     const sourceBooks = books.filter((book) => book.stats.completed_pdf_count > 0).length;
@@ -62,10 +69,10 @@ export default function BookshelfPage() {
 
       <div className="books-toolbar">
         <div className="section-title" style={{ marginBottom: 0 }}><h2>全部书籍</h2><span>{books.length} 本</span></div>
-        <label className="search-box">
+        <form className="search-box" onSubmit={handleSearchSubmit}>
           <Search size={15} />
-          <input aria-label="搜索书名或作者" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索书名或作者" />
-        </label>
+          <input aria-label="搜索书名或作者" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="搜索书名或作者，按回车搜索" />
+        </form>
       </div>
       <div className="tag-row" style={{ marginBottom: 19, marginTop: 0 }}>
         {filters.map((filter) => <button className={`tag ${activeStatus === filter.value ? "active-filter" : ""}`} key={filter.label} onClick={() => setActiveStatus(filter.value)} type="button">{filter.label}</button>)}
