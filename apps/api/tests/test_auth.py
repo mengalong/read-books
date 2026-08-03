@@ -86,3 +86,53 @@ def test_failed_login_does_not_create_session(client):
     )
     assert response.status_code == 401
     assert client.get("/api/auth/me").status_code == 401
+
+
+def test_workspace_data_is_private_for_users_and_visible_to_admin(client):
+    admin_login = client.post(
+        "/api/auth/login",
+        json={"username": "test-admin", "password": "TestAdmin1!"},
+    )
+    assert admin_login.status_code == 200
+    admin_book = client.post("/api/books", json={"title": "管理员工作空间的书"})
+    assert admin_book.status_code == 201
+    admin_book_id = admin_book.json()["id"]
+    created = client.post(
+        "/api/admin/users",
+        json={
+            "username": "isolated-reader",
+            "display_name": "隔离测试读者",
+            "temporary_password": "ReaderTemp1!",
+        },
+    )
+    assert created.status_code == 201
+
+    client.post("/api/auth/logout")
+    user_login = client.post(
+        "/api/auth/login",
+        json={"username": "isolated-reader", "password": "ReaderTemp1!"},
+    )
+    assert user_login.status_code == 200
+    assert client.post(
+        "/api/auth/change-password",
+        json={"current_password": "ReaderTemp1!", "new_password": "ReaderNew2!"},
+    ).status_code == 200
+    book = client.post("/api/books", json={"title": "隔离工作空间的书"})
+    assert book.status_code == 201
+    book_id = book.json()["id"]
+    assert client.get(f"/api/books/{admin_book_id}").status_code == 404
+
+    client.post("/api/auth/logout")
+    assert client.post(
+        "/api/auth/login",
+        json={"username": "test-admin", "password": "TestAdmin1!"},
+    ).status_code == 200
+    assert client.get(f"/api/books/{book_id}").status_code == 200
+    assert any(item["id"] == book_id for item in client.get("/api/books").json())
+
+    client.post("/api/auth/logout")
+    assert client.post(
+        "/api/auth/login",
+        json={"username": "isolated-reader", "password": "ReaderNew2!"},
+    ).status_code == 200
+    assert client.get(f"/api/books/{book_id}").status_code == 200

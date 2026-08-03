@@ -75,12 +75,18 @@ def validate_generation_request(
 
 
 def create_generation_task(
-    db: Session, book_id: str, payload: QuizGenerateRequest, task_type: str
+    db: Session,
+    book_id: str,
+    payload: QuizGenerateRequest,
+    task_type: str,
+    *,
+    created_by_user_id: str | None = None,
 ) -> QuizGenerationTask:
     validate_generation_request(db, book_id, payload, task_type)
     source_mode = resolve_source_mode(db, book_id)
     task = QuizGenerationTask(
         book_id=book_id,
+        created_by_user_id=created_by_user_id,
         task_type=task_type,
         status="pending",
         source_mode=source_mode,
@@ -101,9 +107,20 @@ def create_generation_task(
 
 
 def start_generation_task(
-    db: Session, book_id: str, payload: QuizGenerateRequest, task_type: str
+    db: Session,
+    book_id: str,
+    payload: QuizGenerateRequest,
+    task_type: str,
+    *,
+    created_by_user_id: str | None = None,
 ) -> QuizGenerationTask:
-    task = create_generation_task(db, book_id, payload, task_type)
+    task = create_generation_task(
+        db,
+        book_id,
+        payload,
+        task_type,
+        created_by_user_id=created_by_user_id,
+    )
     threading.Thread(target=run_generation_task, args=(task.id,), daemon=True).start()
     return task
 

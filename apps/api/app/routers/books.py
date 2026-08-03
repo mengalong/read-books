@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
+from app.dependencies import require_ready_identity
 from app.models import Book, ContentChunk, PdfDocument, Quiz
+from app.services.auth import AuthIdentity
 from app.schemas import (
     BookCreate,
     BookDetail,
@@ -25,8 +27,11 @@ router = APIRouter(prefix="/books", tags=["books"])
 settings = get_settings()
 
 
-def get_book_or_404(db: Session, book_id: str) -> Book:
-    book = db.get(Book, book_id)
+def get_book_or_404(db: Session, book_id: str, identity: AuthIdentity) -> Book:
+    statement = select(Book).where(Book.id == book_id)
+    if identity.user.role != "admin":
+        statement = statement.where(Book.workspace_id == identity.workspace.id)
+    book = db.scalar(statement)
     if not book:
         raise HTTPException(status_code=404, detail="未找到这本书")
     return book
@@ -37,8 +42,11 @@ def list_books(
     search: str | None = None,
     reading_status: str | None = Query(default=None, alias="status"),
     db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
 ) -> list[BookSummary]:
     statement = select(Book).order_by(Book.updated_at.desc())
+    if identity.user.role != "admin":
+        statement = statement.where(Book.workspace_id == identity.workspace.id)
     if search:
         keyword = f"%{search.strip()}%"
         statement = statement.where(or_(Book.title.ilike(keyword), Book.author.ilike(keyword)))
@@ -48,8 +56,16 @@ def list_books(
 
 
 @router.post("", response_model=BookDetail, status_code=status.HTTP_201_CREATED)
-def create_book(payload: BookCreate, db: Session = Depends(get_db)) -> BookDetail:
-    book = Book(**payload.model_dump())
+def create_book(
+    payload: BookCreate,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> BookDetail:
+    book = Book(
+        **payload.model_dump(),
+        workspace_id=identity.workspace.id,
+        created_by_user_id=identity.user.id,
+    )
     db.add(book)
     db.commit()
     db.refresh(book)
@@ -57,15 +73,22 @@ def create_book(payload: BookCreate, db: Session = Depends(get_db)) -> BookDetai
 
 
 @router.get("/{book_id}", response_model=BookDetail)
-def get_book(book_id: str, db: Session = Depends(get_db)) -> BookDetail:
-    return to_book_detail(db, get_book_or_404(db, book_id))
+def get_book(
+    book_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> BookDetail:
+    return to_book_detail(db, get_book_or_404(db, book_id, identity))
 
 
 @router.patch("/{book_id}", response_model=BookDetail)
 def update_book(
-    book_id: str, payload: BookUpdate, db: Session = Depends(get_db)
+    book_id: str,
+    payload: BookUpdate,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
 ) -> BookDetail:
-    book = get_book_or_404(db, book_id)
+    book = get_book_or_404(db, book_id, identity)
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(book, key, value)
     db.commit()
@@ -74,8 +97,12 @@ def update_book(
 
 
 @router.delete("/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_book(book_id: str, db: Session = Depends(get_db)) -> None:
-    book = get_book_or_404(db, book_id)
+def delete_book(
+    book_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> None:
+    book = get_book_or_404(db, book_id, identity)
     file_paths = [pdf.file_path for pdf in book.pdfs if not pdf.file_path.startswith("demo://")]
     db.delete(book)
     db.commit()
@@ -90,8 +117,9 @@ async def upload_pdf(
     book_id: str,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
 ) -> PdfResponse:
-    get_book_or_404(db, book_id)
+    get_book_or_404(db, book_id, identity)
     original_name = Path(file.filename or "book.pdf").name
     if not original_name.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="请选择 PDF 文件")
@@ -140,17 +168,24 @@ async def upload_pdf(
     status_code=status.HTTP_202_ACCEPTED,
 )
 def start_book_pre_generation(
-    book_id: str, db: Session = Depends(get_db)
+    book_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
 ) -> PreGenerationResponse:
+    get_book_or_404(db, book_id, identity)
     try:
-        return start_pre_generation(db, book_id)
+        return start_pre_generation(db, book_id, created_by_user_id=identity.user.id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/{book_id}/pdfs", response_model=list[PdfResponse])
-def list_pdfs(book_id: str, db: Session = Depends(get_db)) -> list[PdfDocument]:
-    get_book_or_404(db, book_id)
+def list_pdfs(
+    book_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> list[PdfDocument]:
+    get_book_or_404(db, book_id, identity)
     return list(
         db.scalars(
             select(PdfDocument)
@@ -161,7 +196,13 @@ def list_pdfs(book_id: str, db: Session = Depends(get_db)) -> list[PdfDocument]:
 
 
 @router.get("/{book_id}/pdfs/{pdf_id}", response_model=PdfResponse)
-def get_pdf(book_id: str, pdf_id: str, db: Session = Depends(get_db)) -> PdfDocument:
+def get_pdf(
+    book_id: str,
+    pdf_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> PdfDocument:
+    get_book_or_404(db, book_id, identity)
     pdf = db.get(PdfDocument, pdf_id)
     if not pdf or pdf.book_id != book_id:
         raise HTTPException(status_code=404, detail="未找到这个 PDF")
@@ -169,7 +210,13 @@ def get_pdf(book_id: str, pdf_id: str, db: Session = Depends(get_db)) -> PdfDocu
 
 
 @router.delete("/{book_id}/pdfs/{pdf_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_pdf(book_id: str, pdf_id: str, db: Session = Depends(get_db)) -> None:
+def delete_pdf(
+    book_id: str,
+    pdf_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> None:
+    get_book_or_404(db, book_id, identity)
     pdf = db.get(PdfDocument, pdf_id)
     if not pdf or pdf.book_id != book_id:
         raise HTTPException(status_code=404, detail="未找到这个 PDF")
@@ -192,8 +239,9 @@ def list_chunks(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
 ) -> list[ChunkResponse]:
-    get_book_or_404(db, book_id)
+    get_book_or_404(db, book_id, identity)
     rows = db.execute(
         select(ContentChunk, PdfDocument.file_name)
         .join(PdfDocument, PdfDocument.id == ContentChunk.pdf_id)

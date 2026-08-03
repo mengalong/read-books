@@ -87,7 +87,9 @@ def begin_pre_generation(db: Session, book_id: str) -> PreGenerationStart:
     return PreGenerationStart(pre_generation_response(book), True)
 
 
-def start_pre_generation(db: Session, book_id: str) -> PreGenerationResponse:
+def start_pre_generation(
+    db: Session, book_id: str, *, created_by_user_id: str | None = None
+) -> PreGenerationResponse:
     result = begin_pre_generation(db, book_id)
     if result.should_start:
         task = start_generation_task(
@@ -101,6 +103,7 @@ def start_pre_generation(db: Session, book_id: str) -> PreGenerationResponse:
                 short_count=2,
             ),
             "pre_generation",
+            created_by_user_id=created_by_user_id,
         )
         result.response.task_id = task.id
     return result.response

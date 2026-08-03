@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
 from app.database import get_db
+from app.dependencies import require_ready_identity
+from app.services.auth import AuthIdentity
 from app.models import Book, Question, Quiz, QuizGenerationTask, ReviewAnswer, ReviewTask
 from app.schemas import (
     AnswerResult,
@@ -36,26 +38,34 @@ def current_provider(db: Session, usage_context=None):
     return get_quiz_provider(settings, configuration, prompts, usage_context)
 
 
-def get_quiz_or_404(db: Session, quiz_id: str) -> Quiz:
+def get_quiz_or_404(db: Session, quiz_id: str, identity: AuthIdentity) -> Quiz:
+    conditions = [Quiz.id == quiz_id]
+    if identity.user.role != "admin":
+        conditions.append(Book.workspace_id == identity.workspace.id)
     quiz = db.scalar(
         select(Quiz)
         .options(selectinload(Quiz.questions))
-        .where(Quiz.id == quiz_id)
+        .join(Quiz.book)
+        .where(*conditions)
     )
     if not quiz:
         raise HTTPException(status_code=404, detail="未找到这套复习试卷")
     return quiz
 
 
-def get_review_or_404(db: Session, review_id: str) -> ReviewTask:
+def get_review_or_404(db: Session, review_id: str, identity: AuthIdentity) -> ReviewTask:
+    conditions = [ReviewTask.id == review_id]
+    if identity.user.role != "admin":
+        conditions.append(Book.workspace_id == identity.workspace.id)
     review = db.scalar(
         select(ReviewTask)
+        .join(ReviewTask.book)
         .options(
             selectinload(ReviewTask.book),
             selectinload(ReviewTask.quiz).selectinload(Quiz.questions),
             selectinload(ReviewTask.answers).selectinload(ReviewAnswer.question),
         )
-        .where(ReviewTask.id == review_id)
+        .where(*conditions)
     )
     if not review:
         raise HTTPException(status_code=404, detail="未找到这次复习任务")
@@ -231,10 +241,27 @@ def to_review_summary(review: ReviewTask) -> ReviewTaskSummary:
     status_code=status.HTTP_202_ACCEPTED,
 )
 def generate_quiz(
-    book_id: str, payload: QuizGenerateRequest, db: Session = Depends(get_db)
+    book_id: str,
+    payload: QuizGenerateRequest,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
 ) -> QuizGenerationTaskResponse:
     try:
-        task = start_generation_task(db, book_id, payload, "manual_quiz_generation")
+        if identity.user.role != "admin":
+            book = db.scalar(
+                select(Book).where(Book.id == book_id, Book.workspace_id == identity.workspace.id)
+            )
+        else:
+            book = db.get(Book, book_id)
+        if book is None:
+            raise ValueError("未找到这本书")
+        task = start_generation_task(
+            db,
+            book_id,
+            payload,
+            "manual_quiz_generation",
+            created_by_user_id=identity.user.id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return to_generation_response(task)
@@ -243,21 +270,38 @@ def generate_quiz(
 @router.get(
     "/quiz-generation-tasks/{task_id}", response_model=QuizGenerationTaskResponse
 )
-def get_generation_task(task_id: str, db: Session = Depends(get_db)) -> QuizGenerationTaskResponse:
-    task = db.get(QuizGenerationTask, task_id)
+def get_generation_task(
+    task_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> QuizGenerationTaskResponse:
+    statement = select(QuizGenerationTask).where(QuizGenerationTask.id == task_id)
+    if identity.user.role != "admin":
+        statement = statement.join(QuizGenerationTask.book).where(
+            Book.workspace_id == identity.workspace.id
+        )
+    task = db.scalar(statement)
     if not task:
         raise HTTPException(status_code=404, detail="未找到这次出题任务")
     return to_generation_response(task)
 
 
 @router.get("/quizzes/{quiz_id}", response_model=QuizResponse)
-def get_quiz(quiz_id: str, db: Session = Depends(get_db)) -> QuizResponse:
-    return to_quiz_response(get_quiz_or_404(db, quiz_id))
+def get_quiz(
+    quiz_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> QuizResponse:
+    return to_quiz_response(get_quiz_or_404(db, quiz_id, identity))
 
 
 @router.delete("/quizzes/{quiz_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_quiz(quiz_id: str, db: Session = Depends(get_db)) -> None:
-    quiz = db.get(Quiz, quiz_id)
+def delete_quiz(
+    quiz_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> None:
+    quiz = get_quiz_or_404(db, quiz_id, identity)
     if not quiz:
         raise HTTPException(status_code=404, detail="未找到这套复习试卷")
 
@@ -277,14 +321,19 @@ def delete_quiz(quiz_id: str, db: Session = Depends(get_db)) -> None:
 
 
 @router.get("/books/{book_id}/quizzes", response_model=list[QuizSummary])
-def list_book_quizzes(book_id: str, db: Session = Depends(get_db)) -> list[QuizSummary]:
-    if not db.get(Book, book_id):
+def list_book_quizzes(
+    book_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> list[QuizSummary]:
+    book_statement = select(Book).where(Book.id == book_id)
+    if identity.user.role != "admin":
+        book_statement = book_statement.where(Book.workspace_id == identity.workspace.id)
+    if not db.scalar(book_statement):
         raise HTTPException(status_code=404, detail="未找到这本书")
+    statement = select(Quiz).options(selectinload(Quiz.questions)).where(Quiz.book_id == book_id)
     quizzes = db.scalars(
-        select(Quiz)
-        .options(selectinload(Quiz.questions))
-        .where(Quiz.book_id == book_id)
-        .order_by(Quiz.created_at.desc())
+        statement.order_by(Quiz.created_at.desc())
     ).all()
     return [to_quiz_summary(db, quiz) for quiz in quizzes]
 
@@ -329,8 +378,12 @@ def calculate_next_review(score_percent: float) -> date:
 
 
 @router.post("/quizzes/{quiz_id}/reviews", response_model=ReviewTaskResponse)
-def start_review(quiz_id: str, db: Session = Depends(get_db)) -> ReviewTaskResponse:
-    quiz = get_quiz_or_404(db, quiz_id)
+def start_review(
+    quiz_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> ReviewTaskResponse:
+    quiz = get_quiz_or_404(db, quiz_id, identity)
     attempt_number = (
         db.scalar(select(func.max(ReviewTask.attempt_number)).where(ReviewTask.quiz_id == quiz_id)) or 0
     ) + 1
@@ -343,7 +396,7 @@ def start_review(quiz_id: str, db: Session = Depends(get_db)) -> ReviewTaskRespo
     )
     db.add(review)
     db.commit()
-    review = get_review_or_404(db, review.id)
+    review = get_review_or_404(db, review.id, identity)
     return to_review_response(review)
 
 
@@ -355,15 +408,19 @@ def list_reviews(
         default=None, alias="status"
     ),
     db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
 ) -> list[ReviewTaskSummary]:
     statement = (
         select(ReviewTask)
+        .join(ReviewTask.book)
         .options(
             selectinload(ReviewTask.book),
             selectinload(ReviewTask.quiz).selectinload(Quiz.questions),
         )
         .order_by(ReviewTask.created_at.desc())
     )
+    if identity.user.role != "admin":
+        statement = statement.where(Book.workspace_id == identity.workspace.id)
     if book_id:
         statement = statement.where(ReviewTask.book_id == book_id)
     if search and search.strip():
@@ -377,13 +434,21 @@ def list_reviews(
 
 
 @router.get("/reviews/{review_id}", response_model=ReviewTaskResponse)
-def get_review(review_id: str, db: Session = Depends(get_db)) -> ReviewTaskResponse:
-    return to_review_response(get_review_or_404(db, review_id))
+def get_review(
+    review_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> ReviewTaskResponse:
+    return to_review_response(get_review_or_404(db, review_id, identity))
 
 
 @router.post("/reviews/{review_id}/reopen", response_model=ReviewTaskResponse)
-def reopen_review(review_id: str, db: Session = Depends(get_db)) -> ReviewTaskResponse:
-    review = get_review_or_404(db, review_id)
+def reopen_review(
+    review_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> ReviewTaskResponse:
+    review = get_review_or_404(db, review_id, identity)
     for answer in list(review.answers):
         db.delete(answer)
     review.status = "in_progress"
@@ -392,23 +457,28 @@ def reopen_review(review_id: str, db: Session = Depends(get_db)) -> ReviewTaskRe
     review.submitted_at = None
     review.next_review_date = None
     db.commit()
-    return to_review_response(get_review_or_404(db, review_id))
+    return to_review_response(get_review_or_404(db, review_id, identity))
 
 
 @router.delete("/reviews/{review_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_review(review_id: str, db: Session = Depends(get_db)) -> None:
-    review = db.get(ReviewTask, review_id)
-    if not review:
-        raise HTTPException(status_code=404, detail="未找到这次复习任务")
+def delete_review(
+    review_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> None:
+    review = get_review_or_404(db, review_id, identity)
     db.delete(review)
     db.commit()
 
 
 @router.post("/reviews/{review_id}/submit", response_model=ReviewTaskResponse)
 def submit_review(
-    review_id: str, payload: QuizSubmitRequest, db: Session = Depends(get_db)
+    review_id: str,
+    payload: QuizSubmitRequest,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
 ) -> ReviewTaskResponse:
-    review = get_review_or_404(db, review_id)
+    review = get_review_or_404(db, review_id, identity)
     if review.status == "submitted":
         raise HTTPException(status_code=409, detail="这次复习已经提交，请先选择重新答题")
     submitted = {answer.question_id: answer for answer in payload.answers}
@@ -459,23 +529,35 @@ def submit_review(
     score_percent = review.total_score / review.max_score * 100 if review.max_score else 0
     review.next_review_date = calculate_next_review(score_percent)
     db.commit()
-    return to_review_response(get_review_or_404(db, review.id))
+    return to_review_response(get_review_or_404(db, review.id, identity))
 
 
 @router.get("/reviews/{review_id}/result", response_model=ReviewTaskResponse)
-def get_review_result(review_id: str, db: Session = Depends(get_db)) -> ReviewTaskResponse:
-    review = get_review_or_404(db, review_id)
+def get_review_result(
+    review_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> ReviewTaskResponse:
+    review = get_review_or_404(db, review_id, identity)
     if review.status != "submitted":
         raise HTTPException(status_code=409, detail="提交复习后才能查看结果")
     return to_review_response(review)
 
 
 @router.get("/books/{book_id}/history", response_model=list[ReviewTaskSummary])
-def get_book_history(book_id: str, db: Session = Depends(get_db)) -> list[ReviewTaskSummary]:
-    if not db.get(Book, book_id):
+def get_book_history(
+    book_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> list[ReviewTaskSummary]:
+    book_statement = select(Book).where(Book.id == book_id)
+    if identity.user.role != "admin":
+        book_statement = book_statement.where(Book.workspace_id == identity.workspace.id)
+    if not db.scalar(book_statement):
         raise HTTPException(status_code=404, detail="未找到这本书")
     reviews = db.scalars(
         select(ReviewTask)
+        .join(ReviewTask.book)
         .options(
             selectinload(ReviewTask.book),
             selectinload(ReviewTask.quiz).selectinload(Quiz.questions),
@@ -488,28 +570,49 @@ def get_book_history(book_id: str, db: Session = Depends(get_db)) -> list[Review
 
 @router.post("/quizzes/{quiz_id}/submit", response_model=ReviewTaskResponse)
 def legacy_submit_quiz(
-    quiz_id: str, payload: QuizSubmitRequest, db: Session = Depends(get_db)
+    quiz_id: str,
+    payload: QuizSubmitRequest,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
 ) -> ReviewTaskResponse:
+    get_quiz_or_404(db, quiz_id, identity)
+    statement = select(ReviewTask).where(
+        ReviewTask.quiz_id == quiz_id, ReviewTask.status == "in_progress"
+    )
+    if identity.user.role != "admin":
+        statement = statement.join(ReviewTask.book).where(
+            Book.workspace_id == identity.workspace.id
+        )
     review = db.scalar(
-        select(ReviewTask)
-        .where(ReviewTask.quiz_id == quiz_id, ReviewTask.status == "in_progress")
+        statement
         .order_by(ReviewTask.created_at.desc())
     )
     if not review:
-        review_response = start_review(quiz_id, db)
+        review_response = start_review(quiz_id, db, identity)
         review_id = review_response.id
     else:
         review_id = review.id
-    return submit_review(review_id, payload, db)
+    return submit_review(review_id, payload, db, identity)
 
 
 @router.get("/quizzes/{quiz_id}/result", response_model=ReviewTaskResponse)
-def legacy_quiz_result(quiz_id: str, db: Session = Depends(get_db)) -> ReviewTaskResponse:
+def legacy_quiz_result(
+    quiz_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> ReviewTaskResponse:
+    get_quiz_or_404(db, quiz_id, identity)
+    statement = select(ReviewTask).where(
+        ReviewTask.quiz_id == quiz_id, ReviewTask.status == "submitted"
+    )
+    if identity.user.role != "admin":
+        statement = statement.join(ReviewTask.book).where(
+            Book.workspace_id == identity.workspace.id
+        )
     review = db.scalar(
-        select(ReviewTask)
-        .where(ReviewTask.quiz_id == quiz_id, ReviewTask.status == "submitted")
+        statement
         .order_by(ReviewTask.submitted_at.desc())
     )
     if not review:
         raise HTTPException(status_code=409, detail="提交复习后才能查看结果")
-    return get_review_result(review.id, db)
+    return get_review_result(review.id, db, identity)
