@@ -183,6 +183,7 @@ export type SourceEvidence = {
   file_name: string;
   page_number: number;
   excerpt: string;
+  highlight?: string | null;
   support: string;
 };
 

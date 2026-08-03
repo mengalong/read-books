@@ -6,7 +6,7 @@ from app.models import ContentChunk, Question
 from app.services.model_config import EffectiveModelConfiguration
 from app.services.model_usage import new_usage_context
 from app.services.prompt_config import DEFAULT_PROMPTS, PromptTemplateDefinition
-from app.services.quiz_provider import HttpQuizAiProvider
+from app.services.quiz_provider import HttpQuizAiProvider, key_sentence
 
 
 def make_configuration() -> EffectiveModelConfiguration:
@@ -128,6 +128,14 @@ def generated_payload(source_ids: list[str]) -> dict:
     }
 
 
+def test_key_sentence_prefers_long_matching_phrase():
+    excerpt = "开头只是交代场景，和题目关系不大。真正相关的是他决定继续坚持音乐创作，并相信歌声能够帮助别人。后面还有补充说明。"
+
+    assert key_sentence(excerpt, "题目要求说明人物为什么继续坚持音乐创作，以及音乐如何帮助别人") == (
+        "真正相关的是他决定继续坚持音乐创作，并相信歌声能够帮助别人。"
+    )
+
+
 def test_http_provider_generates_validated_questions(monkeypatch):
     chunks = make_chunks()
     payload = generated_payload([chunk.id for chunk in chunks])
@@ -158,6 +166,7 @@ def test_http_provider_generates_validated_questions(monkeypatch):
             "file_name": "复习材料.pdf",
             "page_number": 10,
             "excerpt": chunks[0].content,
+            "highlight": chunks[0].content,
             "support": "题目与答案依据由后端从该 PDF 原文片段重建。",
         }
     ]

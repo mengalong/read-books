@@ -2040,6 +2040,14 @@ p {
   margin-top: 8px;
 }
 
+.evidence-highlight {
+  background: var(--red-soft);
+  border-radius: 2px;
+  color: var(--red);
+  font-weight: 700;
+  padding: 1px 2px;
+}
+
 .evidence-support {
   color: var(--muted);
   font-size: 11px;
@@ -2069,14 +2077,24 @@ p {
 }
 
 .score-number {
-  align-items: baseline;
+  align-items: center;
   border: 7px solid var(--green);
   border-radius: 50%;
   display: flex;
   flex: 0 0 126px;
   height: 126px;
   justify-content: center;
-  padding-top: 4px;
+  padding-top: 0;
+}
+
+.result-score.low .score-number {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.result-score.low .score-number span,
+.result-score.low .score-copy h1 {
+  color: var(--red);
 }
 
 .score-number strong {

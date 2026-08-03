@@ -25,11 +25,12 @@ export default function QuizResultPage() {
   if (!result) return <div className="page-wrap"><ErrorState message={error} /></div>;
 
   const percent = Math.round((result.total_score || 0) / result.max_score * 100);
+  const isLowScore = result.max_score > 0 && (result.total_score || 0) / result.max_score < 0.6;
   return (
     <div className="page-wrap">
       <Link className="back-link" href={`/books/${result.book_id}`}><ArrowLeft size={14} />返回《{result.book_title}》</Link>
       <section className="result-header">
-        <div className="result-score">
+        <div className={`result-score ${isLowScore ? "low" : ""}`}>
           <div className="score-number"><strong>{percent}</strong><span>分</span></div>
           <div className="score-copy"><div className="eyebrow">Review complete</div><h1>{percent >= 80 ? "掌握得不错，继续保持" : percent >= 60 ? "已经记住一部分" : "找到需要重读的地方了"}</h1><p>{result.title} · 用时 {formatDuration(result.elapsed_seconds)}<br />得分 {result.total_score} / {result.max_score}</p></div>
         </div>

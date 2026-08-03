@@ -23,7 +23,7 @@ from app.services.model_usage import new_usage_context
 from app.services.book_stats import to_quiz_summary
 from app.services.prompt_config import get_effective_prompt_templates
 from app.services.quiz_generation import start_generation_task
-from app.services.quiz_provider import GradeResult, get_quiz_provider
+from app.services.quiz_provider import GradeResult, get_quiz_provider, key_sentence
 
 router = APIRouter(tags=["quizzes"])
 settings = get_settings()
@@ -61,7 +61,41 @@ def get_review_or_404(db: Session, review_id: str) -> ReviewTask:
     return review
 
 
+def question_focus_text(question: Question) -> str:
+    options = question.options if isinstance(question.options, list) else []
+    correct_answers = (
+        set(question.correct_answers) if isinstance(question.correct_answers, list) else set()
+    )
+    option_text = " ".join(
+        option.get("text", "")
+        for option in options
+        if (
+            isinstance(option, dict)
+            and isinstance(option.get("text"), str)
+            and option.get("id") in correct_answers
+        )
+    )
+    return " ".join(
+        value
+        for value in (
+            question.prompt,
+            question.explanation,
+            question.knowledge_point,
+            question.reference_answer or "",
+            option_text,
+        )
+        if value
+    )
+
+
 def to_question_response(question: Question, reveal_answers: bool) -> QuestionResponse:
+    focus_text = question_focus_text(question)
+    source_evidence = []
+    for item in question.source_evidence:
+        evidence = dict(item)
+        if not evidence.get("highlight") and isinstance(evidence.get("excerpt"), str):
+            evidence["highlight"] = key_sentence(evidence["excerpt"], focus_text)
+        source_evidence.append(evidence)
     return QuestionResponse(
         id=question.id,
         position=question.position,
@@ -74,7 +108,7 @@ def to_question_response(question: Question, reveal_answers: bool) -> QuestionRe
         estimated_seconds=question.estimated_seconds,
         reference_answer=question.reference_answer if reveal_answers else None,
         grading_rubric=question.grading_rubric if reveal_answers else [],
-        source_evidence=question.source_evidence,
+        source_evidence=source_evidence,
         max_score=question.max_score,
         correct_answers=question.correct_answers if reveal_answers else None,
     )

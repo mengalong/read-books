@@ -46,6 +46,14 @@ export function BookCard({ book }: { book: BookSummary }) {
 }
 
 export function EvidenceList({ evidence, open = false }: { evidence: SourceEvidence[]; open?: boolean }) {
+  function renderExcerpt(item: SourceEvidence) {
+    const fallback = item.excerpt.match(/[^。！？；\n]+(?:[。！？；]|$)/)?.[0]?.trim();
+    const highlight = (item.highlight || fallback || "").trim();
+    const start = highlight ? item.excerpt.indexOf(highlight) : -1;
+    if (start < 0) return <>“{item.excerpt}”</>;
+    return <>“{item.excerpt.slice(0, start)}<mark className="evidence-highlight">{highlight}</mark>{item.excerpt.slice(start + highlight.length)}”</>;
+  }
+
   return (
     <details className="evidence" open={open}>
       <summary>原文依据（{evidence.length} 处，答题时默认折叠）</summary>
@@ -53,7 +61,7 @@ export function EvidenceList({ evidence, open = false }: { evidence: SourceEvide
         {evidence.map((item) => (
           <div key={item.chunk_id} style={{ marginBottom: 14 }}>
             <div className="evidence-meta"><FileText size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />{item.file_name} · 第 {item.page_number} 页</div>
-            <p className="evidence-excerpt">“{item.excerpt}”</p>
+            <p className="evidence-excerpt">{renderExcerpt(item)}</p>
             <p className="evidence-support">依据说明：{item.support}</p>
           </div>
         ))}

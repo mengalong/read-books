@@ -112,6 +112,7 @@ class SourceEvidence(BaseModel):
     file_name: str
     page_number: int
     excerpt: str
+    highlight: str | None = None
     support: str
 
 

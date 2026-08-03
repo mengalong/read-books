@@ -86,6 +86,42 @@ def knowledge_point(text: str) -> str:
     return first[:18] or "原文核心观点"
 
 
+def key_sentence(excerpt: str, focus_text: str = "") -> str | None:
+    sentences = [
+        sentence.strip()
+        for sentence in re.findall(r"[^。！？；\n]+(?:[。！？；]|$)", excerpt)
+        if sentence.strip()
+    ]
+    if not sentences:
+        return None
+    if not focus_text.strip():
+        return sentences[0]
+
+    focus_terms = {
+        size: {
+            run[index : index + size]
+            for run in re.findall(r"[\u4e00-\u9fff]+", focus_text)
+            if len(run) >= size
+            for index in range(len(run) - size + 1)
+        }
+        for size in (2, 3, 4)
+    }
+    if not any(focus_terms.values()):
+        return sentences[0]
+    scored = [
+        (
+            sum(
+                weight * sum(term in sentence for term in focus_terms[size])
+                for size, weight in ((4, 5), (3, 3), (2, 1))
+            ),
+            -index,
+            sentence,
+        )
+        for index, sentence in enumerate(sentences)
+    ]
+    return max(scored)[2]
+
+
 def rubric_from_text(text: str, max_score: float) -> list[dict[str, Any]]:
     claims = split_claims(text)[:3]
     point_score = round(max_score / max(len(claims), 1), 2)
@@ -150,14 +186,16 @@ class MockQuizAiProvider:
         return questions
 
     def _evidence(
-        self, chunk: ContentChunk, file_names: dict[str, str]
+        self, chunk: ContentChunk, file_names: dict[str, str], focus_text: str = ""
     ) -> list[dict[str, Any]]:
+        excerpt = compact_text(chunk.content, 500)
         return [
             {
                 "chunk_id": chunk.id,
                 "file_name": file_names[chunk.pdf_id],
                 "page_number": chunk.page_number,
-                "excerpt": compact_text(chunk.content, 500),
+                "excerpt": excerpt,
+                "highlight": key_sentence(excerpt, focus_text),
                 "support": "题目与答案均由该段原文直接提炼，未使用原文之外的信息。",
             }
         ]
@@ -192,9 +230,10 @@ class MockQuizAiProvider:
             for option_id, text in zip(option_ids, raw_options, strict=True)
         ]
         correct_id = option_ids[raw_options.index(correct)]
+        prompt = f"根据第 {chunk.page_number} 页的论述，下列哪一项最准确？"
         return GeneratedQuestion(
             question_type="single",
-            prompt=f"根据第 {chunk.page_number} 页的论述，下列哪一项最准确？",
+            prompt=prompt,
             options=options,
             correct_answers=[correct_id],
             explanation="正确选项是原文观点的直接表述，其余选项来自其他语境或与本段意思相反。",
@@ -203,7 +242,7 @@ class MockQuizAiProvider:
             reference_answer=None,
             grading_rubric=[],
             source_chunk_ids=[chunk.id],
-            source_evidence=self._evidence(chunk, file_names),
+            source_evidence=self._evidence(chunk, file_names, correct),
             max_score=6,
         )
 
@@ -227,9 +266,10 @@ class MockQuizAiProvider:
         correct_answers = [
             option["id"] for option, (_, is_correct) in zip(options, tagged, strict=True) if is_correct
         ]
+        prompt = f"结合第 {chunk.page_number} 页原文，以下哪些表述有直接依据？"
         return GeneratedQuestion(
             question_type="multiple",
-            prompt=f"结合第 {chunk.page_number} 页原文，以下哪些表述有直接依据？",
+            prompt=prompt,
             options=options,
             correct_answers=correct_answers,
             explanation="正确选项均可在该页原文中直接定位；多选或漏选都会影响得分。",
@@ -238,7 +278,7 @@ class MockQuizAiProvider:
             reference_answer=None,
             grading_rubric=[],
             source_chunk_ids=[chunk.id],
-            source_evidence=self._evidence(chunk, file_names),
+            source_evidence=self._evidence(chunk, file_names, " ".join(correct_claims)),
             max_score=10,
         )
 
@@ -246,9 +286,10 @@ class MockQuizAiProvider:
         self, chunk: ContentChunk, file_names: dict[str, str]
     ) -> GeneratedQuestion:
         reference = compact_text(chunk.content, 300)
+        prompt = f"请用自己的话概括第 {chunk.page_number} 页这段内容的核心观点，并说明关键理由。"
         return GeneratedQuestion(
             question_type="short",
-            prompt=f"请用自己的话概括第 {chunk.page_number} 页这段内容的核心观点，并说明关键理由。",
+            prompt=prompt,
             options=[],
             correct_answers=[],
             explanation="评分关注是否覆盖原文核心观点及其关键理由，不要求逐字复述。",
@@ -257,7 +298,7 @@ class MockQuizAiProvider:
             reference_answer=reference,
             grading_rubric=rubric_from_text(reference, 20),
             source_chunk_ids=[chunk.id],
-            source_evidence=self._evidence(chunk, file_names),
+            source_evidence=self._evidence(chunk, file_names, reference),
             max_score=20,
         )
 
@@ -503,16 +544,18 @@ class HttpQuizAiProvider:
         return (fresh + repeated)[:candidate_limit]
 
     def _source_evidence(
-        self, chunk: ContentChunk, file_names: dict[str, str]
+        self, chunk: ContentChunk, file_names: dict[str, str], focus_text: str = ""
     ) -> dict[str, Any]:
         file_name = file_names.get(chunk.pdf_id)
         if not file_name:
             raise RuntimeError("真实模型题目的来源文件不存在")
+        excerpt = compact_text(chunk.content, 500)
         return {
             "chunk_id": chunk.id,
             "file_name": file_name,
             "page_number": chunk.page_number,
-            "excerpt": compact_text(chunk.content, 500),
+            "excerpt": excerpt,
+            "highlight": key_sentence(excerpt, focus_text),
             "support": "题目与答案依据由后端从该 PDF 原文片段重建。",
         }
 
@@ -662,8 +705,20 @@ class HttpQuizAiProvider:
             else:
                 reference_answer = None
                 rubric = []
+            correct_option_text = " ".join(
+                option["text"] for option in options if option["id"] in correct_answers
+            )
+            focus_text = " ".join(
+                [
+                    prompt,
+                    explanation,
+                    knowledge,
+                    reference_answer if isinstance(reference_answer, str) else "",
+                    correct_option_text,
+                ]
+            )
             evidence = [
-                self._source_evidence(chunks_by_id[source_id], file_names)
+                self._source_evidence(chunks_by_id[source_id], file_names, focus_text)
                 for source_id in unique_source_ids
             ]
             generated.append(
