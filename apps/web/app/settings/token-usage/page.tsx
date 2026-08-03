@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, getTokenUsage } from "@/lib/api";
+import { formatDateTimeLong } from "@/lib/format";
 import type { TokenUsageReport, TokenUsageStage, TokenUsageTask } from "@/lib/types";
 
 const FILTERS = [
@@ -31,7 +32,7 @@ function formatTokens(value: number | null) {
 }
 
 function formatTime(value: string) {
-  return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  return formatDateTimeLong(value);
 }
 
 function stageUsage(stage: TokenUsageStage) {

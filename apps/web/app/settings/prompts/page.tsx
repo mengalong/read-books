@@ -4,6 +4,7 @@ import { Eye, FileCode2, History, RotateCcw, Save } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError, getPromptHistory, getPromptTemplates, previewPrompt, resetPromptTemplate, updatePromptTemplate } from "@/lib/api";
+import { formatDateTimeLong } from "@/lib/format";
 import type { PromptPreview, PromptTemplate, PromptType } from "@/lib/types";
 
 const PROMPT_LABELS: Record<PromptType, { label: string; description: string }> = {
@@ -13,7 +14,7 @@ const PROMPT_LABELS: Record<PromptType, { label: string; description: string }> 
 
 function formatTime(value: string | null) {
   if (!value) return "内置默认模板";
-  return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  return formatDateTimeLong(value);
 }
 
 export default function PromptSettingsPage() {

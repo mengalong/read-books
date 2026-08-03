@@ -14,6 +14,7 @@
 - 检索：MVP 使用关键词/覆盖权重检索，后续替换为向量检索
 - Python 虚拟环境：Conda 环境 `read-books`，Python 3.12+
 - 配置：`.env` + Pydantic Settings
+- 时间：后端统一保存 UTC；前端展示固定使用 `Asia/Shanghai`，避免运行环境时区影响用户看到的任务时间
 - 测试：pytest + Playwright
 - 包管理：前端用 npm/pnpm；后端在 conda 环境内使用 uv 或 pip 安装依赖
 

@@ -11,6 +11,7 @@ import {
   updateModelConfiguration,
 } from "@/lib/api";
 import type { ModelConfiguration, ModelProviderMode } from "@/lib/types";
+import { formatDateTimeLong } from "@/lib/format";
 
 const MASKED_API_KEY = "****************";
 
@@ -106,7 +107,7 @@ export default function ModelSettingsPage() {
 
   function formatTestTime(value: string | null) {
     if (!value) return "尚未测试连接";
-    return new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+    return formatDateTimeLong(value);
   }
 
   function buildCurlPreview() {
