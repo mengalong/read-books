@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { BookCover, EmptyState, ErrorState, NextReview, StatusBadge, formatPdfMeta } from "@/components/ui";
 import { ApiError, deletePdf, deleteQuiz, getBook, getChunks, startPreGeneration, uploadPdf } from "@/lib/api";
-import { formatDate, formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime, scorePercentage } from "@/lib/format";
 import type { BookDetail, Chunk, PdfDocument, QuizSummary } from "@/lib/types";
 
 const difficultyLabels: Record<string, string> = {
@@ -157,14 +157,14 @@ export default function BookDetailPage() {
       <section className="content-panel quiz-library">
         <div className="section-title"><h2>复习试卷</h2><span>{book.quizzes.length ? "可重复选择同一套试卷复习" : "等待生成"}</span></div>
         {book.quizzes.length === 0 ? <EmptyState title="还没有复习试卷" detail="生成完成后，试卷会保存在这里，以后可以反复作答。" action={<Link className="button button-primary" href={`/books/${book.id}/quiz/new`}><Sparkles size={15} />生成第一套试卷</Link>} /> : <div className="quiz-library-list">{book.quizzes.map((quiz) => {
-          const latestPercent = quiz.latest_score === null ? null : Math.round(quiz.latest_score / quiz.max_score * 100);
+          const latestPercent = scorePercentage(quiz.latest_score, quiz.max_score);
           return <article className="quiz-library-row" key={quiz.id}>
             <div className="quiz-library-main">
               <strong>{quiz.title}</strong>
               <span>难度：{difficultyLabels[quiz.difficulty] || quiz.difficulty} · {quiz.question_count} 道题 · {quiz.duration_minutes} 分钟 · 创建于 {formatDateTime(quiz.created_at)}</span>
               <span>题目构成：单选 {quiz.single_count} · 多选 {quiz.multiple_count} · 问答 {quiz.short_count}</span>
             </div>
-            <div className="quiz-library-stats"><span>已复习 {quiz.review_count} 次</span><strong>{latestPercent === null ? "暂无成绩" : `最近 ${latestPercent} 分`}</strong></div>
+            <div className="quiz-library-stats"><span>已复习 {quiz.review_count} 次</span><strong>{latestPercent === null ? "暂无成绩" : `最近得分率 ${latestPercent}%`}</strong></div>
             <div className="quiz-library-actions">
               <Link className="button button-secondary" href={`/quizzes/${quiz.id}`}><Play size={15} />选择这套</Link>
               <button

@@ -57,7 +57,7 @@ export default function BookshelfPage() {
       <section className="metrics-grid" aria-label="书架概览">
         <div className="metric"><div className="metric-label">书架总数</div><div className="metric-value">{books.length}<span className="metric-detail">本书</span></div></div>
         <div className="metric"><div className="metric-label">已建立原文</div><div className="metric-value">{metrics.sourceBooks}<span className="metric-detail">本书</span></div></div>
-        <div className="metric"><div className="metric-label">平均测试分</div><div className="metric-value">{metrics.average === null ? "—" : metrics.average}<span className="metric-detail">/ 100</span></div></div>
+        <div className="metric"><div className="metric-label">平均得分率</div><div className="metric-value">{metrics.average === null ? "—" : metrics.average}<span className="metric-detail">%</span></div></div>
       </section>
 
       <div className="books-toolbar">

@@ -53,6 +53,16 @@ export function formatDuration(seconds: number | null | undefined) {
   return `${minutes}分${String(remaining).padStart(2, "0")}秒`;
 }
 
+export function formatScore(value: number | null | undefined) {
+  if (value === null || value === undefined) return "—";
+  return value.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+}
+
+export function scorePercentage(score: number | null | undefined, maxScore: number) {
+  if (score === null || score === undefined || maxScore <= 0) return null;
+  return Math.round(score / maxScore * 100);
+}
+
 export function statusLabel(status: string) {
   const labels: Record<string, string> = {
     reading: "在读",

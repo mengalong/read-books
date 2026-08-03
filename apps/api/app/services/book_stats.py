@@ -18,7 +18,7 @@ def get_book_stats(db: Session, book_id: str) -> BookStats:
     quiz_count, average_score, last_reviewed_at, next_review_date = db.execute(
         select(
             func.count(ReviewTask.id),
-            func.avg(ReviewTask.total_score),
+            func.avg(ReviewTask.total_score * 100.0 / func.nullif(ReviewTask.max_score, 0)),
             func.max(ReviewTask.submitted_at),
             func.max(ReviewTask.next_review_date),
         ).where(ReviewTask.book_id == book_id, ReviewTask.status == "submitted")

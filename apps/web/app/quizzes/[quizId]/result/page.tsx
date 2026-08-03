@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { ErrorState, EvidenceList } from "@/components/ui";
 import { ApiError, getQuizResult } from "@/lib/api";
-import { formatDate, formatDuration } from "@/lib/format";
+import { formatDate, formatDuration, formatScore, scorePercentage } from "@/lib/format";
 import type { QuizResult } from "@/lib/types";
 
 export default function QuizResultPage() {
@@ -24,15 +24,15 @@ export default function QuizResultPage() {
   if (!result && !error) return <div className="page-wrap"><div className="loading-state">正在整理复习结果……</div></div>;
   if (!result) return <div className="page-wrap"><ErrorState message={error} /></div>;
 
-  const percent = Math.round((result.total_score || 0) / result.max_score * 100);
+  const percent = scorePercentage(result.total_score, result.max_score) ?? 0;
   const isLowScore = result.max_score > 0 && (result.total_score || 0) / result.max_score < 0.6;
   return (
     <div className="page-wrap">
       <Link className="back-link" href={`/books/${result.book_id}`}><ArrowLeft size={14} />返回《{result.book_title}》</Link>
       <section className="result-header">
         <div className={`result-score ${isLowScore ? "low" : ""}`}>
-          <div className="score-number"><strong>{percent}</strong><span>分</span></div>
-          <div className="score-copy"><div className="eyebrow">Review complete</div><h1>{percent >= 80 ? "掌握得不错，继续保持" : percent >= 60 ? "已经记住一部分" : "找到需要重读的地方了"}</h1><p>{result.title} · 用时 {formatDuration(result.elapsed_seconds)}<br />得分 {result.total_score} / {result.max_score}</p></div>
+          <div className="score-number"><strong>{formatScore(result.total_score)}</strong><span>/ {formatScore(result.max_score)}</span></div>
+          <div className="score-copy"><div className="eyebrow">Review complete</div><h1>{percent >= 80 ? "掌握得不错，继续保持" : percent >= 60 ? "已经记住一部分" : "找到需要重读的地方了"}</h1><p>{result.title} · 用时 {formatDuration(result.elapsed_seconds)}<br />得分 {formatScore(result.total_score)} / {formatScore(result.max_score)} · 得分率 {percent}%</p></div>
         </div>
         <div className="result-next-review"><CalendarClock size={16} style={{ verticalAlign: "-3px", marginRight: 6 }} /><strong>下次建议复习</strong>{formatDate(result.next_review_date)}</div>
       </section>

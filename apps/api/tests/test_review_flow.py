@@ -261,6 +261,11 @@ def test_generate_submit_and_avoid_recent_sources(client):
     assert result["next_review_date"] is not None
     assert result["questions"][-1]["reference_answer"]
     assert result["questions"][-1]["grading_rubric"]
+    detail = client.get(f"/api/books/{book_id}")
+    assert detail.status_code == 200
+    assert detail.json()["stats"]["average_score"] == round(
+        result["total_score"] / result["max_score"] * 100, 1
+    )
 
     second = client.post(f"/api/books/{book_id}/quizzes", json=payload)
     assert second.status_code == 202

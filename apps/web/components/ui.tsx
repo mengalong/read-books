@@ -37,7 +37,7 @@ export function BookCard({ book }: { book: BookSummary }) {
         <div className="book-stats">
           <span>{book.stats.completed_pdf_count} 份原文</span>
           <span>{book.stats.quiz_count} 次测试</span>
-          <span>{book.stats.average_score ? `${book.stats.average_score} 分` : "未测试"}</span>
+          <span>{book.stats.average_score === null ? "未测试" : `平均 ${book.stats.average_score}%`}</span>
         </div>
         <ChevronRight className="book-card-arrow" size={16} />
       </div>
