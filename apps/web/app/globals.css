@@ -1201,6 +1201,12 @@ p {
   align-items: center;
 }
 
+.header-actions {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+}
+
 .readonly-badge {
   align-items: center;
   background: #eef4f1;
@@ -1447,6 +1453,41 @@ p {
   border-left: 3px solid #aebcb6;
   margin-top: 13px;
   padding: 9px 11px;
+}
+
+.confirm-modal {
+  max-width: 460px;
+}
+
+.confirm-modal h2 {
+  font-size: 18px;
+  margin-top: 12px;
+}
+
+.confirm-modal > p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+  margin-top: 8px;
+}
+
+.confirm-icon {
+  align-items: center;
+  background: var(--red-soft);
+  border-radius: 50%;
+  color: var(--red);
+  display: flex;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+}
+
+.credential-modal {
+  max-width: 480px;
+}
+
+.credential-modal .credential-panel {
+  border: 0;
 }
 
 .model-settings-form {
@@ -3211,6 +3252,15 @@ p {
   .page-header .button,
   .detail-actions {
     margin-top: 17px;
+  }
+
+  .header-actions {
+    margin-top: 17px;
+  }
+
+  .header-actions .button {
+    flex: 1;
+    margin-top: 0;
   }
 
   .metrics-grid,
