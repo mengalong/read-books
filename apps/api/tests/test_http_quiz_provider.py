@@ -164,6 +164,7 @@ def test_http_provider_generates_validated_questions(monkeypatch):
     assert requests[0]["url"] == "https://models.example.com/v1/chat/completions"
     assert requests[0]["headers"]["Authorization"] == "Bearer provider-secret"
     assert requests[0]["timeout"] == 30
+    assert requests[0]["json"]["max_tokens"] == 4_000
     assert "chunk-1" in requests[0]["json"]["messages"][1]["content"]
 
 
@@ -244,6 +245,80 @@ def test_http_provider_accepts_common_field_aliases(monkeypatch):
     assert questions[0].explanation == "原文强调合上书本后主动提取。"
     assert questions[0].knowledge_point == "主动回忆"
     assert len(requests) == 1
+
+
+def test_http_provider_accepts_content_parts(monkeypatch):
+    chunks = make_chunks()
+    payload = generated_payload([chunk.id for chunk in chunks])
+    requests = install_chat_responses(
+        monkeypatch,
+        [[{"type": "text", "text": json.dumps(payload, ensure_ascii=False)}]],
+    )
+    provider = HttpQuizAiProvider(make_configuration())
+
+    questions = provider.generate_questions(
+        chunks=chunks,
+        file_names={"pdf-1": "复习材料.pdf"},
+        single_count=1,
+        multiple_count=1,
+        short_count=1,
+        difficulty="medium",
+        generation_number=0,
+        recent_chunk_ids=set(),
+    )
+
+    assert len(questions) == 3
+    assert len(requests) == 1
+
+
+def test_http_provider_explains_empty_content_after_token_limit(monkeypatch):
+    chunks = make_chunks()
+    requests = install_chat_responses(monkeypatch, [None])
+
+    class FakeResponse:
+        is_success = True
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json():
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "length",
+                        "message": {"content": None, "reasoning_content": "正在分析原文"},
+                    }
+                ],
+            }
+
+    class FakeClient:
+        def __init__(self, timeout: float):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def post(self, *args, **kwargs):
+            requests.append(kwargs["json"])
+            return FakeResponse()
+
+    monkeypatch.setattr("app.services.quiz_provider.httpx.Client", FakeClient)
+    provider = HttpQuizAiProvider(make_configuration())
+
+    with pytest.raises(RuntimeError, match="达到 max_tokens 上限"):
+        provider.generate_questions(
+            chunks=chunks,
+            file_names={"pdf-1": "复习材料.pdf"},
+            single_count=1,
+            multiple_count=0,
+            short_count=0,
+            difficulty="medium",
+            generation_number=0,
+            recent_chunk_ids=set(),
+        )
 
 
 def test_http_provider_fills_optional_text_from_valid_source(monkeypatch):

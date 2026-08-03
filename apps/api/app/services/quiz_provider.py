@@ -312,6 +312,25 @@ def parse_json_object(content: str) -> dict[str, Any]:
     raise RuntimeError("真实模型返回的内容不是有效 JSON")
 
 
+def extract_message_text(message: Any) -> str | None:
+    if not isinstance(message, dict):
+        return None
+    content = message.get("content")
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+    if isinstance(content, list):
+        fragments = []
+        for item in content:
+            if isinstance(item, str):
+                fragments.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                fragments.append(item["text"])
+        combined = "".join(fragments).strip()
+        if combined:
+            return combined
+    return None
+
+
 class HttpQuizAiProvider:
     TYPE_SETTINGS = {
         "single": {"estimated_seconds": 45, "max_score": 6.0},
@@ -451,9 +470,18 @@ class HttpQuizAiProvider:
         choices = body.get("choices") if isinstance(body, dict) else None
         first_choice = choices[0] if isinstance(choices, list) and choices else None
         message = first_choice.get("message") if isinstance(first_choice, dict) else None
-        content = message.get("content") if isinstance(message, dict) else None
-        if not isinstance(content, str) or not content.strip():
-            error_message = "真实模型响应中没有可用的文本内容"
+        content = extract_message_text(message)
+        if content is None:
+            finish_reason = first_choice.get("finish_reason") if isinstance(first_choice, dict) else None
+            reasoning_content = extract_message_text(
+                {"content": message.get("reasoning_content")} if isinstance(message, dict) else None
+            )
+            if finish_reason == "length":
+                error_message = "真实模型响应没有最终文本内容：输出达到 max_tokens 上限，请提高模型输出预算"
+            elif reasoning_content:
+                error_message = "真实模型响应只有推理内容，没有最终文本内容；请调整模型的推理或响应配置"
+            else:
+                error_message = "真实模型响应中没有可用的文本内容"
             self._record_usage(
                 phase, call_number, started_at, "failed", body, error_message
             )
@@ -726,7 +754,7 @@ class HttpQuizAiProvider:
                 ),
             },
         ]
-        max_tokens = max(2_000, total * 700)
+        max_tokens = max(4_000, total * 700)
         content = self._chat_completion(
             messages, max_tokens=max_tokens, phase="quiz_generation"
         )
