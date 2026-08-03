@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { BookCover, EmptyState, ErrorState, NextReview, SourceModeNotice, StatusBadge, formatPdfMeta } from "@/components/ui";
-import { ApiError, deletePdf, deleteQuiz, getBook, getChunks, startPreGeneration, uploadPdf } from "@/lib/api";
+import { ApiError, deletePdf, deleteQuiz, getBook, getChunks, uploadPdf } from "@/lib/api";
 import { formatDate, formatDateTime, scorePercentage } from "@/lib/format";
 import type { BookDetail, Chunk, PdfDocument, QuizSummary } from "@/lib/types";
 
@@ -23,7 +23,6 @@ export default function BookDetailPage() {
   const [chunks, setChunks] = useState<Chunk[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [startingPreGeneration, setStartingPreGeneration] = useState(false);
   const [deletingQuizId, setDeletingQuizId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -50,11 +49,9 @@ export default function BookDetailPage() {
 
   const completed = book?.stats.completed_pdf_count || 0;
   const pending = book?.pdfs.filter((pdf) => pdf.parse_status !== "completed").length || 0;
-  const preGenerating = book?.pre_generation_status === "pending" || book?.pre_generation_status === "processing";
   const generating = Boolean(book?.active_generation_task_id);
   const noPdf = Boolean(book && book.pdfs.length === 0);
   const canGenerate = Boolean(book && (completed > 0 || noPdf) && !generating);
-  const canPreGenerate = Boolean(book && (completed > 0 || noPdf));
   const previewChunks = useMemo(() => chunks.slice(0, 4), [chunks]);
 
   async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
@@ -80,19 +77,6 @@ export default function BookDetailPage() {
       await refresh();
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "PDF 删除失败");
-    }
-  }
-
-  async function handleStartPreGeneration() {
-    setStartingPreGeneration(true);
-    setError("");
-    try {
-      await startPreGeneration(bookId);
-      await refresh(false);
-    } catch (reason: unknown) {
-      setError(reason instanceof ApiError ? reason.message : "预生成测试启动失败");
-    } finally {
-      setStartingPreGeneration(false);
     }
   }
 
@@ -132,8 +116,6 @@ export default function BookDetailPage() {
           <Link className="button button-secondary" href={`/books/${book.id}/edit`}><PencilLine size={15} />编辑信息</Link>
           <Link className="button button-secondary" href={`/books/${book.id}/history`}><History size={15} />复习记录</Link>
           <Link className="button button-primary" href={canGenerate ? `/books/${book.id}/quiz/new` : "#"} aria-disabled={!canGenerate} onClick={(event) => { if (!canGenerate) event.preventDefault(); }}><Sparkles size={15} />{generating ? "正在后台出题" : "生成新试卷"}</Link>
-          {canPreGenerate && book.pre_generation_status !== "completed" && <button className="button button-secondary" disabled={startingPreGeneration || generating} onClick={() => void handleStartPreGeneration()} type="button"><Sparkles size={15} />{book.pre_generation_status === "failed" ? "重新预生成" : preGenerating ? "正在生成……" : "开启预生成"}</button>}
-          {canPreGenerate && book.pre_generation_status === "completed" && book.pre_generation_quiz_id && <Link className="button button-secondary" href={`/quizzes/${book.pre_generation_quiz_id}`}><CheckCircle2 size={15} />打开预生成测试</Link>}
         </div>
       </section>
 
@@ -149,7 +131,7 @@ export default function BookDetailPage() {
         {book.pre_generation_status === "completed" ? <CheckCircle2 size={18} /> : book.pre_generation_status === "failed" ? <AlertCircle size={18} /> : <LoaderCircle className={book.pre_generation_status === "processing" ? "spin" : ""} size={18} />}
         <div>
           <strong>{book.pre_generation_status === "completed" ? "预生成测试已准备好" : book.pre_generation_status === "failed" ? "预生成测试失败" : "正在生成题目中"}</strong>
-          <span>{book.pre_generation_error || (book.pre_generation_status === "completed" ? "可以直接打开这套测试，也可以继续创建新的测试。" : "系统正在后台生成一套默认复习测试，完成前不能重复触发。")}</span>
+          <span>{book.pre_generation_error || (book.pre_generation_status === "completed" ? "预生成试卷已保存到下方的复习试卷列表中。" : "系统正在后台生成一套默认复习测试，完成前不能重复触发。")}</span>
         </div>
       </div>}
 
