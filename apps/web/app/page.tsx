@@ -23,18 +23,23 @@ export default function BookshelfPage() {
   const [activeStatus, setActiveStatus] = useState<ReadingStatus | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [ownerId, setOwnerId] = useState<string | undefined>();
+
+  useEffect(() => {
+    setOwnerId(new URLSearchParams(window.location.search).get("owner_id") || undefined);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    getBooks(appliedSearch, activeStatus)
+    getBooks(appliedSearch, activeStatus, ownerId)
       .then((items) => { if (!cancelled) { setBooks(items); setError(""); } })
       .catch((reason: unknown) => {
         if (!cancelled) setError(reason instanceof ApiError ? reason.message : "书架加载失败");
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [appliedSearch, activeStatus]);
+  }, [appliedSearch, activeStatus, ownerId]);
 
   function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

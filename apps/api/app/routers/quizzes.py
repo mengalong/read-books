@@ -405,6 +405,7 @@ def start_review(
 def list_reviews(
     book_id: str | None = Query(default=None),
     search: str | None = Query(default=None),
+    owner_id: str | None = Query(default=None),
     review_status: Literal["in_progress", "submitted"] | None = Query(
         default=None, alias="status"
     ),
@@ -422,13 +423,15 @@ def list_reviews(
     )
     if identity.user.role != "admin":
         statement = statement.where(Book.workspace_id == identity.workspace.id)
+        if owner_id and owner_id != identity.user.id:
+            raise HTTPException(status_code=403, detail="不能查看其他用户的复习记录")
+    if owner_id:
+        statement = statement.where(Book.created_by_user_id == owner_id)
     if book_id:
         statement = statement.where(ReviewTask.book_id == book_id)
     if search and search.strip():
         keyword = f"%{search.strip()}%"
-        statement = statement.join(ReviewTask.book).where(
-            or_(Book.title.ilike(keyword), Book.author.ilike(keyword))
-        )
+        statement = statement.where(or_(Book.title.ilike(keyword), Book.author.ilike(keyword)))
     if review_status:
         statement = statement.where(ReviewTask.status == review_status)
     return [to_review_summary(review) for review in db.scalars(statement).all()]

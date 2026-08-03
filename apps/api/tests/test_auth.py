@@ -106,6 +106,7 @@ def test_workspace_data_is_private_for_users_and_visible_to_admin(client):
         },
     )
     assert created.status_code == 201
+    reader_id = created.json()["user"]["id"]
 
     client.post("/api/auth/logout")
     user_login = client.post(
@@ -129,6 +130,9 @@ def test_workspace_data_is_private_for_users_and_visible_to_admin(client):
     ).status_code == 200
     assert client.get(f"/api/books/{book_id}").status_code == 200
     assert any(item["id"] == book_id for item in client.get("/api/books").json())
+    filtered_books = client.get(f"/api/books?owner_id={reader_id}")
+    assert filtered_books.status_code == 200
+    assert [item["id"] for item in filtered_books.json()] == [book_id]
     assert client.patch(f"/api/books/{book_id}", json={"title": "越权修改"}).status_code == 404
     assert client.delete(f"/api/books/{book_id}").status_code == 404
     assert client.get(f"/api/books/{book_id}").json()["title"] == "隔离工作空间的书"

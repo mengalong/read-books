@@ -1,6 +1,7 @@
 "use client";
 
-import { Check, Copy, KeyRound, Plus, RefreshCw, Shield, UserRound, UserX } from "lucide-react";
+import { Check, Copy, Eye, KeyRound, Plus, RefreshCw, Shield, UserRound, UserX } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
@@ -120,8 +121,7 @@ export default function UserManagementPage() {
       </div>
 
       <section className="content-panel user-list-panel">
-        <div className="section-title"><div><h2><UserRound size={16} />平台账户</h2><span>共 {users.length} 个账户</span></div></div>
-        {loading ? <div className="loading-state">正在读取用户列表……</div> : <div className="user-table-wrap"><table className="user-table"><thead><tr><th>用户</th><th>角色</th><th>工作空间</th><th>状态</th><th>最后登录</th><th>操作</th></tr></thead><tbody>{users.map((user) => <tr key={user.id}><td><strong>{user.display_name}</strong><small>{user.username}</small></td><td><span className="role-badge">{user.role === "admin" ? <Shield size={12} /> : <UserRound size={12} />}{user.role === "admin" ? "管理员" : "普通用户"}</span></td><td>{user.workspace.name}</td><td><span className={`status-badge status-${user.status}`}>{user.status === "active" ? "正常" : "已停用"}</span></td><td>{user.last_login_at ? formatDateTimeLong(user.last_login_at) : "尚未登录"}</td><td><span className="table-actions"><button className="button button-quiet" onClick={() => void resetPassword(user)} title="重置临时密码" type="button"><KeyRound size={14} />重置密码</button><button className="button button-quiet" disabled={user.role === "admin" && user.status === "active"} onClick={() => void toggleStatus(user)} title={user.status === "active" ? "停用账户" : "恢复账户"} type="button">{user.status === "active" ? <UserX size={14} /> : <Check size={14} />}{user.status === "active" ? "停用" : "恢复"}</button></span></td></tr>)}</tbody></table></div>}
+        {loading ? <div className="loading-state">正在读取用户列表……</div> : <div className="user-table-wrap"><table className="user-table"><thead><tr><th>用户</th><th>角色</th><th>工作空间</th><th>状态</th><th>最后登录</th><th>操作</th></tr></thead><tbody>{users.map((user) => <tr key={user.id}><td><strong>{user.display_name}</strong><small>{user.username}</small></td><td><span className="role-badge">{user.role === "admin" ? <Shield size={12} /> : <UserRound size={12} />}{user.role === "admin" ? "管理员" : "普通用户"}</span></td><td>{user.workspace.name}</td><td><span className={`status-badge status-${user.status}`}>{user.status === "active" ? "正常" : "已停用"}</span></td><td>{user.last_login_at ? formatDateTimeLong(user.last_login_at) : "尚未登录"}</td><td><span className="table-actions"><Link className="button button-quiet" href={`/?owner_id=${user.id}`} title="查看用户书架"><Eye size={14} />查看书架</Link><button className="button button-quiet" onClick={() => void resetPassword(user)} title="重置临时密码" type="button"><KeyRound size={14} />重置密码</button><button className="button button-quiet" disabled={user.role === "admin" && user.status === "active"} onClick={() => void toggleStatus(user)} title={user.status === "active" ? "停用账户" : "恢复账户"} type="button">{user.status === "active" ? <UserX size={14} /> : <Check size={14} />}{user.status === "active" ? "停用" : "恢复"}</button></span></td></tr>)}</tbody></table></div>}
       </section>
     </div>
   );

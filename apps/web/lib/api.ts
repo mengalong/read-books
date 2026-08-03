@@ -65,10 +65,11 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function getBooks(search = "", status?: ReadingStatus) {
+export function getBooks(search = "", status?: ReadingStatus, ownerId?: string) {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (status) params.set("status", status);
+  if (ownerId) params.set("owner_id", ownerId);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<BookSummary[]>(`/books${suffix}`);
 }
@@ -199,10 +200,11 @@ export function getReviewResult(reviewId: string) {
   return apiFetch<ReviewTask>(`/reviews/${reviewId}/result`);
 }
 
-export function getReviewHistory(filters: { bookId?: string; search?: string; status?: "in_progress" | "submitted" } = {}) {
+export function getReviewHistory(filters: { bookId?: string; search?: string; ownerId?: string; status?: "in_progress" | "submitted" } = {}) {
   const params = new URLSearchParams();
   if (filters.bookId) params.set("book_id", filters.bookId);
   if (filters.search) params.set("search", filters.search);
+  if (filters.ownerId) params.set("owner_id", filters.ownerId);
   if (filters.status) params.set("status", filters.status);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<ReviewTaskSummary[]>(`/reviews${suffix}`);

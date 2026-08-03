@@ -43,12 +43,17 @@ def get_book_or_404(
 def list_books(
     search: str | None = None,
     reading_status: str | None = Query(default=None, alias="status"),
+    owner_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> list[BookSummary]:
     statement = select(Book).order_by(Book.updated_at.desc())
     if identity.user.role != "admin":
         statement = statement.where(Book.workspace_id == identity.workspace.id)
+        if owner_id and owner_id != identity.user.id:
+            raise HTTPException(status_code=403, detail="不能查看其他用户的书籍")
+    if owner_id:
+        statement = statement.where(Book.created_by_user_id == owner_id)
     if search:
         keyword = f"%{search.strip()}%"
         statement = statement.where(or_(Book.title.ilike(keyword), Book.author.ilike(keyword)))
