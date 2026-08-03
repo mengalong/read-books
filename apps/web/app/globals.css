@@ -686,6 +686,22 @@ p {
   padding: 4px 7px;
 }
 
+.pdf-status-tag {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.pdf-status-tag.has-pdf {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.pdf-status-tag.no-pdf {
+  background: var(--yellow-soft);
+  color: var(--yellow);
+}
+
 .active-filter {
   background: var(--green-soft);
   color: var(--green);

@@ -1,4 +1,4 @@
-import { AlertCircle, ChevronRight, FileText } from "lucide-react";
+import { AlertCircle, ChevronRight, FileText, FileX2 } from "lucide-react";
 import Link from "next/link";
 
 import type { BookSummary, SourceEvidence, SourceMode } from "@/lib/types";
@@ -19,6 +19,8 @@ export function StatusBadge({ status }: { status: string }) {
 }
 
 export function BookCard({ book }: { book: BookSummary }) {
+  const hasPdf = book.stats.pdf_count > 0;
+
   return (
     <Link className="book-card" href={`/books/${book.id}`}>
       <div className="book-card-top">
@@ -31,6 +33,10 @@ export function BookCard({ book }: { book: BookSummary }) {
       </div>
       <p className="book-description">{book.description || "还没有写下这本书的简介。"}</p>
       <div className="tag-row">
+        <span className={`tag pdf-status-tag ${hasPdf ? "has-pdf" : "no-pdf"}`}>
+          {hasPdf ? <FileText size={12} /> : <FileX2 size={12} />}
+          {hasPdf ? "已上传 PDF" : "未上传 PDF"}
+        </span>
         {book.tags.slice(0, 3).map((tag) => <span className="tag" key={tag}>{tag}</span>)}
       </div>
       <div className="book-card-bottom">
