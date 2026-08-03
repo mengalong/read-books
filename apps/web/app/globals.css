@@ -671,6 +671,14 @@ p {
   margin-top: 17px;
 }
 
+.book-card .book-description {
+  display: -webkit-box;
+  min-height: 3.3em;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .tag-row {
   display: flex;
   flex-wrap: wrap;
@@ -1662,6 +1670,8 @@ p {
   display: flex;
   flex-shrink: 0;
   gap: 9px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .detail-columns {

@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, ArrowLeft, BookOpen, CheckCircle2, FileText, History, LoaderCircle, Play, Sparkles, Trash2, UploadCloud } from "lucide-react";
+import { AlertCircle, ArrowLeft, BookOpen, CheckCircle2, FileText, History, LoaderCircle, PencilLine, Play, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -129,6 +129,7 @@ export default function BookDetailPage() {
           </div>
         </div>
         <div className="detail-actions">
+          <Link className="button button-secondary" href={`/books/${book.id}/edit`}><PencilLine size={15} />编辑信息</Link>
           <Link className="button button-secondary" href={`/books/${book.id}/history`}><History size={15} />复习记录</Link>
           <Link className="button button-primary" href={canGenerate ? `/books/${book.id}/quiz/new` : "#"} aria-disabled={!canGenerate} onClick={(event) => { if (!canGenerate) event.preventDefault(); }}><Sparkles size={15} />{generating ? "正在后台出题" : "生成新试卷"}</Link>
           {canPreGenerate && book.pre_generation_status !== "completed" && <button className="button button-secondary" disabled={startingPreGeneration || generating} onClick={() => void handleStartPreGeneration()} type="button"><Sparkles size={15} />{book.pre_generation_status === "failed" ? "重新预生成" : preGenerating ? "正在生成……" : "开启预生成"}</button>}

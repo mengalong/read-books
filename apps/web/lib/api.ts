@@ -83,6 +83,24 @@ export function createBook(payload: {
   return apiFetch<BookDetail>("/books", { method: "POST", body: JSON.stringify(payload) });
 }
 
+export function updateBook(
+  bookId: string,
+  payload: {
+    title: string;
+    author: string;
+    description: string;
+    cover_color: string;
+    language: string;
+    reading_status: ReadingStatus;
+    tags: string[];
+  },
+) {
+  return apiFetch<BookDetail>(`/books/${bookId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function uploadPdf(bookId: string, file: File) {
   const formData = new FormData();
   formData.append("file", file);
