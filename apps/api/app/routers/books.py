@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 from uuid import uuid4
 
@@ -7,10 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
-from app.dependencies import require_ready_identity
-from app.models import Book, ContentChunk, PdfDocument, Quiz
-from app.services.auth import AuthIdentity
+from app.dependencies import require_admin, require_ready_identity
+from app.models import Book, ContentChunk, PdfDocument, Quiz, User
+from app.services.auth import AuthIdentity, add_audit_log, get_personal_workspace
 from app.schemas import (
+    AdminBookCopyRequest,
+    AdminBookCopyResponse,
     BookCreate,
     BookDetail,
     BookSummary,
@@ -24,16 +27,22 @@ from app.services.pdf_parser import parse_pdf_document
 from app.services.pre_generation import start_pre_generation
 
 router = APIRouter(prefix="/books", tags=["books"])
+admin_router = APIRouter(prefix="/admin/books", tags=["admin-books"])
 settings = get_settings()
 
 
 def get_book_or_404(
     db: Session, book_id: str, identity: AuthIdentity, *, for_write: bool = False
 ) -> Book:
-    statement = select(Book).where(Book.id == book_id)
-    if identity.user.role != "admin" or for_write:
-        statement = statement.where(Book.workspace_id == identity.workspace.id)
+    statement = select(Book).where(Book.id == book_id, Book.workspace_id == identity.workspace.id)
     book = db.scalar(statement)
+    if not book:
+        raise HTTPException(status_code=404, detail="未找到这本书")
+    return book
+
+
+def get_admin_book_or_404(db: Session, book_id: str) -> Book:
+    book = db.scalar(select(Book).where(Book.id == book_id))
     if not book:
         raise HTTPException(status_code=404, detail="未找到这本书")
     return book
@@ -47,13 +56,13 @@ def list_books(
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> list[BookSummary]:
-    statement = select(Book).order_by(Book.updated_at.desc())
-    if identity.user.role != "admin":
-        statement = statement.where(Book.workspace_id == identity.workspace.id)
-        if owner_id and owner_id != identity.user.id:
-            raise HTTPException(status_code=403, detail="不能查看其他用户的书籍")
-    if owner_id:
-        statement = statement.where(Book.created_by_user_id == owner_id)
+    statement = (
+        select(Book)
+        .where(Book.workspace_id == identity.workspace.id)
+        .order_by(Book.updated_at.desc())
+    )
+    if owner_id and owner_id != identity.user.id:
+        raise HTTPException(status_code=403, detail="不能查看其他用户的书籍")
     if search:
         keyword = f"%{search.strip()}%"
         statement = statement.where(or_(Book.title.ilike(keyword), Book.author.ilike(keyword)))
@@ -269,3 +278,190 @@ def list_chunks(
         )
         for chunk, file_name in rows
     ]
+
+
+@admin_router.get("", response_model=list[BookSummary])
+def list_admin_books(
+    search: str | None = None,
+    reading_status: str | None = Query(default=None, alias="status"),
+    owner_id: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    _: AuthIdentity = Depends(require_admin),
+) -> list[BookSummary]:
+    statement = select(Book).order_by(Book.updated_at.desc())
+    if owner_id:
+        statement = statement.where(Book.created_by_user_id == owner_id)
+    if search and search.strip():
+        keyword = f"%{search.strip()}%"
+        statement = statement.where(or_(Book.title.ilike(keyword), Book.author.ilike(keyword)))
+    if reading_status:
+        statement = statement.where(Book.reading_status == reading_status)
+    return [to_book_summary(db, book) for book in db.scalars(statement).all()]
+
+
+@admin_router.get("/{book_id}", response_model=BookDetail)
+def get_admin_book(
+    book_id: str,
+    db: Session = Depends(get_db),
+    _: AuthIdentity = Depends(require_admin),
+) -> BookDetail:
+    return to_book_detail(db, get_admin_book_or_404(db, book_id))
+
+
+@admin_router.get("/{book_id}/chunks", response_model=list[ChunkResponse])
+def list_admin_book_chunks(
+    book_id: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    _: AuthIdentity = Depends(require_admin),
+) -> list[ChunkResponse]:
+    get_admin_book_or_404(db, book_id)
+    rows = db.execute(
+        select(ContentChunk, PdfDocument.file_name)
+        .join(PdfDocument, PdfDocument.id == ContentChunk.pdf_id)
+        .where(ContentChunk.book_id == book_id)
+        .order_by(ContentChunk.page_number, ContentChunk.sequence)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+    return [
+        ChunkResponse(
+            id=chunk.id,
+            pdf_id=chunk.pdf_id,
+            page_number=chunk.page_number,
+            sequence=chunk.sequence,
+            content=chunk.content,
+            char_count=chunk.char_count,
+            file_name=file_name,
+        )
+        for chunk, file_name in rows
+    ]
+
+
+@admin_router.post(
+    "/{book_id}/copy",
+    response_model=AdminBookCopyResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def copy_admin_book(
+    book_id: str,
+    payload: AdminBookCopyRequest,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_admin),
+) -> AdminBookCopyResponse:
+    source = get_admin_book_or_404(db, book_id)
+    target_user = db.get(User, payload.target_user_id)
+    if target_user is None or target_user.status != "active":
+        raise HTTPException(status_code=404, detail="未找到可用的目标用户")
+    target_workspace = get_personal_workspace(db, target_user.id)
+    if target_workspace is None:
+        raise HTTPException(status_code=409, detail="目标用户缺少个人工作空间")
+    if source.workspace_id == target_workspace.id:
+        raise HTTPException(status_code=409, detail="这本书已经在目标用户的书架中")
+    if payload.copy_content and not payload.copy_pdf:
+        raise HTTPException(status_code=422, detail="复制原文片段时必须同时复制 PDF")
+
+    settings.ensure_directories()
+    copied_paths: list[Path] = []
+    copied_pdf_count = 0
+    copied_chunk_count = 0
+    try:
+        copied_book = Book(
+            title=source.title,
+            author=source.author,
+            description=source.description,
+            cover_color=source.cover_color,
+            language=source.language,
+            reading_status=source.reading_status,
+            tags=list(source.tags or []),
+            workspace_id=target_workspace.id,
+            created_by_user_id=target_user.id,
+            pre_generation_enabled=False,
+            pre_generation_status="disabled",
+            pre_generation_error=None,
+            pre_generation_quiz_id=None,
+        )
+        db.add(copied_book)
+        db.flush()
+
+        if payload.copy_pdf:
+            for source_pdf in source.pdfs:
+                source_path = Path(source_pdf.file_path)
+                if source_pdf.file_path.startswith("demo://"):
+                    target_path = source_pdf.file_path
+                else:
+                    if not source_path.is_file():
+                        raise HTTPException(
+                            status_code=409,
+                            detail=f"源 PDF 文件不存在：{source_pdf.file_name}",
+                        )
+                    target_path = settings.upload_dir / f"{uuid4()}.pdf"
+                    shutil.copy2(source_path, target_path)
+                    copied_paths.append(target_path)
+
+                target_pdf = PdfDocument(
+                    book_id=copied_book.id,
+                    file_name=source_pdf.file_name,
+                    file_path=str(target_path),
+                    file_size=source_pdf.file_size,
+                    page_count=source_pdf.page_count,
+                    chunk_count=source_pdf.chunk_count if payload.copy_content else 0,
+                    parse_status=source_pdf.parse_status if payload.copy_content else "not_copied",
+                    error_message=(
+                        source_pdf.error_message
+                        if payload.copy_content
+                        else "未复制原文片段"
+                    ),
+                )
+                db.add(target_pdf)
+                db.flush()
+                copied_pdf_count += 1
+                if payload.copy_content:
+                    for source_chunk in source_pdf.chunks:
+                        db.add(
+                            ContentChunk(
+                                book_id=copied_book.id,
+                                pdf_id=target_pdf.id,
+                                page_number=source_chunk.page_number,
+                                sequence=source_chunk.sequence,
+                                content=source_chunk.content,
+                                char_count=source_chunk.char_count,
+                            )
+                        )
+                        copied_chunk_count += 1
+
+        add_audit_log(
+            db,
+            actor_user_id=identity.user.id,
+            action="admin.book_copied",
+            target_type="book",
+            target_id=copied_book.id,
+            details={
+                "source_book_id": source.id,
+                "target_user_id": target_user.id,
+                "copied_pdf": payload.copy_pdf,
+                "copied_content": payload.copy_content,
+                "copied_pdf_count": copied_pdf_count,
+                "copied_chunk_count": copied_chunk_count,
+            },
+        )
+        db.commit()
+        db.refresh(copied_book)
+        return AdminBookCopyResponse(
+            book=to_book_detail(db, copied_book),
+            source_book_id=source.id,
+            target_user_id=target_user.id,
+            copied_pdf_count=copied_pdf_count,
+            copied_chunk_count=copied_chunk_count,
+        )
+    except HTTPException:
+        db.rollback()
+        for path in copied_paths:
+            path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        db.rollback()
+        for path in copied_paths:
+            path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"复制书籍失败：{exc}") from exc

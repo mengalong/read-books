@@ -101,6 +101,20 @@ class BookDetail(BookSummary):
     quizzes: list[QuizSummary] = Field(default_factory=list)
 
 
+class AdminBookCopyRequest(BaseModel):
+    target_user_id: str = Field(min_length=1, max_length=36)
+    copy_pdf: bool = True
+    copy_content: bool = True
+
+
+class AdminBookCopyResponse(BaseModel):
+    book: BookDetail
+    source_book_id: str
+    target_user_id: str
+    copied_pdf_count: int
+    copied_chunk_count: int
+
+
 class ChunkResponse(ApiModel):
     id: str
     pdf_id: str

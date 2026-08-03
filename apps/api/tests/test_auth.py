@@ -1,8 +1,8 @@
 from sqlalchemy import select
 
 from app.database import SessionLocal
-from app.models import User
-from app.services.auth import create_user_with_workspace
+from app.models import Book, ContentChunk, PdfDocument, Quiz, User
+from app.services.auth import create_user_with_workspace, get_personal_workspace
 
 
 ADMIN_USERNAME = "admin-auth"
@@ -128,14 +128,16 @@ def test_workspace_data_is_private_for_users_and_visible_to_admin(client):
         "/api/auth/login",
         json={"username": "test-admin", "password": "TestAdmin1!"},
     ).status_code == 200
-    assert client.get(f"/api/books/{book_id}").status_code == 200
-    assert any(item["id"] == book_id for item in client.get("/api/books").json())
-    filtered_books = client.get(f"/api/books?owner_id={reader_id}")
+    assert client.get(f"/api/books/{book_id}").status_code == 404
+    assert all(item["id"] != book_id for item in client.get("/api/books").json())
+    assert client.get(f"/api/books?owner_id={reader_id}").status_code == 403
+    assert client.get(f"/api/admin/books/{book_id}").status_code == 200
+    filtered_books = client.get(f"/api/admin/books?owner_id={reader_id}")
     assert filtered_books.status_code == 200
     assert [item["id"] for item in filtered_books.json()] == [book_id]
     assert client.patch(f"/api/books/{book_id}", json={"title": "越权修改"}).status_code == 404
     assert client.delete(f"/api/books/{book_id}").status_code == 404
-    assert client.get(f"/api/books/{book_id}").json()["title"] == "隔离工作空间的书"
+    assert client.get(f"/api/admin/books/{book_id}").json()["title"] == "隔离工作空间的书"
 
     client.post("/api/auth/logout")
     assert client.post(
@@ -143,3 +145,77 @@ def test_workspace_data_is_private_for_users_and_visible_to_admin(client):
         json={"username": "isolated-reader", "password": "ReaderNew2!"},
     ).status_code == 200
     assert client.get(f"/api/books/{book_id}").status_code == 200
+
+
+def test_admin_can_copy_book_content_without_copying_quizzes(client):
+    with SessionLocal() as db:
+        source_user, source_workspace = create_user_with_workspace(
+            db,
+            username="copy-source",
+            display_name="复制来源用户",
+            password="CopySource1!",
+        )
+        target_user, target_workspace = create_user_with_workspace(
+            db,
+            username="copy-target",
+            display_name="复制目标用户",
+            password="CopyTarget1!",
+        )
+        source_book = Book(
+            title="可共享的书",
+            author="测试作者",
+            workspace_id=source_workspace.id,
+            created_by_user_id=source_user.id,
+        )
+        db.add(source_book)
+        db.flush()
+        source_pdf = PdfDocument(
+            book_id=source_book.id,
+            file_name="source.pdf",
+            file_path="demo://source.pdf",
+            file_size=1024,
+            page_count=1,
+            chunk_count=1,
+            parse_status="completed",
+        )
+        db.add(source_pdf)
+        db.flush()
+        db.add(
+            ContentChunk(
+                book_id=source_book.id,
+                pdf_id=source_pdf.id,
+                page_number=1,
+                sequence=1,
+                content="这是用于验证复制的原文片段。",
+                char_count=14,
+            )
+        )
+        db.add(Quiz(book_id=source_book.id, title="不应被复制的试卷"))
+        db.commit()
+        source_book_id = source_book.id
+        target_user_id = target_user.id
+        target_workspace_id = target_workspace.id
+
+    response = client.post(
+        f"/api/admin/books/{source_book_id}/copy",
+        json={
+            "target_user_id": target_user_id,
+            "copy_pdf": True,
+            "copy_content": True,
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["copied_pdf_count"] == 1
+    assert body["copied_chunk_count"] == 1
+    assert body["book"]["workspace_id"] == target_workspace_id
+    assert body["book"]["owner_user_id"] == target_user_id
+    assert body["book"]["quizzes"] == []
+
+    with SessionLocal() as db:
+        copied_book = db.get(Book, body["book"]["id"])
+        assert copied_book is not None
+        assert copied_book.workspace_id == get_personal_workspace(db, target_user_id).id
+        assert len(copied_book.pdfs) == 1
+        assert len(copied_book.chunks) == 1
+        assert copied_book.quizzes == []

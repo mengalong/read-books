@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.database import Base, SessionLocal, engine
 from app.models import PdfDocument
 from app.routers.auth import router as auth_router
+from app.routers.books import admin_router as admin_books_router
 from app.routers.books import router as books_router
 from app.routers.quizzes import router as quizzes_router
 from app.routers.settings import router as settings_router
@@ -70,6 +71,7 @@ app.add_middleware(
 )
 
 app.include_router(books_router, prefix="/api")
+app.include_router(admin_books_router, prefix="/api")
 app.include_router(quizzes_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")

@@ -42,8 +42,7 @@ def get_quiz_or_404(
     db: Session, quiz_id: str, identity: AuthIdentity, *, for_write: bool = False
 ) -> Quiz:
     conditions = [Quiz.id == quiz_id]
-    if identity.user.role != "admin" or for_write:
-        conditions.append(Book.workspace_id == identity.workspace.id)
+    conditions.append(Book.workspace_id == identity.workspace.id)
     quiz = db.scalar(
         select(Quiz)
         .options(selectinload(Quiz.questions))
@@ -59,8 +58,7 @@ def get_review_or_404(
     db: Session, review_id: str, identity: AuthIdentity, *, for_write: bool = False
 ) -> ReviewTask:
     conditions = [ReviewTask.id == review_id]
-    if identity.user.role != "admin" or for_write:
-        conditions.append(Book.workspace_id == identity.workspace.id)
+    conditions.append(Book.workspace_id == identity.workspace.id)
     review = db.scalar(
         select(ReviewTask)
         .join(ReviewTask.book)
@@ -277,10 +275,9 @@ def get_generation_task(
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> QuizGenerationTaskResponse:
     statement = select(QuizGenerationTask).where(QuizGenerationTask.id == task_id)
-    if identity.user.role != "admin":
-        statement = statement.join(QuizGenerationTask.book).where(
-            Book.workspace_id == identity.workspace.id
-        )
+    statement = statement.join(QuizGenerationTask.book).where(
+        Book.workspace_id == identity.workspace.id
+    )
     task = db.scalar(statement)
     if not task:
         raise HTTPException(status_code=404, detail="未找到这次出题任务")
@@ -328,8 +325,7 @@ def list_book_quizzes(
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> list[QuizSummary]:
     book_statement = select(Book).where(Book.id == book_id)
-    if identity.user.role != "admin":
-        book_statement = book_statement.where(Book.workspace_id == identity.workspace.id)
+    book_statement = book_statement.where(Book.workspace_id == identity.workspace.id)
     if not db.scalar(book_statement):
         raise HTTPException(status_code=404, detail="未找到这本书")
     statement = select(Quiz).options(selectinload(Quiz.questions)).where(Quiz.book_id == book_id)
@@ -421,10 +417,9 @@ def list_reviews(
         )
         .order_by(ReviewTask.created_at.desc())
     )
-    if identity.user.role != "admin":
-        statement = statement.where(Book.workspace_id == identity.workspace.id)
-        if owner_id and owner_id != identity.user.id:
-            raise HTTPException(status_code=403, detail="不能查看其他用户的复习记录")
+    statement = statement.where(Book.workspace_id == identity.workspace.id)
+    if owner_id and owner_id != identity.user.id:
+        raise HTTPException(status_code=403, detail="不能查看其他用户的复习记录")
     if owner_id:
         statement = statement.where(Book.created_by_user_id == owner_id)
     if book_id:
@@ -557,8 +552,7 @@ def get_book_history(
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> list[ReviewTaskSummary]:
     book_statement = select(Book).where(Book.id == book_id)
-    if identity.user.role != "admin":
-        book_statement = book_statement.where(Book.workspace_id == identity.workspace.id)
+    book_statement = book_statement.where(Book.workspace_id == identity.workspace.id)
     if not db.scalar(book_statement):
         raise HTTPException(status_code=404, detail="未找到这本书")
     reviews = db.scalars(
@@ -585,10 +579,9 @@ def legacy_submit_quiz(
     statement = select(ReviewTask).where(
         ReviewTask.quiz_id == quiz_id, ReviewTask.status == "in_progress"
     )
-    if identity.user.role != "admin":
-        statement = statement.join(ReviewTask.book).where(
-            Book.workspace_id == identity.workspace.id
-        )
+    statement = statement.join(ReviewTask.book).where(
+        Book.workspace_id == identity.workspace.id
+    )
     review = db.scalar(
         statement
         .order_by(ReviewTask.created_at.desc())
@@ -611,10 +604,9 @@ def legacy_quiz_result(
     statement = select(ReviewTask).where(
         ReviewTask.quiz_id == quiz_id, ReviewTask.status == "submitted"
     )
-    if identity.user.role != "admin":
-        statement = statement.join(ReviewTask.book).where(
-            Book.workspace_id == identity.workspace.id
-        )
+    statement = statement.join(ReviewTask.book).where(
+        Book.workspace_id == identity.workspace.id
+    )
     review = db.scalar(
         statement
         .order_by(ReviewTask.submitted_at.desc())
