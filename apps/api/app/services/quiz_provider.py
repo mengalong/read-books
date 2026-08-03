@@ -892,7 +892,13 @@ class HttpQuizAiProvider:
             return GradeResult(0, False, "本题未作答。", [], points)
         rubric = json.dumps(question.grading_rubric, ensure_ascii=False)
         evidence = json.dumps(question.source_evidence, ensure_ascii=False)
+        source_mode = getattr(getattr(question, "quiz", None), "source_mode", "pdf")
         grading_values = {
+            "source_mode": (
+                "pdf（基于已解析 PDF 原文）"
+                if source_mode == "pdf"
+                else "model_knowledge（无 PDF 原文依据）"
+            ),
             "question": question.prompt,
             "reference_answer": question.reference_answer or "",
             "grading_rubric": rubric,

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from app.models import ContentChunk, Question
+from app.models import ContentChunk, Question, Quiz
 from app.services.model_config import EffectiveModelConfiguration
 from app.services.model_usage import new_usage_context
 from app.services.prompt_config import DEFAULT_PROMPTS, PromptTemplateDefinition
@@ -535,3 +535,47 @@ def test_http_provider_grades_short_answer(monkeypatch):
     assert result.is_correct is True
     assert result.matched_points == ["题目可以追溯原文"]
     assert result.missing_points == ["避免自行补全"]
+
+
+def test_http_provider_grades_model_knowledge_answer_without_pdf_evidence(monkeypatch):
+    grade_payload = {
+        "score": 12,
+        "feedback": "回答覆盖了主要情节。",
+        "matched_points": ["说明回信方式"],
+        "missing_points": [],
+    }
+    requests = install_chat_responses(
+        monkeypatch, [json.dumps(grade_payload, ensure_ascii=False)]
+    )
+    provider = HttpQuizAiProvider(make_configuration())
+    quiz = Quiz(
+        id="quiz-model-knowledge",
+        book_id="book-1",
+        title="模型知识试卷",
+        source_mode="model_knowledge",
+    )
+    question = Question(
+        id="question-model-knowledge",
+        quiz=quiz,
+        position=1,
+        question_type="short",
+        prompt="浪矢杂货店如何回应咨询？",
+        options=[],
+        correct_answers=[],
+        explanation="依据模型知识生成。",
+        knowledge_point="回信方式",
+        estimated_seconds=180,
+        reference_answer="通过书信回应投递到牛奶箱中的咨询。",
+        grading_rubric=[
+            {"point": "说明回信方式", "keywords": ["书信"], "score": 20}
+        ],
+        source_chunk_ids=[],
+        source_evidence=[],
+        max_score=20,
+    )
+
+    provider.grade_short_answer(question, "店主会认真写回信来回应咨询。")
+
+    prompt = requests[0]["json"]["messages"][1]["content"]
+    assert "model_knowledge" in prompt
+    assert "原文依据：[]" in prompt

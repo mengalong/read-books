@@ -26,6 +26,7 @@ PROMPT_VARIABLES = {
         "source_material",
     ),
     "grading": (
+        "source_mode",
         "question",
         "reference_answer",
         "grading_rubric",
@@ -43,7 +44,14 @@ PROMPT_REQUIRED_VARIABLES = {
         "duration_minutes",
         "source_material",
     ),
-    "grading": PROMPT_VARIABLES["grading"],
+    "grading": (
+        "question",
+        "reference_answer",
+        "grading_rubric",
+        "source_evidence",
+        "user_answer",
+        "max_score",
+    ),
 }
 TEMPLATE_PATTERN = re.compile(r"{{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*}}")
 
@@ -100,7 +108,9 @@ SOURCE_MATERIAL：
     "grading": PromptTemplateDefinition(
         prompt_type="grading",
         system_prompt="你只输出符合要求的 JSON，不要输出 Markdown。",
-        user_prompt="""请根据题目、参考答案、评分要点、原文依据评价用户回答。不得使用原文依据之外的信息。
+        user_prompt="""请根据来源模式、题目、参考答案、评分要点和原文依据评价用户回答。
+来源模式：{{source_mode}}
+当来源模式为 pdf 时，可以结合原文依据评分；当来源模式为 model_knowledge 时，原文依据为空，请依据参考答案和评分要点评分，不得声称完成了 PDF 原文核验。
 
 题目：{{question}}
 参考答案：{{reference_answer}}
@@ -172,6 +182,7 @@ def prompt_values_for_preview(prompt_type: str) -> dict[str, str]:
             ),
         }
     return {
+        "source_mode": "pdf（基于已解析 PDF 原文）",
         "question": "请概括这段原文的核心观点。",
         "reference_answer": "原文围绕核心观点展开说明，并给出了相应理由。",
         "grading_rubric": json.dumps(
