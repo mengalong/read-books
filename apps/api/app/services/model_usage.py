@@ -6,10 +6,10 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import case, func, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.database import SessionLocal
-from app.models import ModelUsageRecord
+from app.models import ModelUsageRecord, User
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,8 @@ class ModelUsageContext:
     task_label: str
     book_id: str | None = None
     quiz_id: str | None = None
+    user_id: str | None = None
+    workspace_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,10 @@ class ModelUsageTask:
     status: str
     book_id: str | None
     quiz_id: str | None
+    user_id: str | None
+    username: str | None
+    display_name: str | None
+    workspace_id: str | None
     input_tokens: int
     output_tokens: int
     total_tokens: int
@@ -64,12 +70,26 @@ class ModelUsageTask:
     stages: list[ModelUsageRecord]
 
 
+@dataclass(frozen=True)
+class ModelUsageUserSummary:
+    user_id: str
+    username: str
+    display_name: str
+    task_count: int
+    total_calls: int
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+
+
 def new_usage_context(
     task_type: str,
     task_label: str,
     *,
     book_id: str | None = None,
     quiz_id: str | None = None,
+    user_id: str | None = None,
+    workspace_id: str | None = None,
 ) -> ModelUsageContext:
     return ModelUsageContext(
         task_id=str(uuid4()),
@@ -77,6 +97,8 @@ def new_usage_context(
         task_label=task_label,
         book_id=book_id,
         quiz_id=quiz_id,
+        user_id=user_id,
+        workspace_id=workspace_id,
     )
 
 
@@ -122,6 +144,8 @@ def record_model_usage(event: ModelUsageEvent) -> None:
                 latency_ms=event.latency_ms,
                 book_id=event.context.book_id,
                 quiz_id=event.context.quiz_id,
+                user_id=event.context.user_id,
+                workspace_id=event.context.workspace_id,
             )
         )
         db.commit()
@@ -138,9 +162,15 @@ def attach_quiz_to_usage(task_id: str, quiz_id: str) -> None:
 
 
 def get_model_usage_report(
-    db: Session, *, task_type: str | None = None, limit: int = 50
+    db: Session,
+    *,
+    task_type: str | None = None,
+    user_id: str | None = None,
+    limit: int = 50,
 ) -> tuple[ModelUsageSummary, list[ModelUsageTask]]:
     filters = [ModelUsageRecord.task_type == task_type] if task_type else []
+    if user_id:
+        filters.append(ModelUsageRecord.user_id == user_id)
     summary_row = db.execute(
         select(
             func.count(func.distinct(ModelUsageRecord.task_id)),
@@ -172,6 +202,7 @@ def get_model_usage_report(
     records = list(
         db.scalars(
             select(ModelUsageRecord)
+            .options(selectinload(ModelUsageRecord.user))
             .where(ModelUsageRecord.task_id.in_(task_ids))
             .order_by(ModelUsageRecord.created_at, ModelUsageRecord.call_number)
         ).all()
@@ -192,6 +223,10 @@ def get_model_usage_report(
                 status="failed" if any(stage.status == "failed" for stage in stages) else "success",
                 book_id=first.book_id,
                 quiz_id=next((stage.quiz_id for stage in stages if stage.quiz_id), None),
+                user_id=first.user_id,
+                username=first.user.username if first.user else None,
+                display_name=first.user.display_name if first.user else None,
+                workspace_id=first.workspace_id,
                 input_tokens=sum(stage.input_tokens or 0 for stage in stages),
                 output_tokens=sum(stage.output_tokens or 0 for stage in stages),
                 total_tokens=sum(stage.total_tokens or 0 for stage in stages),
@@ -202,3 +237,40 @@ def get_model_usage_report(
             )
         )
     return summary, tasks
+
+
+def get_model_usage_user_summaries(
+    db: Session, *, task_type: str | None = None
+) -> list[ModelUsageUserSummary]:
+    filters = [ModelUsageRecord.user_id.is_not(None)]
+    if task_type:
+        filters.append(ModelUsageRecord.task_type == task_type)
+    rows = db.execute(
+        select(
+            User.id,
+            User.username,
+            User.display_name,
+            func.count(func.distinct(ModelUsageRecord.task_id)),
+            func.count(ModelUsageRecord.id),
+            func.coalesce(func.sum(ModelUsageRecord.input_tokens), 0),
+            func.coalesce(func.sum(ModelUsageRecord.output_tokens), 0),
+            func.coalesce(func.sum(ModelUsageRecord.total_tokens), 0),
+        )
+        .join(ModelUsageRecord, ModelUsageRecord.user_id == User.id)
+        .where(*filters)
+        .group_by(User.id, User.username, User.display_name)
+        .order_by(func.coalesce(func.sum(ModelUsageRecord.total_tokens), 0).desc())
+    ).all()
+    return [
+        ModelUsageUserSummary(
+            user_id=row[0],
+            username=row[1],
+            display_name=row[2],
+            task_count=int(row[3] or 0),
+            total_calls=int(row[4] or 0),
+            input_tokens=int(row[5] or 0),
+            output_tokens=int(row[6] or 0),
+            total_tokens=int(row[7] or 0),
+        )
+        for row in rows
+    ]

@@ -240,7 +240,12 @@ def get_prompt_history(db: Session, prompt_type: str) -> list[PromptTemplateDefi
 
 
 def save_prompt_template(
-    db: Session, prompt_type: str, system_prompt: str, user_prompt: str
+    db: Session,
+    prompt_type: str,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    updated_by_user_id: str | None = None,
 ) -> PromptTemplateDefinition:
     validate_prompt(prompt_type, system_prompt, user_prompt)
     latest_version = db.scalar(
@@ -252,6 +257,8 @@ def save_prompt_template(
         .values(is_active=False)
     )
     row = PromptTemplate(
+        scope_type="platform",
+        updated_by_user_id=updated_by_user_id,
         prompt_type=prompt_type,
         system_prompt=system_prompt.strip(),
         user_prompt=user_prompt.strip(),
@@ -264,6 +271,14 @@ def save_prompt_template(
     return to_definition(row)
 
 
-def reset_prompt_template(db: Session, prompt_type: str) -> PromptTemplateDefinition:
+def reset_prompt_template(
+    db: Session, prompt_type: str, *, updated_by_user_id: str | None = None
+) -> PromptTemplateDefinition:
     default = DEFAULT_PROMPTS[prompt_type]
-    return save_prompt_template(db, prompt_type, default.system_prompt, default.user_prompt)
+    return save_prompt_template(
+        db,
+        prompt_type,
+        default.system_prompt,
+        default.user_prompt,
+        updated_by_user_id=updated_by_user_id,
+    )

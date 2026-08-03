@@ -5,7 +5,15 @@ import fitz
 from sqlalchemy import select
 
 from app.database import SessionLocal
-from app.models import Book, ContentChunk, ModelConfiguration, PdfDocument, Question
+from app.models import (
+    Book,
+    ContentChunk,
+    ModelConfiguration,
+    PdfDocument,
+    Question,
+    User,
+    WorkspaceMember,
+)
 from app.services.model_usage import ModelUsageEvent, new_usage_context, record_model_usage
 from app.services.pdf_parser import parse_pdf_document
 from app.services.pre_generation import recover_pre_generation_tasks
@@ -71,7 +79,18 @@ def wait_for_generation(client, task_id: str) -> dict:
 
 
 def test_token_usage_report_groups_calls_by_task(client):
-    context = new_usage_context("token_report_test", "Token 统计测试")
+    with SessionLocal() as db:
+        user = db.query(User).filter(User.username == "test-admin").one()
+        workspace_id = db.query(WorkspaceMember.workspace_id).filter(
+            WorkspaceMember.user_id == user.id
+        ).scalar()
+        user_id = user.id
+    context = new_usage_context(
+        "token_report_test",
+        "Token 统计测试",
+        user_id=user_id,
+        workspace_id=workspace_id,
+    )
     record_model_usage(
         ModelUsageEvent(
             context=context,
@@ -117,6 +136,13 @@ def test_token_usage_report_groups_calls_by_task(client):
     }
     assert len(body["tasks"]) == 1
     assert body["tasks"][0]["status"] == "failed"
+    assert body["tasks"][0]["username"] == "test-admin"
+    assert body["users"][0]["user_id"] == user_id
+    filtered = client.get(
+        f"/api/settings/token-usage?task_type=token_report_test&user_id={user_id}"
+    )
+    assert filtered.status_code == 200
+    assert filtered.json()["summary"]["total_tokens"] == 150
     assert [stage["phase"] for stage in body["tasks"][0]["stages"]] == [
         "quiz_generation",
         "quiz_generation_repair",

@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
+from app.dependencies import require_admin
+from app.services.auth import AuthIdentity
 from app.models import ModelConfiguration
 from app.schemas import (
     ModelConfigurationResponse,
@@ -20,6 +22,7 @@ from app.schemas import (
     TokenUsageStageResponse,
     TokenUsageSummaryResponse,
     TokenUsageTaskResponse,
+    TokenUsageUserSummaryResponse,
 )
 from app.services.model_config import (
     DEFAULT_CONFIGURATION_ID,
@@ -28,6 +31,7 @@ from app.services.model_config import (
 from app.services.model_usage import (
     ModelUsageEvent,
     get_model_usage_report,
+    get_model_usage_user_summaries,
     new_usage_context,
     record_model_usage,
     token_counts,
@@ -44,7 +48,11 @@ from app.services.prompt_config import (
     validate_prompt,
 )
 
-router = APIRouter(prefix="/settings", tags=["settings"])
+router = APIRouter(
+    prefix="/settings",
+    tags=["settings"],
+    dependencies=[Depends(require_admin)],
+)
 settings = get_settings()
 
 
@@ -94,7 +102,9 @@ def get_model_configuration(db: Session = Depends(get_db)) -> ModelConfiguration
 
 @router.put("/model", response_model=ModelConfigurationResponse)
 def update_model_configuration(
-    payload: ModelConfigurationUpdate, db: Session = Depends(get_db)
+    payload: ModelConfigurationUpdate,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_admin),
 ) -> ModelConfigurationResponse:
     base_url = payload.base_url.strip()
     model_name = payload.model_name.strip()
@@ -116,6 +126,8 @@ def update_model_configuration(
     stored.provider_mode = payload.provider_mode
     stored.base_url = base_url
     stored.model_name = model_name
+    stored.scope_type = "platform"
+    stored.updated_by_user_id = identity.user.id
     stored.timeout_ms = payload.timeout_ms
     stored.temperature = payload.temperature
     if payload.clear_api_key:
@@ -144,11 +156,20 @@ def get_prompt_template_history(
 
 @router.put("/prompts/{prompt_type}", response_model=PromptTemplateResponse)
 def update_prompt_template(
-    prompt_type: str, payload: PromptTemplateUpdate, db: Session = Depends(get_db)
+    prompt_type: str,
+    payload: PromptTemplateUpdate,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_admin),
 ) -> PromptTemplateResponse:
     prompt_type_or_404(prompt_type)
     try:
-        prompt = save_prompt_template(db, prompt_type, payload.system_prompt, payload.user_prompt)
+        prompt = save_prompt_template(
+            db,
+            prompt_type,
+            payload.system_prompt,
+            payload.user_prompt,
+            updated_by_user_id=identity.user.id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return to_prompt_response(prompt)
@@ -156,10 +177,14 @@ def update_prompt_template(
 
 @router.post("/prompts/{prompt_type}/reset", response_model=PromptTemplateResponse)
 def reset_prompt(
-    prompt_type: str, db: Session = Depends(get_db)
+    prompt_type: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_admin),
 ) -> PromptTemplateResponse:
     prompt_type_or_404(prompt_type)
-    return to_prompt_response(reset_prompt_template(db, prompt_type))
+    return to_prompt_response(
+        reset_prompt_template(db, prompt_type, updated_by_user_id=identity.user.id)
+    )
 
 
 @router.post("/prompts/{prompt_type}/preview", response_model=PromptPreviewResponse)
@@ -185,10 +210,14 @@ def preview_prompt(
 @router.get("/token-usage", response_model=TokenUsageReportResponse)
 def get_token_usage(
     task_type: str | None = Query(default=None),
+    user_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> TokenUsageReportResponse:
-    summary, tasks = get_model_usage_report(db, task_type=task_type, limit=limit)
+    summary, tasks = get_model_usage_report(
+        db, task_type=task_type, user_id=user_id, limit=limit
+    )
+    users = get_model_usage_user_summaries(db, task_type=task_type)
     return TokenUsageReportResponse(
         summary=TokenUsageSummaryResponse(
             task_count=summary.task_count,
@@ -200,11 +229,16 @@ def get_token_usage(
             output_tokens=summary.output_tokens,
             total_tokens=summary.total_tokens,
         ),
+        users=[TokenUsageUserSummaryResponse.model_validate(user) for user in users],
         tasks=[
             TokenUsageTaskResponse(
                 task_id=task.task_id,
                 task_type=task.task_type,
                 task_label=task.task_label,
+                user_id=task.user_id,
+                username=task.username,
+                display_name=task.display_name,
+                workspace_id=task.workspace_id,
                 status=task.status,
                 book_id=task.book_id,
                 quiz_id=task.quiz_id,
@@ -250,7 +284,9 @@ def record_test_result(db: Session, status: str, message: str, latency_ms: int) 
 
 @router.post("/model/test", response_model=ModelConnectionTestResponse)
 def test_model_connection(
-    payload: ModelConnectionTestRequest, db: Session = Depends(get_db)
+    payload: ModelConnectionTestRequest,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_admin),
 ) -> ModelConnectionTestResponse:
     base_url = payload.base_url.strip()
     model_name = payload.model_name.strip()
@@ -276,7 +312,10 @@ def test_model_connection(
     )
     started_at = perf_counter()
     usage_context = new_usage_context(
-        "model_connection_test", f"测试模型连接 · {model_name}"
+        "model_connection_test",
+        f"测试模型连接 · {model_name}",
+        user_id=identity.user.id,
+        workspace_id=identity.workspace.id,
     )
 
     def record_connection_usage(

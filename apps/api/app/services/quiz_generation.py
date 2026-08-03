@@ -238,6 +238,8 @@ def run_generation_task(task_id: str) -> None:
                 if task.task_type == "pre_generation"
                 else f"《{book.title}》生成复习试卷",
                 book_id=book.id,
+                user_id=task.created_by_user_id,
+                workspace_id=book.workspace_id,
             )
             provider = get_quiz_provider(
                 settings,

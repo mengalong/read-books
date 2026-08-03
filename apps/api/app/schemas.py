@@ -358,6 +358,8 @@ class PromptPreviewResponse(BaseModel):
 
 class TokenUsageStageResponse(ApiModel):
     id: str
+    user_id: str | None = None
+    workspace_id: str | None = None
     phase: str
     call_number: int
     model_name: str
@@ -374,6 +376,10 @@ class TokenUsageTaskResponse(BaseModel):
     task_id: str
     task_type: str
     task_label: str
+    user_id: str | None
+    username: str | None
+    display_name: str | None
+    workspace_id: str | None
     status: Literal["success", "failed"]
     book_id: str | None
     quiz_id: str | None
@@ -384,6 +390,17 @@ class TokenUsageTaskResponse(BaseModel):
     started_at: datetime
     finished_at: datetime
     stages: list[TokenUsageStageResponse]
+
+
+class TokenUsageUserSummaryResponse(ApiModel):
+    user_id: str
+    username: str
+    display_name: str
+    task_count: int
+    total_calls: int
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
 
 
 class TokenUsageSummaryResponse(BaseModel):
@@ -399,6 +416,7 @@ class TokenUsageSummaryResponse(BaseModel):
 
 class TokenUsageReportResponse(BaseModel):
     summary: TokenUsageSummaryResponse
+    users: list[TokenUsageUserSummaryResponse] = Field(default_factory=list)
     tasks: list[TokenUsageTaskResponse]
 
 

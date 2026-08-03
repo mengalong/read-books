@@ -492,6 +492,8 @@ def submit_review(
         f"提交《{review.book.title}》第 {review.attempt_number} 次复习",
         book_id=review.book_id,
         quiz_id=review.quiz_id,
+        user_id=identity.user.id,
+        workspace_id=review.book.workspace_id,
     )
     provider = current_provider(db, usage_context)
     try:
