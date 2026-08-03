@@ -164,7 +164,7 @@ def test_http_provider_generates_validated_questions(monkeypatch):
     assert requests[0]["url"] == "https://models.example.com/v1/chat/completions"
     assert requests[0]["headers"]["Authorization"] == "Bearer provider-secret"
     assert requests[0]["timeout"] == 30
-    assert requests[0]["json"]["max_tokens"] == 4_000
+    assert "max_tokens" not in requests[0]["json"]
     assert "chunk-1" in requests[0]["json"]["messages"][1]["content"]
 
 
@@ -308,7 +308,7 @@ def test_http_provider_explains_empty_content_after_token_limit(monkeypatch):
     monkeypatch.setattr("app.services.quiz_provider.httpx.Client", FakeClient)
     provider = HttpQuizAiProvider(make_configuration())
 
-    with pytest.raises(RuntimeError, match="达到 max_tokens 上限"):
+    with pytest.raises(RuntimeError, match="模型服务在自身输出上限处结束"):
         provider.generate_questions(
             chunks=chunks,
             file_names={"pdf-1": "复习材料.pdf"},

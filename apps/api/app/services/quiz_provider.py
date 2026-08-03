@@ -399,7 +399,6 @@ class HttpQuizAiProvider:
     def _chat_completion(
         self,
         messages: list[dict[str, str]],
-        max_tokens: int,
         phase: str = "model_call",
     ) -> str:
         started_at = perf_counter()
@@ -408,18 +407,18 @@ class HttpQuizAiProvider:
         headers = {"Content-Type": "application/json"}
         if self.configuration.api_key:
             headers["Authorization"] = f"Bearer {self.configuration.api_key}"
+        request_body: dict[str, Any] = {
+            "model": self.configuration.model_name.strip(),
+            "messages": messages,
+            "temperature": self.configuration.temperature,
+            "stream": False,
+        }
         try:
             with httpx.Client(timeout=self.configuration.timeout_ms / 1_000) as client:
                 response = client.post(
                     self._endpoint(),
                     headers=headers,
-                    json={
-                        "model": self.configuration.model_name.strip(),
-                        "messages": messages,
-                        "temperature": self.configuration.temperature,
-                        "max_tokens": max_tokens,
-                        "stream": False,
-                    },
+                    json=request_body,
                 )
         except httpx.ReadTimeout as exc:
             timeout_seconds = round(self.configuration.timeout_ms / 1_000)
@@ -477,7 +476,7 @@ class HttpQuizAiProvider:
                 {"content": message.get("reasoning_content")} if isinstance(message, dict) else None
             )
             if finish_reason == "length":
-                error_message = "真实模型响应没有最终文本内容：输出达到 max_tokens 上限，请提高模型输出预算"
+                error_message = "真实模型响应没有最终文本内容：模型服务在自身输出上限处结束，请检查模型服务的输出限制或缩短提示词"
             elif reasoning_content:
                 error_message = "真实模型响应只有推理内容，没有最终文本内容；请调整模型的推理或响应配置"
             else:
@@ -754,10 +753,7 @@ class HttpQuizAiProvider:
                 ),
             },
         ]
-        max_tokens = max(4_000, total * 700)
-        content = self._chat_completion(
-            messages, max_tokens=max_tokens, phase="quiz_generation"
-        )
+        content = self._chat_completion(messages, phase="quiz_generation")
         try:
             return self._validate_questions(
                 parse_json_object(content),
@@ -770,7 +766,6 @@ class HttpQuizAiProvider:
         except RuntimeError as first_error:
             repaired_content = self._chat_completion(
                 self._repair_generation_messages(messages, content, str(first_error)),
-                max_tokens=max_tokens,
                 phase="quiz_generation_repair",
             )
             try:
@@ -815,7 +810,6 @@ class HttpQuizAiProvider:
                     ),
                 },
             ],
-            max_tokens=1_200,
             phase="short_answer_grading",
         )
         payload = parse_json_object(content)
