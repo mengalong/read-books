@@ -1,7 +1,8 @@
 from datetime import date, datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
@@ -348,7 +349,12 @@ def start_review(quiz_id: str, db: Session = Depends(get_db)) -> ReviewTaskRespo
 
 @router.get("/reviews", response_model=list[ReviewTaskSummary])
 def list_reviews(
-    book_id: str | None = Query(default=None), db: Session = Depends(get_db)
+    book_id: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+    review_status: Literal["in_progress", "submitted"] | None = Query(
+        default=None, alias="status"
+    ),
+    db: Session = Depends(get_db),
 ) -> list[ReviewTaskSummary]:
     statement = (
         select(ReviewTask)
@@ -360,6 +366,13 @@ def list_reviews(
     )
     if book_id:
         statement = statement.where(ReviewTask.book_id == book_id)
+    if search and search.strip():
+        keyword = f"%{search.strip()}%"
+        statement = statement.join(ReviewTask.book).where(
+            or_(Book.title.ilike(keyword), Book.author.ilike(keyword))
+        )
+    if review_status:
+        statement = statement.where(ReviewTask.status == review_status)
     return [to_review_summary(review) for review in db.scalars(statement).all()]
 
 

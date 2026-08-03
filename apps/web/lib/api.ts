@@ -193,8 +193,12 @@ export function getReviewResult(reviewId: string) {
   return apiFetch<ReviewTask>(`/reviews/${reviewId}/result`);
 }
 
-export function getReviewHistory(bookId?: string) {
-  const suffix = bookId ? `?book_id=${encodeURIComponent(bookId)}` : "";
+export function getReviewHistory(filters: { bookId?: string; search?: string; status?: "in_progress" | "submitted" } = {}) {
+  const params = new URLSearchParams();
+  if (filters.bookId) params.set("book_id", filters.bookId);
+  if (filters.search) params.set("search", filters.search);
+  if (filters.status) params.set("status", filters.status);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<ReviewTaskSummary[]>(`/reviews${suffix}`);
 }
 

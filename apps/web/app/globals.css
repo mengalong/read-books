@@ -2279,6 +2279,26 @@ p {
   overflow-x: auto;
 }
 
+.review-filters {
+  margin-bottom: 16px;
+}
+
+.review-filter-meta {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.review-filter-meta .tag-row {
+  margin-top: 0;
+}
+
+.review-filter-meta > span {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .history-table {
   border-collapse: collapse;
   min-width: 700px;
@@ -2544,6 +2564,10 @@ p {
   .books-toolbar {
     align-items: stretch;
     display: grid;
+  }
+
+  .review-filter-meta {
+    justify-content: space-between;
   }
 
   .search-box {

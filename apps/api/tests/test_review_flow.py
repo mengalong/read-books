@@ -301,6 +301,18 @@ def test_generate_submit_and_avoid_recent_sources(client):
     assert another_review.json()["attempt_number"] == 2
     all_reviews = client.get(f"/api/reviews?book_id={book_id}")
     assert [item["attempt_number"] for item in all_reviews.json()] == [2, 1]
+    title_results = client.get("/api/reviews", params={"search": "复习流程"})
+    assert {item["id"] for item in title_results.json()} == {
+        another_review.json()["id"],
+        review.json()["id"],
+    }
+    author_results = client.get("/api/reviews", params={"search": "测试作者"})
+    assert {item["id"] for item in author_results.json()} == {
+        another_review.json()["id"],
+        review.json()["id"],
+    }
+    submitted_results = client.get("/api/reviews", params={"status": "submitted"})
+    assert [item["id"] for item in submitted_results.json()] == [review.json()["id"]]
 
     deleted = client.delete(f"/api/reviews/{another_review.json()['id']}")
     assert deleted.status_code == 204
