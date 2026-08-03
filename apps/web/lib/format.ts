@@ -2,7 +2,7 @@ const BEIJING_TIME_ZONE = "Asia/Shanghai";
 
 function parseServerDate(value: string) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return new Date(`${value}T00:00:00Z`);
+    return new Date(`${value}T00:00:00+08:00`);
   }
   if (/(?:Z|[+-]\d{2}:?\d{2})$/.test(value)) {
     return new Date(value);
@@ -17,33 +17,27 @@ export function formatFileSize(size: number) {
 }
 
 export function formatDate(value: string | null | undefined) {
-  if (!value) return "暂无";
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    timeZone: BEIJING_TIME_ZONE,
-  }).format(parseServerDate(value));
+  return formatDateTime(value);
 }
 
 export function formatDateTime(value: string | null | undefined) {
   if (!value) return "暂无";
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "numeric",
-    day: "numeric",
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
     hour: "2-digit",
+    hourCycle: "h23",
     minute: "2-digit",
+    month: "2-digit",
+    second: "2-digit",
     timeZone: BEIJING_TIME_ZONE,
-  }).format(parseServerDate(value));
+    year: "numeric",
+  }).formatToParts(parseServerDate(value));
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
 }
 
 export function formatDateTimeLong(value: string | null | undefined) {
-  if (!value) return "暂无";
-  return new Intl.DateTimeFormat("zh-CN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: BEIJING_TIME_ZONE,
-  }).format(parseServerDate(value));
+  return formatDateTime(value);
 }
 
 export function formatDuration(seconds: number | null | undefined) {
