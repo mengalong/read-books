@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     upload_dir: Path = PROJECT_ROOT / "data/uploads"
     parsed_dir: Path = PROJECT_ROOT / "data/parsed"
     seed_demo_data: bool = True
+    initial_admin_username: str | None = None
+    initial_admin_password: str | None = Field(default=None, repr=False)
+    initial_admin_display_name: str = "系统管理员"
+    session_cookie_name: str = "huijuan_session"
+    session_ttl_hours: int = 24 * 7
+    session_cookie_secure: bool = False
     ocr_enabled: bool = True
     ocr_command: str = "swift"
     ocr_script: Path = PROJECT_ROOT / "scripts/pdf_ocr.swift"

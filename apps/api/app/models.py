@@ -36,6 +36,114 @@ class TimestampMixin:
     )
 
 
+class User(TimestampMixin, Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    username: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(120), default="")
+    password_hash: Mapped[str] = mapped_column(Text)
+    role: Mapped[str] = mapped_column(String(20), default="user", index=True)
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=True)
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    workspace_memberships: Mapped[list[WorkspaceMember]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    sessions: Mapped[list[UserSession]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    created_workspaces: Mapped[list[Workspace]] = relationship(
+        back_populates="created_by_user", foreign_keys="Workspace.created_by_user_id"
+    )
+    created_books: Mapped[list[Book]] = relationship(
+        back_populates="created_by_user", foreign_keys="Book.created_by_user_id"
+    )
+    created_generation_tasks: Mapped[list[QuizGenerationTask]] = relationship(
+        back_populates="created_by_user", foreign_keys="QuizGenerationTask.created_by_user_id"
+    )
+    usage_records: Mapped[list[ModelUsageRecord]] = relationship(
+        back_populates="user", foreign_keys="ModelUsageRecord.user_id"
+    )
+    audit_logs: Mapped[list[AuditLog]] = relationship(
+        back_populates="actor_user", foreign_keys="AuditLog.actor_user_id"
+    )
+
+
+class Workspace(TimestampMixin, Base):
+    __tablename__ = "workspaces"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(120))
+    workspace_type: Mapped[str] = mapped_column(String(20), default="personal")
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    created_by_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
+
+    created_by_user: Mapped[User] = relationship(
+        back_populates="created_workspaces", foreign_keys=[created_by_user_id]
+    )
+    members: Mapped[list[WorkspaceMember]] = relationship(
+        back_populates="workspace", cascade="all, delete-orphan"
+    )
+    books: Mapped[list[Book]] = relationship(back_populates="workspace")
+    usage_records: Mapped[list[ModelUsageRecord]] = relationship(back_populates="workspace")
+
+
+class WorkspaceMember(Base):
+    __tablename__ = "workspace_members"
+    __table_args__ = (UniqueConstraint("workspace_id", "user_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(20), default="owner")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    workspace: Mapped[Workspace] = relationship(back_populates="members")
+    user: Mapped[User] = relationship(back_populates="workspace_memberships")
+
+
+class UserSession(TimestampMixin, Base):
+    __tablename__ = "user_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+    ip_address: Mapped[str | None] = mapped_column(String(80))
+
+    user: Mapped[User] = relationship(back_populates="sessions")
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    actor_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    action: Mapped[str] = mapped_column(String(80), index=True)
+    target_type: Mapped[str] = mapped_column(String(50), index=True)
+    target_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    ip_address: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+    actor_user: Mapped[User | None] = relationship(
+        back_populates="audit_logs", foreign_keys=[actor_user_id]
+    )
+
+
 class Book(TimestampMixin, Base):
     __tablename__ = "books"
 
@@ -47,6 +155,12 @@ class Book(TimestampMixin, Base):
     language: Mapped[str] = mapped_column(String(30), default="中文")
     reading_status: Mapped[str] = mapped_column(String(30), default="finished", index=True)
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    workspace_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
     pre_generation_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     pre_generation_status: Mapped[str] = mapped_column(String(20), default="disabled", index=True)
     pre_generation_error: Mapped[str | None] = mapped_column(Text)
@@ -66,6 +180,10 @@ class Book(TimestampMixin, Base):
     )
     review_tasks: Mapped[list[ReviewTask]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
+    )
+    workspace: Mapped[Workspace | None] = relationship(back_populates="books")
+    created_by_user: Mapped[User | None] = relationship(
+        back_populates="created_books", foreign_keys=[created_by_user_id]
     )
 
 
@@ -189,6 +307,9 @@ class QuizGenerationTask(TimestampMixin, Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     book_id: Mapped[str] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
     task_type: Mapped[str] = mapped_column(String(40), index=True)
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     source_mode: Mapped[str] = mapped_column(String(30), default="pdf", index=True)
@@ -207,6 +328,9 @@ class QuizGenerationTask(TimestampMixin, Base):
     error_message: Mapped[str | None] = mapped_column(Text)
 
     book: Mapped[Book] = relationship(back_populates="generation_tasks")
+    created_by_user: Mapped[User | None] = relationship(
+        back_populates="created_generation_tasks", foreign_keys=[created_by_user_id]
+    )
 
 
 class ReviewTask(TimestampMixin, Base):
@@ -258,6 +382,13 @@ class ModelConfiguration(TimestampMixin, Base):
     __tablename__ = "model_configurations"
 
     id: Mapped[str] = mapped_column(String(20), primary_key=True, default="default")
+    scope_type: Mapped[str] = mapped_column(String(20), default="platform", index=True)
+    workspace_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    updated_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
     provider_mode: Mapped[str] = mapped_column(String(30), default="mock")
     base_url: Mapped[str] = mapped_column(Text, default="")
     api_key: Mapped[str | None] = mapped_column(Text)
@@ -274,6 +405,13 @@ class PromptTemplate(TimestampMixin, Base):
     __tablename__ = "prompt_templates"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    scope_type: Mapped[str] = mapped_column(String(20), default="platform", index=True)
+    workspace_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    updated_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
     prompt_type: Mapped[str] = mapped_column(String(30), index=True)
     system_prompt: Mapped[str] = mapped_column(Text)
     user_prompt: Mapped[str] = mapped_column(Text)
@@ -299,6 +437,17 @@ class ModelUsageRecord(Base):
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     book_id: Mapped[str | None] = mapped_column(String(36), index=True)
     quiz_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    workspace_id: Mapped[str | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="SET NULL"), index=True
+    )
+    user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, index=True
+    )
+
+    workspace: Mapped[Workspace | None] = relationship(back_populates="usage_records")
+    user: Mapped[User | None] = relationship(
+        back_populates="usage_records", foreign_keys=[user_id]
     )
