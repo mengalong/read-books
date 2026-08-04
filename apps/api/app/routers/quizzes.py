@@ -254,6 +254,8 @@ def generate_quiz(
         )
         if book is None:
             raise ValueError("未找到这本书")
+        if book.shelf_status != "active":
+            raise ValueError("这本书已下架，请恢复后再生成试卷")
         task = start_generation_task(
             db,
             book_id,
@@ -381,6 +383,8 @@ def start_review(
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> ReviewTaskResponse:
     quiz = get_quiz_or_404(db, quiz_id, identity, for_write=True)
+    if quiz.book.shelf_status != "active":
+        raise HTTPException(status_code=409, detail="这本书已下架，请恢复后再开始复习")
     attempt_number = (
         db.scalar(select(func.max(ReviewTask.attempt_number)).where(ReviewTask.quiz_id == quiz_id)) or 0
     ) + 1
@@ -448,6 +452,8 @@ def reopen_review(
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> ReviewTaskResponse:
     review = get_review_or_404(db, review_id, identity, for_write=True)
+    if review.book.shelf_status != "active":
+        raise HTTPException(status_code=409, detail="这本书已下架，请恢复后再重新答题")
     for answer in list(review.answers):
         db.delete(answer)
     review.status = "in_progress"

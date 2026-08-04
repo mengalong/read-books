@@ -1,7 +1,7 @@
 from sqlalchemy import select
 
 from app.database import SessionLocal
-from app.models import Book, ContentChunk, PdfDocument, Quiz, User
+from app.models import AuditLog, Book, ContentChunk, PdfDocument, Quiz, User
 from app.services.auth import create_user_with_workspace, get_personal_workspace
 
 
@@ -219,3 +219,56 @@ def test_admin_can_copy_book_content_without_copying_quizzes(client):
         assert len(copied_book.pdfs) == 1
         assert len(copied_book.chunks) == 1
         assert copied_book.quizzes == []
+
+
+def test_admin_can_manage_other_users_books_but_regular_users_cannot(client):
+    with SessionLocal() as db:
+        user, workspace = create_user_with_workspace(
+            db,
+            username="managed-book-owner",
+            display_name="受管书籍用户",
+            password="ManagedBook1!",
+            must_change_password=False,
+        )
+        book = Book(
+            title="管理员操作范围测试书",
+            workspace_id=workspace.id,
+            created_by_user_id=user.id,
+        )
+        db.add(book)
+        db.commit()
+        book_id = book.id
+
+    client.post("/api/auth/logout")
+    assert client.post(
+        "/api/auth/login",
+        json={"username": "managed-book-owner", "password": "ManagedBook1!"},
+    ).status_code == 200
+    assert client.post(f"/api/admin/books/{book_id}/unlist").status_code == 403
+    assert client.delete(f"/api/admin/books/{book_id}").status_code == 403
+
+    client.post("/api/auth/logout")
+    assert client.post(
+        "/api/auth/login",
+        json={"username": "test-admin", "password": "TestAdmin1!"},
+    ).status_code == 200
+    unlisted = client.post(f"/api/admin/books/{book_id}/unlist")
+    assert unlisted.status_code == 200
+    assert unlisted.json()["shelf_status"] == "unlisted"
+    restored = client.post(f"/api/admin/books/{book_id}/restore")
+    assert restored.status_code == 200
+    assert restored.json()["shelf_status"] == "active"
+    assert client.delete(f"/api/admin/books/{book_id}").status_code == 204
+
+    with SessionLocal() as db:
+        assert db.get(Book, book_id) is None
+        actions = set(
+            db.scalars(
+                select(AuditLog.action).where(AuditLog.target_id == book_id)
+            ).all()
+        )
+        assert {
+            "admin.book_unlisted",
+            "admin.book_restored",
+            "admin.book_deleted",
+        }.issubset(actions)

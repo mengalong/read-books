@@ -1,5 +1,6 @@
 import shutil
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies import require_admin, require_ready_identity
-from app.models import Book, ContentChunk, PdfDocument, Quiz, User
+from app.models import Book, ContentChunk, PdfDocument, Quiz, QuizGenerationTask, User
 from app.services.auth import AuthIdentity, add_audit_log, get_personal_workspace
 from app.schemas import (
     AdminBookCopyRequest,
@@ -48,17 +49,45 @@ def get_admin_book_or_404(db: Session, book_id: str) -> Book:
     return book
 
 
+def ensure_book_is_active(book: Book) -> None:
+    if book.shelf_status != "active":
+        raise HTTPException(status_code=409, detail="这本书已下架，请恢复后再进行此操作")
+
+
+def ensure_book_has_no_active_generation(db: Session, book: Book) -> None:
+    active_task = db.scalar(
+        select(QuizGenerationTask.id).where(
+            QuizGenerationTask.book_id == book.id,
+            QuizGenerationTask.status.in_(["pending", "processing"]),
+        )
+    )
+    if active_task:
+        raise HTTPException(status_code=409, detail="这本书正在生成试卷，完成后才能下架或删除")
+
+
+def delete_book_and_files(db: Session, book: Book) -> None:
+    file_paths = [pdf.file_path for pdf in book.pdfs if not pdf.file_path.startswith("demo://")]
+    db.delete(book)
+    db.commit()
+    for file_path in file_paths:
+        Path(file_path).unlink(missing_ok=True)
+
+
 @router.get("", response_model=list[BookSummary])
 def list_books(
     search: str | None = None,
     reading_status: str | None = Query(default=None, alias="status"),
+    shelf_status: Literal["active", "unlisted"] = Query(default="active"),
     owner_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> list[BookSummary]:
     statement = (
         select(Book)
-        .where(Book.workspace_id == identity.workspace.id)
+        .where(
+            Book.workspace_id == identity.workspace.id,
+            Book.shelf_status == shelf_status,
+        )
         .order_by(Book.updated_at.desc())
     )
     if owner_id and owner_id != identity.user.id:
@@ -119,11 +148,35 @@ def delete_book(
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> None:
     book = get_book_or_404(db, book_id, identity, for_write=True)
-    file_paths = [pdf.file_path for pdf in book.pdfs if not pdf.file_path.startswith("demo://")]
-    db.delete(book)
+    ensure_book_has_no_active_generation(db, book)
+    delete_book_and_files(db, book)
+
+
+@router.post("/{book_id}/unlist", response_model=BookDetail)
+def unlist_book(
+    book_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> BookDetail:
+    book = get_book_or_404(db, book_id, identity, for_write=True)
+    ensure_book_has_no_active_generation(db, book)
+    book.shelf_status = "unlisted"
     db.commit()
-    for file_path in file_paths:
-        Path(file_path).unlink(missing_ok=True)
+    db.refresh(book)
+    return to_book_detail(db, book)
+
+
+@router.post("/{book_id}/restore", response_model=BookDetail)
+def restore_book(
+    book_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> BookDetail:
+    book = get_book_or_404(db, book_id, identity, for_write=True)
+    book.shelf_status = "active"
+    db.commit()
+    db.refresh(book)
+    return to_book_detail(db, book)
 
 
 @router.post(
@@ -135,7 +188,8 @@ async def upload_pdf(
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> PdfResponse:
-    get_book_or_404(db, book_id, identity, for_write=True)
+    book = get_book_or_404(db, book_id, identity, for_write=True)
+    ensure_book_is_active(book)
     original_name = Path(file.filename or "book.pdf").name
     if not original_name.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="请选择 PDF 文件")
@@ -188,7 +242,8 @@ def start_book_pre_generation(
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> PreGenerationResponse:
-    get_book_or_404(db, book_id, identity, for_write=True)
+    book = get_book_or_404(db, book_id, identity, for_write=True)
+    ensure_book_is_active(book)
     try:
         return start_pre_generation(db, book_id, created_by_user_id=identity.user.id)
     except ValueError as exc:
@@ -284,6 +339,7 @@ def list_chunks(
 def list_admin_books(
     search: str | None = None,
     reading_status: str | None = Query(default=None, alias="status"),
+    shelf_status: Literal["active", "unlisted"] | None = Query(default=None),
     owner_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
     _: AuthIdentity = Depends(require_admin),
@@ -296,6 +352,8 @@ def list_admin_books(
         statement = statement.where(or_(Book.title.ilike(keyword), Book.author.ilike(keyword)))
     if reading_status:
         statement = statement.where(Book.reading_status == reading_status)
+    if shelf_status:
+        statement = statement.where(Book.shelf_status == shelf_status)
     return [to_book_summary(db, book) for book in db.scalars(statement).all()]
 
 
@@ -306,6 +364,76 @@ def get_admin_book(
     _: AuthIdentity = Depends(require_admin),
 ) -> BookDetail:
     return to_book_detail(db, get_admin_book_or_404(db, book_id))
+
+
+@admin_router.post("/{book_id}/unlist", response_model=BookDetail)
+def unlist_admin_book(
+    book_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_admin),
+) -> BookDetail:
+    book = get_admin_book_or_404(db, book_id)
+    ensure_book_has_no_active_generation(db, book)
+    changed = book.shelf_status != "unlisted"
+    book.shelf_status = "unlisted"
+    if changed:
+        add_audit_log(
+            db,
+            actor_user_id=identity.user.id,
+            action="admin.book_unlisted",
+            target_type="book",
+            target_id=book.id,
+            details={"owner_user_id": book.created_by_user_id},
+        )
+    db.commit()
+    db.refresh(book)
+    return to_book_detail(db, book)
+
+
+@admin_router.post("/{book_id}/restore", response_model=BookDetail)
+def restore_admin_book(
+    book_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_admin),
+) -> BookDetail:
+    book = get_admin_book_or_404(db, book_id)
+    changed = book.shelf_status != "active"
+    book.shelf_status = "active"
+    if changed:
+        add_audit_log(
+            db,
+            actor_user_id=identity.user.id,
+            action="admin.book_restored",
+            target_type="book",
+            target_id=book.id,
+            details={"owner_user_id": book.created_by_user_id},
+        )
+    db.commit()
+    db.refresh(book)
+    return to_book_detail(db, book)
+
+
+@admin_router.delete("/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_admin_book(
+    book_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_admin),
+) -> None:
+    book = get_admin_book_or_404(db, book_id)
+    ensure_book_has_no_active_generation(db, book)
+    add_audit_log(
+        db,
+        actor_user_id=identity.user.id,
+        action="admin.book_deleted",
+        target_type="book",
+        target_id=book.id,
+        details={
+            "title": book.title,
+            "owner_user_id": book.created_by_user_id,
+            "workspace_id": book.workspace_id,
+        },
+    )
+    delete_book_and_files(db, book)
 
 
 @admin_router.get("/{book_id}/chunks", response_model=list[ChunkResponse])
@@ -374,6 +502,7 @@ def copy_admin_book(
             cover_color=source.cover_color,
             language=source.language,
             reading_status=source.reading_status,
+            shelf_status="active",
             tags=list(source.tags or []),
             workspace_id=target_workspace.id,
             created_by_user_id=target_user.id,

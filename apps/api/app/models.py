@@ -154,6 +154,7 @@ class Book(TimestampMixin, Base):
     cover_color: Mapped[str] = mapped_column(String(20), default="#2F6B5F")
     language: Mapped[str] = mapped_column(String(30), default="中文")
     reading_status: Mapped[str] = mapped_column(String(30), default="finished", index=True)
+    shelf_status: Mapped[str] = mapped_column(String(20), default="active", index=True)
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
     workspace_id: Mapped[str | None] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"), index=True

@@ -51,6 +51,8 @@ def validate_generation_request(
     book = db.get(Book, book_id)
     if not book:
         raise ValueError("未找到这本书")
+    if book.shelf_status != "active":
+        raise ValueError("这本书已下架，请恢复后再生成试卷")
     if payload.single_count + payload.multiple_count + payload.short_count == 0:
         raise ValueError("至少需要选择一种题型")
     if payload.page_start and payload.page_end and payload.page_start > payload.page_end:

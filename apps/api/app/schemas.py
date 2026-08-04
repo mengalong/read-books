@@ -49,6 +49,7 @@ class BookSummary(ApiModel):
     cover_color: str
     language: str
     reading_status: str
+    shelf_status: Literal["active", "unlisted"] = "active"
     tags: list[str]
     created_at: datetime
     updated_at: datetime

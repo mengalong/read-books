@@ -58,6 +58,8 @@ def begin_pre_generation(db: Session, book_id: str) -> PreGenerationStart:
     book = db.get(Book, book_id)
     if not book:
         raise ValueError("未找到这本书")
+    if book.shelf_status != "active":
+        raise ValueError("这本书已下架，请恢复后再生成试卷")
     if book.pre_generation_status in {"pending", "processing"}:
         return PreGenerationStart(pre_generation_response(book), False)
     if book.pre_generation_status == "completed" and book.pre_generation_quiz_id:

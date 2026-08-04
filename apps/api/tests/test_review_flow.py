@@ -164,6 +164,56 @@ def test_health_and_book_crud(client):
     assert updated.json()["reading_status"] == "reviewing"
 
 
+def test_book_unlist_blocks_new_activity_and_can_be_restored(client):
+    book_id, _ = create_source_book(client, "上下架测试书")
+    generated = client.post(
+        f"/api/books/{book_id}/quizzes",
+        json={
+            "duration_minutes": 15,
+            "difficulty": "medium",
+            "single_count": 1,
+            "multiple_count": 0,
+            "short_count": 0,
+        },
+    )
+    task = wait_for_generation(client, generated.json()["id"])
+    quiz_id = task["quiz_id"]
+
+    unlisted = client.post(f"/api/books/{book_id}/unlist")
+    assert unlisted.status_code == 200
+    assert unlisted.json()["shelf_status"] == "unlisted"
+    assert book_id not in {item["id"] for item in client.get("/api/books").json()}
+    assert book_id in {
+        item["id"]
+        for item in client.get("/api/books?shelf_status=unlisted").json()
+    }
+
+    assert client.post(
+        f"/api/books/{book_id}/quizzes",
+        json={
+            "duration_minutes": 15,
+            "difficulty": "medium",
+            "single_count": 1,
+            "multiple_count": 0,
+            "short_count": 0,
+        },
+    ).status_code == 409
+    assert client.post(f"/api/books/{book_id}/pre-generation").status_code == 409
+    assert client.post(f"/api/quizzes/{quiz_id}/reviews").status_code == 409
+    assert client.post(
+        f"/api/books/{book_id}/pdfs",
+        files={"file": ("blocked.pdf", b"%PDF-1.4\n", "application/pdf")},
+    ).status_code == 409
+
+    restored = client.post(f"/api/books/{book_id}/restore")
+    assert restored.status_code == 200
+    assert restored.json()["shelf_status"] == "active"
+    assert client.post(f"/api/quizzes/{quiz_id}/reviews").status_code == 200
+
+    assert client.delete(f"/api/books/{book_id}").status_code == 204
+    assert client.get(f"/api/books/{book_id}").status_code == 404
+
+
 def test_quiz_summary_counts_question_types_and_delete_cascades_reviews(client):
     book_id, _ = create_source_book(client, "试卷管理测试书")
     generated = client.post(
