@@ -70,6 +70,8 @@ export function statusLabel(status: string) {
     in_progress: "进行中",
     submitted: "已完成",
     not_copied: "未复制原文",
+    active: "已上架",
+    unlisted: "已下架",
   };
   return labels[status] || status;
 }

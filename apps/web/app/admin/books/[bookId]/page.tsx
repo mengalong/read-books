@@ -1,12 +1,12 @@
 "use client";
 
-import { ArrowLeft, BookOpen, FileText, LockKeyhole, UserRound } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, BookOpen, FileText, ShieldCheck, Trash2, UserRound } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { BookCover, EmptyState, ErrorState, StatusBadge, formatPdfMeta } from "@/components/ui";
-import { ApiError, getAdminBook, getAdminBookChunks } from "@/lib/api";
+import { ApiError, deleteAdminBook, getAdminBook, getAdminBookChunks, restoreAdminBook, unlistAdminBook } from "@/lib/api";
 import { formatDate, formatDateTime, scorePercentage } from "@/lib/format";
 import type { BookDetail, Chunk } from "@/lib/types";
 
@@ -14,9 +14,12 @@ const difficultyLabels: Record<string, string> = { easy: "基础", medium: "适�
 
 export default function AdminBookDetailPage() {
   const params = useParams<{ bookId: string }>();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [book, setBook] = useState<BookDetail | null>(null);
   const [chunks, setChunks] = useState<Chunk[]>([]);
   const [loading, setLoading] = useState(true);
+  const [managing, setManaging] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -36,14 +39,50 @@ export default function AdminBookDetailPage() {
   const previewChunks = useMemo(() => chunks.slice(0, 4), [chunks]);
 
   if (loading) return <div className="page-wrap"><div className="loading-state">正在打开管理视图……</div></div>;
-  if (!book || error) return <div className="page-wrap"><ErrorState message={error || "未找到这本书"} /></div>;
+  if (!book) return <div className="page-wrap"><ErrorState message={error || "未找到这本书"} /></div>;
+
+  const currentBook = book;
+  const fromWorkspace = searchParams.get("source") === "workspace" && book.owner_user_id;
+  const returnHref = fromWorkspace ? `/admin/users/${book.owner_user_id}/space` : "/settings/books";
+  const returnLabel = fromWorkspace ? `返回${book.owner_display_name || "用户"}的空间` : "返回书籍管理";
+
+  async function handleShelfStatus() {
+    const action = currentBook.shelf_status === "active" ? "下架" : "恢复上架";
+    if (!window.confirm(`确定${action}《${currentBook.title}》吗？${currentBook.shelf_status === "active" ? "下架后会保留全部资料和历史记录。" : ""}`)) return;
+    setManaging(true);
+    setError("");
+    try {
+      const updated = currentBook.shelf_status === "active"
+        ? await unlistAdminBook(currentBook.id)
+        : await restoreAdminBook(currentBook.id);
+      setBook(updated);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : `书籍${action}失败`);
+    } finally {
+      setManaging(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!window.confirm(`确定永久删除《${currentBook.title}》吗？该用户的 PDF、试卷、复习记录和答案都会一并删除，且无法恢复。`)) return;
+    setManaging(true);
+    setError("");
+    try {
+      await deleteAdminBook(currentBook.id);
+      router.replace(returnHref);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "书籍删除失败");
+      setManaging(false);
+    }
+  }
 
   return (
     <div className="page-wrap">
-      <Link className="back-link" href="/settings/books"><ArrowLeft size={14} />返回书籍管理</Link>
+      <Link className="back-link" href={returnHref}><ArrowLeft size={14} />{returnLabel}</Link>
+      {error && <div className="toast-error">{error}</div>}
       <div className="workspace-context-banner">
-        <LockKeyhole size={18} />
-        <div><strong>管理员只读书籍视图</strong><span>归属：{book.owner_display_name || "历史未归属用户"}。此页面不能编辑、出题、答题或删除内容。</span></div>
+        <ShieldCheck size={18} />
+        <div><strong>管理员书籍管理视图</strong><span>归属：{book.owner_display_name || "历史未归属用户"}。管理员可管理上下架和删除，但不能代用户编辑、出题或答题。</span></div>
       </div>
 
       <section className="detail-hero">
@@ -54,10 +93,14 @@ export default function AdminBookDetailPage() {
             <h1>{book.title}</h1>
             <p className="book-author">{book.author || "作者未填写"} · {book.language}</p>
             <p className="book-description">{book.description || "还没有写下这本书的简介。"}</p>
-            <div className="tag-row"><span className="tag book-owner-tag"><UserRound size={12} />归属：{book.owner_display_name || "历史数据"}</span>{book.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div>
+            <div className="tag-row"><StatusBadge status={book.shelf_status} /><span className="tag book-owner-tag"><UserRound size={12} />归属：{book.owner_display_name || "历史数据"}</span>{book.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div>
           </div>
         </div>
-        {book.owner_user_id && <Link className="button button-secondary" href={`/admin/users/${book.owner_user_id}/space`}><UserRound size={15} />查看所属空间</Link>}
+        <div className="detail-actions">
+          {book.owner_user_id && <Link className="button button-secondary" href={`/admin/users/${book.owner_user_id}/space`}><UserRound size={15} />查看所属空间</Link>}
+          <button className="button button-secondary" disabled={managing} onClick={() => void handleShelfStatus()} type="button">{book.shelf_status === "active" ? <Archive size={15} /> : <ArchiveRestore size={15} />}{book.shelf_status === "active" ? "下架书籍" : "恢复上架"}</button>
+          <button className="button button-danger" disabled={managing} onClick={() => void handleDelete()} type="button"><Trash2 size={15} />删除书籍</button>
+        </div>
       </section>
 
       <div className="metrics-grid book-detail-metrics" style={{ marginBottom: 25 }}>

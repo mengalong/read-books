@@ -15,6 +15,7 @@ import type {
   QuizSummary,
   QuizResult,
   ReadingStatus,
+  ShelfStatus,
   ReviewTask,
   ReviewTaskSummary,
   TokenUsageReport,
@@ -66,19 +67,20 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function getBooks(search = "", status?: ReadingStatus, ownerId?: string) {
+export function getBooks(search = "", status?: ReadingStatus, shelfStatus: ShelfStatus = "active") {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (status) params.set("status", status);
-  if (ownerId) params.set("owner_id", ownerId);
+  params.set("shelf_status", shelfStatus);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<BookSummary[]>(`/books${suffix}`);
 }
 
-export function getAdminBooks(search = "", ownerId?: string) {
+export function getAdminBooks(search = "", ownerId?: string, shelfStatus?: ShelfStatus) {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (ownerId) params.set("owner_id", ownerId);
+  if (shelfStatus) params.set("shelf_status", shelfStatus);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<BookSummary[]>(`/admin/books${suffix}`);
 }
@@ -101,8 +103,32 @@ export function copyAdminBook(
   });
 }
 
+export function unlistAdminBook(bookId: string) {
+  return apiFetch<BookDetail>(`/admin/books/${bookId}/unlist`, { method: "POST" });
+}
+
+export function restoreAdminBook(bookId: string) {
+  return apiFetch<BookDetail>(`/admin/books/${bookId}/restore`, { method: "POST" });
+}
+
+export function deleteAdminBook(bookId: string) {
+  return apiFetch<void>(`/admin/books/${bookId}`, { method: "DELETE" });
+}
+
 export function getBook(bookId: string) {
   return apiFetch<BookDetail>(`/books/${bookId}`);
+}
+
+export function unlistBook(bookId: string) {
+  return apiFetch<BookDetail>(`/books/${bookId}/unlist`, { method: "POST" });
+}
+
+export function restoreBook(bookId: string) {
+  return apiFetch<BookDetail>(`/books/${bookId}/restore`, { method: "POST" });
+}
+
+export function deleteBook(bookId: string) {
+  return apiFetch<void>(`/books/${bookId}`, { method: "DELETE" });
 }
 
 export function createBook(payload: {

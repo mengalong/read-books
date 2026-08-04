@@ -1,4 +1,5 @@
 export type ReadingStatus = "reading" | "finished" | "reviewing";
+export type ShelfStatus = "active" | "unlisted";
 
 export type ModelProviderMode = "mock" | "openai_compatible";
 
@@ -175,6 +176,7 @@ export type BookSummary = {
   cover_color: string;
   language: string;
   reading_status: ReadingStatus;
+  shelf_status: ShelfStatus;
   tags: string[];
   created_at: string;
   updated_at: string;

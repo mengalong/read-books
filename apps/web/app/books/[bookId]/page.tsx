@@ -1,12 +1,12 @@
 "use client";
 
-import { AlertCircle, ArrowLeft, BookOpen, CheckCircle2, FileText, History, LoaderCircle, PencilLine, Play, Sparkles, Trash2, UploadCloud } from "lucide-react";
+import { AlertCircle, Archive, ArchiveRestore, ArrowLeft, BookOpen, CheckCircle2, FileText, History, LoaderCircle, PencilLine, Play, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { BookCover, EmptyState, ErrorState, NextReview, SourceModeNotice, StatusBadge, formatPdfMeta } from "@/components/ui";
-import { ApiError, deletePdf, deleteQuiz, getBook, getChunks, uploadPdf } from "@/lib/api";
+import { ApiError, deleteBook, deletePdf, deleteQuiz, getBook, getChunks, restoreBook, unlistBook, uploadPdf } from "@/lib/api";
 import { formatDate, formatDateTime, scorePercentage } from "@/lib/format";
 import type { BookDetail, Chunk, PdfDocument, QuizSummary } from "@/lib/types";
 
@@ -18,12 +18,14 @@ const difficultyLabels: Record<string, string> = {
 
 export default function BookDetailPage() {
   const params = useParams<{ bookId: string }>();
+  const router = useRouter();
   const bookId = params.bookId;
   const [book, setBook] = useState<BookDetail | null>(null);
   const [chunks, setChunks] = useState<Chunk[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [deletingQuizId, setDeletingQuizId] = useState<string | null>(null);
+  const [managingBook, setManagingBook] = useState(false);
   const [error, setError] = useState("");
 
   async function refresh(loadChunks = true) {
@@ -51,7 +53,8 @@ export default function BookDetailPage() {
   const pending = book?.pdfs.filter((pdf) => pdf.parse_status !== "completed").length || 0;
   const generating = Boolean(book?.active_generation_task_id);
   const noPdf = Boolean(book && book.pdfs.length === 0);
-  const canGenerate = Boolean(book && (completed > 0 || noPdf) && !generating);
+  const isActive = book?.shelf_status === "active";
+  const canGenerate = Boolean(book && isActive && (completed > 0 || noPdf) && !generating);
   const previewChunks = useMemo(() => chunks.slice(0, 4), [chunks]);
 
   async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
@@ -94,6 +97,37 @@ export default function BookDetailPage() {
     }
   }
 
+  async function handleShelfStatus() {
+    if (!book) return;
+    const action = book.shelf_status === "active" ? "下架" : "恢复上架";
+    if (!window.confirm(`确定${action}《${book.title}》吗？${book.shelf_status === "active" ? "下架后会保留资料和复习记录，但不能继续生成试卷或开始复习。" : ""}`)) return;
+    setManagingBook(true);
+    setError("");
+    try {
+      const updated = book.shelf_status === "active"
+        ? await unlistBook(book.id)
+        : await restoreBook(book.id);
+      setBook(updated);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : `书籍${action}失败`);
+    } finally {
+      setManagingBook(false);
+    }
+  }
+
+  async function handleDeleteBook() {
+    if (!book || !window.confirm(`确定永久删除《${book.title}》吗？PDF、试卷、复习记录和答案都会一并删除，且无法恢复。`)) return;
+    setManagingBook(true);
+    setError("");
+    try {
+      await deleteBook(book.id);
+      router.replace("/");
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "书籍删除失败");
+      setManagingBook(false);
+    }
+  }
+
   if (loading) return <div className="page-wrap"><div className="loading-state">正在打开书籍……</div></div>;
   if (!book || error && !book) return <div className="page-wrap"><ErrorState message={error || "未找到这本书"} /></div>;
 
@@ -109,17 +143,21 @@ export default function BookDetailPage() {
             <h1>{book.title}</h1>
             <p className="book-author">{book.author || "作者未填写"} · {book.language}</p>
             <p className="book-description">{book.description || "还没有写下这本书的简介。"}</p>
-            <div className="tag-row">{book.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div>
+            <div className="tag-row"><StatusBadge status={book.shelf_status} />{book.tags.map((tag) => <span className="tag" key={tag}>{tag}</span>)}</div>
           </div>
         </div>
         <div className="detail-actions">
           <Link className="button button-secondary" href={`/books/${book.id}/edit`}><PencilLine size={15} />编辑信息</Link>
           <Link className="button button-secondary" href={`/books/${book.id}/history`}><History size={15} />复习记录</Link>
-          <Link className="button button-primary" href={canGenerate ? `/books/${book.id}/quiz/new` : "#"} aria-disabled={!canGenerate} onClick={(event) => { if (!canGenerate) event.preventDefault(); }}><Sparkles size={15} />{generating ? "正在后台出题" : "生成新试卷"}</Link>
+          {isActive && <Link className="button button-primary" href={canGenerate ? `/books/${book.id}/quiz/new` : "#"} aria-disabled={!canGenerate} onClick={(event) => { if (!canGenerate) event.preventDefault(); }}><Sparkles size={15} />{generating ? "正在后台出题" : "生成新试卷"}</Link>}
+          <button className="button button-secondary" disabled={managingBook} onClick={() => void handleShelfStatus()} type="button">{isActive ? <Archive size={15} /> : <ArchiveRestore size={15} />}{isActive ? "下架书籍" : "恢复上架"}</button>
+          <button className="button button-danger" disabled={managingBook} onClick={() => void handleDeleteBook()} type="button"><Trash2 size={15} />删除书籍</button>
         </div>
       </section>
 
-      {noPdf && !generating && <SourceModeNotice sourceMode="model_knowledge" />}
+      {!isActive && <div className="shelf-status-banner"><Archive size={18} /><div><strong>这本书已下架</strong><span>PDF、试卷和复习记录均已保留。恢复上架后才能上传 PDF、生成试卷或开始新的复习。</span></div></div>}
+
+      {isActive && noPdf && !generating && <SourceModeNotice sourceMode="model_knowledge" />}
 
       {book.active_generation_task_id && <div className="generation-progress processing">
         <div className="generation-progress-heading"><div><span className="eyebrow">出题任务</span><strong>{book.active_generation_phase || "正在后台生成题目"}</strong></div><LoaderCircle className="spin" size={21} /></div>
@@ -144,7 +182,7 @@ export default function BookDetailPage() {
 
       <section className="content-panel quiz-library">
         <div className="section-title"><h2>复习试卷</h2><span>{book.quizzes.length ? "可重复选择同一套试卷复习" : "等待生成"}</span></div>
-        {book.quizzes.length === 0 ? <EmptyState title="还没有复习试卷" detail="生成完成后，试卷会保存在这里，以后可以反复作答。" action={<Link className="button button-primary" href={`/books/${book.id}/quiz/new`}><Sparkles size={15} />生成第一套试卷</Link>} /> : <div className="quiz-library-list">{book.quizzes.map((quiz) => {
+        {book.quizzes.length === 0 ? <EmptyState title="还没有复习试卷" detail={isActive ? "生成完成后，试卷会保存在这里，以后可以反复作答。" : "恢复上架后，可以为这本书生成复习试卷。"} action={isActive ? <Link className="button button-primary" href={`/books/${book.id}/quiz/new`}><Sparkles size={15} />生成第一套试卷</Link> : undefined} /> : <div className="quiz-library-list">{book.quizzes.map((quiz) => {
           const latestPercent = scorePercentage(quiz.latest_score, quiz.max_score);
           return <article className="quiz-library-row" key={quiz.id}>
             <div className="quiz-library-main">
@@ -155,7 +193,7 @@ export default function BookDetailPage() {
             </div>
             <div className="quiz-library-stats"><span>已复习 {quiz.review_count} 次</span><strong>{latestPercent === null ? "暂无成绩" : `最近得分率 ${latestPercent}%`}</strong></div>
             <div className="quiz-library-actions">
-              <Link className="button button-secondary" href={`/quizzes/${quiz.id}`}><Play size={15} />选择这套</Link>
+              {isActive && <Link className="button button-secondary" href={`/quizzes/${quiz.id}`}><Play size={15} />选择这套</Link>}
               <button
                 aria-label={`删除${quiz.title}`}
                 className="button button-quiet quiz-delete-button"
@@ -183,11 +221,11 @@ export default function BookDetailPage() {
             </div>)}
             {book.pdfs.length === 0 && <EmptyState title="还没有 PDF" detail="可以上传读过的原文以获得页码和逐句依据；当前也可以使用已配置模型的知识生成测试。" />}
           </div>
-          <div className="upload-zone">
+          {isActive && <div className="upload-zone">
             <UploadCloud size={23} />
             <div className="upload-zone-copy"><strong>{uploading ? "正在上传……" : "补充一份 PDF"}</strong><span>不设置产品层面的大小上限；大文件上传后会在后台解析，请在此页等待状态更新。</span></div>
             <input className="upload-input" accept="application/pdf,.pdf" disabled={uploading} onChange={handleUpload} type="file" />
-          </div>
+          </div>}
         </section>
 
         <section className="content-panel">

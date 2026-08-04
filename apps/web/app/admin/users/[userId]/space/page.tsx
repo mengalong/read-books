@@ -48,9 +48,9 @@ export default function AdminUserSpacePage() {
         <div>
           <div className="eyebrow">Temporary workspace</div>
           <h1 className="page-title">{user.display_name} 的空间</h1>
-          <p className="page-description">当前正在只读查看 {user.username} 的个人工作空间，与管理员自己的书架完全分开。</p>
+          <p className="page-description">当前正在临时查看 {user.username} 的个人工作空间，与管理员自己的书架完全分开。</p>
         </div>
-        <span className="readonly-badge"><LockKeyhole size={14} />管理员只读视图</span>
+        <span className="readonly-badge"><LockKeyhole size={14} />管理员临时视图</span>
       </header>
 
       <div className="workspace-context-banner">
@@ -70,8 +70,8 @@ export default function AdminUserSpacePage() {
       </div>
       {books.length === 0
         ? <EmptyState title="该空间还没有书籍" detail="用户添加或接收共享书籍后，会在这里显示。" />
-        : <div className="book-grid">{books.map((book) => <BookCard book={book} href={`/admin/books/${book.id}`} key={book.id} />)}</div>}
-      <div className="readonly-footnote"><BookOpenText size={14} />这里只提供内容核查；复制书籍请前往系统管理中的书籍管理。</div>
+        : <div className="book-grid">{books.map((book) => <BookCard book={book} href={`/admin/books/${book.id}?source=workspace`} key={book.id} />)}</div>}
+      <div className="readonly-footnote"><BookOpenText size={14} />进入书籍详情可管理上下架或删除；复制书籍请前往系统管理中的书籍管理。</div>
     </div>
   );
 }

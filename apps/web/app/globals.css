@@ -1185,6 +1185,11 @@ p {
   color: var(--muted);
 }
 
+.status-unlisted {
+  background: #f1f3f2;
+  color: #68736f;
+}
+
 .user-table .table-actions {
   display: flex;
   gap: 3px;
@@ -1269,6 +1274,12 @@ p {
   margin-bottom: 17px;
 }
 
+.admin-book-filters {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
 .admin-owner-filter {
   align-items: center;
   color: var(--muted);
@@ -1279,6 +1290,10 @@ p {
 
 .admin-owner-filter select {
   min-width: 210px;
+}
+
+.admin-book-filters .admin-owner-filter:first-child select {
+  min-width: 125px;
 }
 
 .admin-book-panel {
@@ -1663,6 +1678,34 @@ p {
 
 .source-mode-warning.compact {
   margin: 14px 0 18px;
+}
+
+.shelf-status-banner {
+  align-items: flex-start;
+  background: #f5f6f5;
+  border: 1px solid #d9dddb;
+  border-radius: 5px;
+  color: #68736f;
+  display: flex;
+  gap: 10px;
+  margin: 20px 0 25px;
+  padding: 12px 14px;
+}
+
+.shelf-status-banner > div {
+  display: grid;
+  gap: 3px;
+}
+
+.shelf-status-banner strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.shelf-status-banner span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
 }
 
 .prompt-tabs {
@@ -3313,6 +3356,7 @@ p {
   }
 
   .admin-book-toolbar,
+  .admin-book-filters,
   .admin-owner-filter {
     align-items: stretch;
     display: grid;

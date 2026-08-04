@@ -33,6 +33,7 @@ export function BookCard({ book, href }: { book: BookSummary; href?: string }) {
       </div>
       <p className="book-description">{book.description || "还没有写下这本书的简介。"}</p>
       <div className="tag-row">
+        {book.shelf_status === "unlisted" && <StatusBadge status="unlisted" />}
         <span className={`tag pdf-status-tag ${hasPdf ? "has-pdf" : "no-pdf"}`}>
           {hasPdf ? <FileText size={12} /> : <FileX2 size={12} />}
           {hasPdf ? "已上传 PDF" : "未上传 PDF"}

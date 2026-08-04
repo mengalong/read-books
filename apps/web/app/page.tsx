@@ -7,7 +7,7 @@ import type { FormEvent } from "react";
 
 import { BookCard, EmptyState, ErrorState } from "@/components/ui";
 import { ApiError, getBooks } from "@/lib/api";
-import type { BookSummary, ReadingStatus } from "@/lib/types";
+import type { BookSummary, ReadingStatus, ShelfStatus } from "@/lib/types";
 
 const filters: { label: string; value?: ReadingStatus }[] = [
   { label: "全部" },
@@ -21,20 +21,21 @@ export default function BookshelfPage() {
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [activeStatus, setActiveStatus] = useState<ReadingStatus | undefined>();
+  const [shelfStatus, setShelfStatus] = useState<ShelfStatus>("active");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    getBooks(appliedSearch, activeStatus)
+    getBooks(appliedSearch, activeStatus, shelfStatus)
       .then((items) => { if (!cancelled) { setBooks(items); setError(""); } })
       .catch((reason: unknown) => {
         if (!cancelled) setError(reason instanceof ApiError ? reason.message : "书架加载失败");
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [appliedSearch, activeStatus]);
+  }, [appliedSearch, activeStatus, shelfStatus]);
 
   function handleSearchSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -75,12 +76,13 @@ export default function BookshelfPage() {
         </form>
       </div>
       <div className="tag-row" style={{ marginBottom: 19, marginTop: 0 }}>
-        {filters.map((filter) => <button className={`tag ${activeStatus === filter.value ? "active-filter" : ""}`} key={filter.label} onClick={() => setActiveStatus(filter.value)} type="button">{filter.label}</button>)}
+        {filters.map((filter) => <button className={`tag ${shelfStatus === "active" && activeStatus === filter.value ? "active-filter" : ""}`} key={filter.label} onClick={() => { setShelfStatus("active"); setActiveStatus(filter.value); }} type="button">{filter.label}</button>)}
+        <button className={`tag ${shelfStatus === "unlisted" ? "active-filter unlisted-filter" : ""}`} onClick={() => { setShelfStatus("unlisted"); setActiveStatus(undefined); }} type="button">已下架</button>
       </div>
 
       {loading && <div className="loading-state">正在整理书架……</div>}
       {!loading && error && <ErrorState message={error} />}
-      {!loading && !error && books.length === 0 && <EmptyState title="书架还是空的" detail="添加一本书并上传 PDF，开始建立属于你的复习资料。" action={<Link className="button button-primary" href="/books/new"><BookPlus size={16} />添加第一本书</Link>} />}
+      {!loading && !error && books.length === 0 && <EmptyState title={shelfStatus === "unlisted" ? "没有已下架的书籍" : "书架还是空的"} detail={shelfStatus === "unlisted" ? "下架的书会保留资料和历史记录，并显示在这里。" : "添加一本书并上传 PDF，开始建立属于你的复习资料。"} action={shelfStatus === "active" ? <Link className="button button-primary" href="/books/new"><BookPlus size={16} />添加第一本书</Link> : undefined} />}
       {!loading && !error && books.length > 0 && <div className="book-grid">{books.map((book) => <BookCard book={book} key={book.id} />)}</div>}
 
       <div style={{ alignItems: "center", color: "var(--muted)", display: "flex", fontSize: 12, gap: 7, marginTop: 32 }}><Sparkles size={14} color="var(--yellow)" />开发阶段使用模拟出题与评分；没有 PDF 时需启用真实模型进行知识兜底。</div>
