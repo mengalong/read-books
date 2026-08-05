@@ -56,6 +56,9 @@ class User(TimestampMixin, Base):
     sessions: Mapped[list[UserSession]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    access_visits: Mapped[list[UserAccessVisit]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
     created_workspaces: Mapped[list[Workspace]] = relationship(
         back_populates="created_by_user", foreign_keys="Workspace.created_by_user_id"
     )
@@ -92,6 +95,7 @@ class Workspace(TimestampMixin, Base):
     )
     books: Mapped[list[Book]] = relationship(back_populates="workspace")
     usage_records: Mapped[list[ModelUsageRecord]] = relationship(back_populates="workspace")
+    access_visits: Mapped[list[UserAccessVisit]] = relationship(back_populates="workspace")
 
 
 class WorkspaceMember(Base):
@@ -123,6 +127,31 @@ class UserSession(TimestampMixin, Base):
     ip_address: Mapped[str | None] = mapped_column(String(80))
 
     user: Mapped[User] = relationship(back_populates="sessions")
+    access_visits: Mapped[list[UserAccessVisit]] = relationship(back_populates="session")
+
+
+class UserAccessVisit(Base):
+    __tablename__ = "user_access_visits"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("user_sessions.id", ondelete="SET NULL"), index=True
+    )
+    entry_type: Mapped[str] = mapped_column(String(20), default="resume", index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    end_reason: Mapped[str | None] = mapped_column(String(20), index=True)
+
+    user: Mapped[User] = relationship(back_populates="access_visits")
+    workspace: Mapped[Workspace] = relationship(back_populates="access_visits")
+    session: Mapped[UserSession | None] = relationship(back_populates="access_visits")
 
 
 class AuditLog(Base):

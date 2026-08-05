@@ -22,12 +22,14 @@ from app.schemas import (
 from app.services.auth import (
     AuthIdentity,
     add_audit_log,
+    close_access_visit,
     create_session,
     create_user_with_workspace,
     generate_temporary_password,
     get_personal_workspace,
     hash_password,
     revoke_user_sessions,
+    start_access_visit,
     validate_password,
     verify_login,
     verify_password,
@@ -95,6 +97,13 @@ def login(
         user_agent=request.headers.get("user-agent"),
         ip_address=client_ip(request),
     )
+    start_access_visit(
+        db,
+        user_id=user.id,
+        workspace_id=workspace.id,
+        session_id=session.id,
+        entry_type="login",
+    )
     add_audit_log(
         db,
         actor_user_id=user.id,
@@ -122,7 +131,14 @@ def logout(
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(get_current_identity),
 ) -> None:
-    identity.session.revoked_at = datetime.now(timezone.utc)
+    logged_out_at = datetime.now(timezone.utc)
+    identity.session.revoked_at = logged_out_at
+    close_access_visit(
+        db,
+        identity.session.id,
+        reason="logout",
+        now=logged_out_at,
+    )
     add_audit_log(
         db,
         actor_user_id=identity.user.id,
@@ -145,6 +161,13 @@ def current_user(
     identity: AuthIdentity = Depends(get_current_identity),
 ) -> CurrentUserResponse:
     return to_current_user(identity)
+
+
+@router.post("/auth/activity", status_code=status.HTTP_204_NO_CONTENT)
+def record_activity(
+    _: AuthIdentity = Depends(get_current_identity),
+) -> None:
+    return None
 
 
 @router.post("/auth/change-password", response_model=CurrentUserResponse)

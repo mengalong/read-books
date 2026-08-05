@@ -20,6 +20,7 @@ from app.models import (
     PromptTemplate,
     QuizGenerationTask,
     User,
+    UserAccessVisit,
     UserSession,
     Workspace,
     WorkspaceMember,
@@ -27,6 +28,9 @@ from app.models import (
 
 USERNAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,79}$")
 PASSWORD_HASH = PasswordHash.recommended()
+ACCESS_VISIT_IDLE_TIMEOUT = timedelta(minutes=30)
+ACCESS_VISIT_ACTIVITY_INTERVAL = timedelta(seconds=60)
+ACCESS_VISIT_END_GRACE = timedelta(minutes=2)
 
 
 @dataclass(frozen=True)
@@ -38,6 +42,104 @@ class AuthIdentity:
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def as_utc(value: datetime) -> datetime:
+    return (
+        value.replace(tzinfo=timezone.utc)
+        if value.tzinfo is None
+        else value.astimezone(timezone.utc)
+    )
+
+
+def start_access_visit(
+    db: Session,
+    *,
+    user_id: str,
+    workspace_id: str,
+    session_id: str,
+    entry_type: str,
+    now: datetime | None = None,
+) -> UserAccessVisit:
+    current = now or utc_now()
+    visit = UserAccessVisit(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        session_id=session_id,
+        entry_type=entry_type,
+        started_at=current,
+        last_activity_at=current,
+    )
+    db.add(visit)
+    db.flush()
+    return visit
+
+
+def close_access_visit(
+    db: Session,
+    session_id: str,
+    *,
+    reason: str,
+    now: datetime | None = None,
+) -> None:
+    visit = db.scalar(
+        select(UserAccessVisit)
+        .where(
+            UserAccessVisit.session_id == session_id,
+            UserAccessVisit.ended_at.is_(None),
+        )
+        .order_by(UserAccessVisit.started_at.desc())
+    )
+    if visit is None:
+        return
+    current = now or utc_now()
+    visit.last_activity_at = current
+    visit.ended_at = current
+    visit.end_reason = reason
+
+
+def record_access_activity(
+    db: Session,
+    *,
+    user_id: str,
+    workspace_id: str,
+    session_id: str,
+    now: datetime | None = None,
+) -> UserAccessVisit:
+    current = now or utc_now()
+    visit = db.scalar(
+        select(UserAccessVisit)
+        .where(
+            UserAccessVisit.session_id == session_id,
+            UserAccessVisit.ended_at.is_(None),
+        )
+        .order_by(UserAccessVisit.started_at.desc())
+    )
+    if visit is None:
+        return start_access_visit(
+            db,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            session_id=session_id,
+            entry_type="resume",
+            now=current,
+        )
+
+    last_activity = as_utc(visit.last_activity_at)
+    if current - last_activity > ACCESS_VISIT_IDLE_TIMEOUT:
+        visit.ended_at = min(current, last_activity + ACCESS_VISIT_END_GRACE)
+        visit.end_reason = "timeout"
+        return start_access_visit(
+            db,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            session_id=session_id,
+            entry_type="resume",
+            now=current,
+        )
+    if current - last_activity >= ACCESS_VISIT_ACTIVITY_INTERVAL:
+        visit.last_activity_at = current
+    return visit
 
 
 def normalize_username(username: str) -> str:
@@ -283,16 +385,35 @@ def authenticate_session(db: Session, token: str) -> AuthIdentity | None:
     workspace = get_personal_workspace(db, session.user_id)
     if workspace is None:
         return None
+    record_access_activity(
+        db,
+        user_id=session.user_id,
+        workspace_id=workspace.id,
+        session_id=session.id,
+        now=now,
+    )
     session.last_seen_at = now
     db.commit()
     return AuthIdentity(user=session.user, workspace=workspace, session=session)
 
 
 def revoke_user_sessions(db: Session, user_id: str, *, except_session_id: str | None = None) -> None:
+    now = utc_now()
+    visits = db.scalars(
+        select(UserAccessVisit).where(
+            UserAccessVisit.user_id == user_id,
+            UserAccessVisit.ended_at.is_(None),
+        )
+    ).all()
+    for visit in visits:
+        if except_session_id and visit.session_id == except_session_id:
+            continue
+        visit.ended_at = min(now, as_utc(visit.last_activity_at) + ACCESS_VISIT_END_GRACE)
+        visit.end_reason = "revoked"
     statement = (
         update(UserSession)
         .where(UserSession.user_id == user_id, UserSession.revoked_at.is_(None))
-        .values(revoked_at=utc_now())
+        .values(revoked_at=now)
     )
     if except_session_id:
         statement = statement.where(UserSession.id != except_session_id)

@@ -1,5 +1,6 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from time import perf_counter
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,6 +12,7 @@ from app.dependencies import require_admin
 from app.services.auth import AuthIdentity
 from app.models import ModelConfiguration
 from app.schemas import (
+    AccessStatisticsReportResponse,
     ModelConfigurationResponse,
     ModelConfigurationUpdate,
     ModelConnectionTestRequest,
@@ -24,6 +26,7 @@ from app.schemas import (
     TokenUsageTaskResponse,
     TokenUsageUserSummaryResponse,
 )
+from app.services.access_statistics import get_access_statistics_report
 from app.services.model_config import (
     DEFAULT_CONFIGURATION_ID,
     get_effective_model_configuration,
@@ -253,6 +256,26 @@ def get_token_usage(
             for task in tasks
         ],
     )
+
+
+@router.get("/access-statistics", response_model=AccessStatisticsReportResponse)
+def get_access_statistics(
+    granularity: Literal["day", "month", "year"] = Query(default="day"),
+    start_date: date | None = Query(default=None),
+    end_date: date | None = Query(default=None),
+    user_id: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> AccessStatisticsReportResponse:
+    try:
+        return get_access_statistics_report(
+            db,
+            granularity=granularity,
+            start_date=start_date,
+            end_date=end_date,
+            user_id=user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def model_error_message(response: httpx.Response) -> str:

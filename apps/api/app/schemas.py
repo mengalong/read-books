@@ -438,6 +438,46 @@ class TokenUsageReportResponse(BaseModel):
     tasks: list[TokenUsageTaskResponse]
 
 
+class AccessStatisticsSummaryResponse(BaseModel):
+    visit_count: int = 0
+    login_count: int = 0
+    active_user_count: int = 0
+    total_duration_seconds: int = 0
+    average_duration_seconds: int = 0
+
+
+class AccessStatisticsPeriodResponse(AccessStatisticsSummaryResponse):
+    period_key: str
+    period_label: str
+    period_start: datetime
+    period_end: datetime
+
+
+class AccessStatisticsUserResponse(BaseModel):
+    user_id: str
+    workspace_id: str
+    username: str
+    display_name: str
+    visit_count: int = 0
+    login_count: int = 0
+    active_period_count: int = 0
+    total_duration_seconds: int = 0
+    average_duration_seconds: int = 0
+    first_visit_at: datetime | None = None
+    last_visit_at: datetime | None = None
+
+
+class AccessStatisticsReportResponse(BaseModel):
+    granularity: Literal["day", "month", "year"]
+    timezone: str = "Asia/Shanghai"
+    range_start: datetime
+    range_end: datetime
+    selected_user_id: str | None = None
+    summary: AccessStatisticsSummaryResponse
+    periods: list[AccessStatisticsPeriodResponse] = Field(default_factory=list)
+    users: list[AccessStatisticsUserResponse] = Field(default_factory=list)
+
+
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=80)
     password: str = Field(min_length=1, max_length=256)
