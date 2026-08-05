@@ -84,9 +84,31 @@ make test
 make test-api
 ```
 
+## 远程部署
+
+项目已提供统一的生产服务脚本和远程部署脚本。部署到当前服务器：
+
+```bash
+scripts/deploy.sh
+```
+
+远端服务统一通过以下命令管理：
+
+```bash
+cd /home/mengalong/website/read-books
+scripts/server.sh start
+scripts/server.sh stop
+scripts/server.sh restart
+scripts/server.sh status
+scripts/server.sh logs
+```
+
+完整端口、Nginx、生产配置和 HTTPS 注意事项见 [远程部署文档](docs/deployment.md)。
+
 ## 文档
 
 - [需求设计](docs/reading-review-system-requirements.md)
 - [技术选型](docs/technical-selection.md)
 - [开发状态](docs/development-status.md)
 - [多用户模式改造计划](docs/multi-user-mode-plan.md)
+- [远程部署](docs/deployment.md)
