@@ -20,12 +20,14 @@ from app.services.pre_generation import recover_pre_generation_tasks
 from app.services.quiz_provider import GeneratedQuestion, HttpQuizAiProvider, MockQuizAiProvider
 
 
-def create_source_book(client, title: str = "测试书籍") -> tuple[str, str]:
+def create_source_book(
+    client, title: str = "测试书籍", author: str = "测试作者"
+) -> tuple[str, str]:
     response = client.post(
         "/api/books",
         json={
             "title": title,
-            "author": "测试作者",
+            "author": author,
             "description": "一段用于接口测试的书籍内容。",
             "reading_status": "finished",
             "tags": ["测试"],
@@ -162,6 +164,40 @@ def test_health_and_book_crud(client):
     updated = client.patch(f"/api/books/{book_id}", json={"reading_status": "reviewing"})
     assert updated.status_code == 200
     assert updated.json()["reading_status"] == "reviewing"
+
+
+def test_unanswered_review_questions_score_zero(client):
+    book_id, _ = create_source_book(client, "提前交卷测试书", "提前交卷专属作者")
+    generated = client.post(
+        f"/api/books/{book_id}/quizzes",
+        json={
+            "duration_minutes": 15,
+            "difficulty": "medium",
+            "single_count": 1,
+            "multiple_count": 1,
+            "short_count": 1,
+        },
+    )
+    assert generated.status_code == 202
+    task = wait_for_generation(client, generated.json()["id"])
+    review = client.post(f"/api/quizzes/{task['quiz_id']}/reviews")
+    assert review.status_code == 200
+
+    submitted = client.post(
+        f"/api/reviews/{review.json()['id']}/submit",
+        json={"elapsed_seconds": 45, "answers": []},
+    )
+
+    assert submitted.status_code == 200
+    result = submitted.json()
+    assert result["status"] == "submitted"
+    assert result["total_score"] == 0
+    assert len(result["answers"]) == 3
+    assert all(answer["score"] == 0 for answer in result["answers"])
+    assert all(answer["feedback"] == "本题未作答，按 0 分处理。" for answer in result["answers"])
+    with SessionLocal() as db:
+        db.delete(db.get(Book, book_id))
+        db.commit()
 
 
 def test_book_unlist_blocks_new_activity_and_can_be_restored(client):

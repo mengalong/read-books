@@ -2826,6 +2826,11 @@ p {
   margin-top: 5px;
 }
 
+.quiz-early-submit {
+  margin-top: 14px;
+  width: 100%;
+}
+
 .quiz-timer {
   align-items: center;
   background: var(--ink);

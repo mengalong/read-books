@@ -64,10 +64,15 @@ export default function ReviewPage() {
     });
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(mode: "regular" | "early" = "regular") {
     if (!review) return;
     const unanswered = review.questions.length - answeredCount;
-    if (unanswered && !window.confirm(`还有 ${unanswered} 道题未作答，仍然提交吗？`)) return;
+    if (unanswered) {
+      const message = mode === "early"
+        ? `还有 ${unanswered} 道题未作答，提前交卷后这些题将按 0 分处理，且提交后不能修改。确认提前交卷吗？`
+        : `还有 ${unanswered} 道题未作答，提交后这些题将按 0 分处理。仍然提交吗？`;
+      if (!window.confirm(message)) return;
+    }
     setSubmitting(true);
     setError("");
     try {
@@ -106,6 +111,7 @@ export default function ReviewPage() {
               return <button aria-label={`前往第${index + 1}题`} className={`${done ? "done" : ""} ${index === current ? "current" : ""}`} key={item.id} onClick={() => setCurrent(index)} type="button">{index + 1}</button>;
             })}</div>
             <p className="quiz-sidebar-meta" style={{ marginTop: 13 }}>已答 {answeredCount} / {review.questions.length}</p>
+            <button className="button button-secondary quiz-early-submit" disabled={submitting} onClick={() => void handleSubmit("early")} type="button"><Send size={15} />提前交卷</button>
           </div>
         </aside>
 

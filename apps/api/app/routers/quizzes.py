@@ -506,7 +506,21 @@ def submit_review(
             item = submitted.get(question.id)
             selected_answers = item.selected_answers if item else []
             text_answer = item.text_answer if item else None
-            if question.question_type == "short":
+            has_answer = bool(selected_answers) if question.question_type != "short" else bool((text_answer or "").strip())
+            if not has_answer:
+                missing_points = (
+                    [str(rubric_item["point"]) for rubric_item in question.grading_rubric]
+                    if question.question_type == "short"
+                    else list(question.correct_answers)
+                )
+                grade = GradeResult(
+                    score=0,
+                    is_correct=False,
+                    feedback="本题未作答，按 0 分处理。",
+                    matched_points=[],
+                    missing_points=missing_points,
+                )
+            elif question.question_type == "short":
                 grade = provider.grade_short_answer(question, text_answer or "")
             else:
                 grade = grade_objective(question, selected_answers)
@@ -536,6 +550,7 @@ def submit_review(
     score_percent = review.total_score / review.max_score * 100 if review.max_score else 0
     review.next_review_date = calculate_next_review(score_percent)
     db.commit()
+    db.expire(review, ["answers"])
     return to_review_response(get_review_or_404(db, review.id, identity))
 
 
