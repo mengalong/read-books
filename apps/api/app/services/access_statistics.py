@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import User, UserAccessVisit, Workspace, WorkspaceMember
@@ -61,11 +61,16 @@ def resolve_access_range(
     start_date: date | None,
     end_date: date | None,
     *,
+    data_start_date: date | None = None,
     now: datetime | None = None,
 ) -> tuple[datetime, datetime, list[tuple[datetime, datetime]]]:
     local_today = (now or datetime.now(timezone.utc)).astimezone(BEIJING_TIMEZONE).date()
     anchor = end_date or local_today
-    requested_start = start_date or _default_start(anchor, granularity)
+    requested_start = start_date
+    if requested_start is None:
+        requested_start = _default_start(anchor, granularity)
+        if end_date is None and data_start_date is not None:
+            requested_start = max(requested_start, min(data_start_date, anchor))
     if requested_start > anchor:
         raise ValueError("开始日期不能晚于结束日期")
     range_start = _period_start(requested_start, granularity)
@@ -141,12 +146,6 @@ def get_access_statistics_report(
     now: datetime | None = None,
 ) -> AccessStatisticsReportResponse:
     current = as_utc(now or datetime.now(timezone.utc))
-    local_start, local_end, local_periods = resolve_access_range(
-        granularity, start_date, end_date, now=current
-    )
-    range_start = local_start.astimezone(timezone.utc)
-    range_end = local_end.astimezone(timezone.utc)
-
     user_rows = db.execute(
         select(User, Workspace)
         .join(WorkspaceMember, WorkspaceMember.user_id == User.id)
@@ -157,6 +156,25 @@ def get_access_statistics_report(
     users = {user.id: (user, workspace) for user, workspace in user_rows}
     if user_id and user_id not in users:
         raise ValueError("未找到该用户")
+
+    first_visit_query = select(func.min(UserAccessVisit.started_at))
+    if user_id:
+        first_visit_query = first_visit_query.where(UserAccessVisit.user_id == user_id)
+    first_visit_at = db.scalar(first_visit_query)
+    data_start_date = (
+        as_utc(first_visit_at).astimezone(BEIJING_TIMEZONE).date()
+        if first_visit_at is not None
+        else current.astimezone(BEIJING_TIMEZONE).date()
+    )
+    local_start, local_end, local_periods = resolve_access_range(
+        granularity,
+        start_date,
+        end_date,
+        data_start_date=data_start_date,
+        now=current,
+    )
+    range_start = local_start.astimezone(timezone.utc)
+    range_end = local_end.astimezone(timezone.utc)
 
     visits = list(
         db.scalars(

@@ -1,10 +1,33 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import func, select
 
 from app.database import SessionLocal
 from app.models import User, UserAccessVisit, UserSession
+from app.services.access_statistics import resolve_access_range
 from app.services.auth import create_user_with_workspace
+
+
+def test_default_access_range_starts_at_first_real_visit():
+    now = datetime(2026, 8, 5, 3, 0, tzinfo=timezone.utc)
+    data_start_date = date(2026, 8, 5)
+
+    expected_periods = {
+        "day": ["2026-08-05"],
+        "month": ["2026-08"],
+        "year": ["2026"],
+    }
+    formats = {"day": "%Y-%m-%d", "month": "%Y-%m", "year": "%Y"}
+
+    for granularity, expected in expected_periods.items():
+        _, _, periods = resolve_access_range(
+            granularity,
+            None,
+            None,
+            data_start_date=data_start_date,
+            now=now,
+        )
+        assert [start.strftime(formats[granularity]) for start, _ in periods] == expected
 
 
 def test_access_statistics_supports_day_month_and_year_tables(client):
