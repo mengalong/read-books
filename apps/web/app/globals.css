@@ -748,6 +748,36 @@ a {
   box-shadow: 0 0 0 3px rgba(47, 107, 95, 0.1);
 }
 
+.password-input-wrap {
+  position: relative;
+}
+
+.auth-form .password-input-wrap input {
+  padding-right: 43px;
+  width: 100%;
+}
+
+.password-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  height: 32px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+}
+
+.password-toggle:hover {
+  color: var(--green);
+}
+
 .auth-form-error {
   background: var(--red-soft);
   border-radius: 4px;
@@ -760,11 +790,22 @@ a {
 
 .auth-submit {
   margin-top: 13px;
+  position: relative;
   width: 100%;
 }
 
-.auth-submit svg:last-child {
-  margin-left: auto;
+.auth-submit > svg {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.auth-submit-leading {
+  left: 15px;
+}
+
+.auth-submit-trailing {
+  right: 15px;
 }
 
 .auth-footnote {

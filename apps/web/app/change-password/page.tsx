@@ -46,7 +46,7 @@ export default function ChangePasswordPage() {
           <label htmlFor="confirm-password">确认新密码</label>
           <input autoComplete="new-password" id="confirm-password" onChange={(event) => setConfirmPassword(event.target.value)} required type="password" value={confirmPassword} />
           {error && <div className="auth-form-error">{error}</div>}
-          <button className="button button-primary auth-submit" disabled={submitting} type="submit"><KeyRound size={16} />{submitting ? "正在保存……" : "保存新密码"}</button>
+          <button className="button button-primary auth-submit" disabled={submitting} type="submit"><KeyRound className="auth-submit-leading" size={16} /><span>{submitting ? "正在保存……" : "保存新密码"}</span></button>
         </form>
       </section>
     </main>
