@@ -24,6 +24,8 @@ import type {
   AdminUserCreateResult,
   PasswordResetResult,
   AdminBookCopyResult,
+  AccessGranularity,
+  AccessStatisticsReport,
 } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
@@ -353,8 +355,25 @@ export function getTokenUsage(taskType?: string, userId?: string) {
   return apiFetch<TokenUsageReport>(`/settings/token-usage${suffix}`);
 }
 
+export function getAccessStatistics(filters: {
+  granularity: AccessGranularity;
+  startDate?: string;
+  endDate?: string;
+  userId?: string;
+}) {
+  const params = new URLSearchParams({ granularity: filters.granularity });
+  if (filters.startDate) params.set("start_date", filters.startDate);
+  if (filters.endDate) params.set("end_date", filters.endDate);
+  if (filters.userId) params.set("user_id", filters.userId);
+  return apiFetch<AccessStatisticsReport>(`/settings/access-statistics?${params.toString()}`);
+}
+
 export function getCurrentUser() {
   return apiFetch<CurrentUser>("/auth/me");
+}
+
+export function recordActivity() {
+  return apiFetch<void>("/auth/activity", { method: "POST" });
 }
 
 export function login(username: string, password: string) {

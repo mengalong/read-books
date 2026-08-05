@@ -109,6 +109,48 @@ export type TokenUsageReport = {
   tasks: TokenUsageTask[];
 };
 
+export type AccessGranularity = "day" | "month" | "year";
+
+export type AccessStatisticsSummary = {
+  visit_count: number;
+  login_count: number;
+  active_user_count: number;
+  total_duration_seconds: number;
+  average_duration_seconds: number;
+};
+
+export type AccessStatisticsPeriod = AccessStatisticsSummary & {
+  period_key: string;
+  period_label: string;
+  period_start: string;
+  period_end: string;
+};
+
+export type AccessStatisticsUser = {
+  user_id: string;
+  workspace_id: string;
+  username: string;
+  display_name: string;
+  visit_count: number;
+  login_count: number;
+  active_period_count: number;
+  total_duration_seconds: number;
+  average_duration_seconds: number;
+  first_visit_at: string | null;
+  last_visit_at: string | null;
+};
+
+export type AccessStatisticsReport = {
+  granularity: AccessGranularity;
+  timezone: string;
+  range_start: string;
+  range_end: string;
+  selected_user_id: string | null;
+  summary: AccessStatisticsSummary;
+  periods: AccessStatisticsPeriod[];
+  users: AccessStatisticsUser[];
+};
+
 export type CurrentUser = {
   id: string;
   username: string;

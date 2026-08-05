@@ -487,6 +487,152 @@ a {
   white-space: nowrap;
 }
 
+.access-filter-bar {
+  align-items: end;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: auto minmax(430px, 1fr) minmax(190px, 240px);
+  margin-bottom: 20px;
+}
+
+.access-granularity {
+  background: #eef2f0;
+  border-radius: 5px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+}
+
+.access-granularity button {
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  min-height: 34px;
+  padding: 0 13px;
+}
+
+.access-granularity button.active {
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(28, 48, 42, 0.12);
+  color: var(--green);
+  font-weight: 700;
+}
+
+.access-date-filter {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(135px, 1fr) auto minmax(135px, 1fr) auto;
+}
+
+.access-date-filter label,
+.access-user-filter {
+  color: var(--muted);
+  display: grid;
+  font-size: 11px;
+  gap: 5px;
+}
+
+.access-date-filter > span {
+  color: var(--muted);
+  font-size: 11px;
+  padding-bottom: 11px;
+}
+
+.access-date-filter input,
+.access-user-filter select {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  height: 38px;
+  min-width: 0;
+  padding: 0 9px;
+  width: 100%;
+}
+
+.access-metrics {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+.access-duration-value {
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.access-period-panel {
+  margin-bottom: 16px;
+}
+
+.access-period-panel .section-title h2,
+.access-user-panel .section-title h2 {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+}
+
+.access-table-wrap {
+  overflow-x: auto;
+}
+
+.access-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 760px;
+  width: 100%;
+}
+
+.access-user-table {
+  min-width: 1120px;
+}
+
+.access-table th,
+.access-table td {
+  border-top: 1px solid var(--line-soft);
+  padding: 12px 10px;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.access-table th {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.access-table td {
+  color: #52615d;
+  font-variant-numeric: tabular-nums;
+}
+
+.access-table td strong {
+  color: var(--ink);
+}
+
+.access-user-table td:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.access-user-table td:first-child small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.access-login-count {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
 .app-main {
   flex: 1;
   min-width: 0;
@@ -3232,6 +3378,18 @@ p {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .access-filter-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .access-granularity {
+    justify-self: start;
+  }
+
+  .access-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .user-management-grid {
     grid-template-columns: 1fr;
   }
@@ -3321,6 +3479,19 @@ p {
     align-items: flex-start;
     flex-direction: column;
     gap: 12px;
+  }
+
+  .access-date-filter {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .access-date-filter > span {
+    display: none;
+  }
+
+  .access-user-filter {
+    width: 100%;
   }
 
   .auth-panel {

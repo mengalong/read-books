@@ -1,11 +1,11 @@
 "use client";
 
-import { BarChart3, BookMarked, BookOpenText, FileCode2, History, LibraryBig, LogOut, Plus, Settings2, Users } from "lucide-react";
+import { Activity, BarChart3, BookMarked, BookOpenText, FileCode2, History, LibraryBig, LogOut, Plus, Settings2, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
-import { ApiError, getCurrentUser, logout } from "@/lib/api";
+import { ApiError, getCurrentUser, logout, recordActivity } from "@/lib/api";
 import type { CurrentUser } from "@/lib/types";
 
 const navigation = [
@@ -19,6 +19,7 @@ const systemNavigation = [
   { href: "/settings/model", label: "模型设置", icon: Settings2 },
   { href: "/settings/prompts", label: "提示词管理", icon: FileCode2 },
   { href: "/settings/token-usage", label: "Token 用量", icon: BarChart3 },
+  { href: "/settings/access-statistics", label: "访问统计", icon: Activity },
   { href: "/settings/users", label: "用户管理", icon: Users },
 ];
 
@@ -56,6 +57,34 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [authPage, pathname, router]);
 
   useEffect(() => { void loadUser(); }, [loadUser]);
+
+  useEffect(() => {
+    if (!user || authPage) return;
+    let sending = false;
+    const sendHeartbeat = async () => {
+      if (document.visibilityState !== "visible" || sending) return;
+      sending = true;
+      try {
+        await recordActivity();
+      } catch (reason: unknown) {
+        if (reason instanceof ApiError && reason.status === 401) {
+          setUser(null);
+          router.replace("/login");
+        }
+      } finally {
+        sending = false;
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") void sendHeartbeat();
+    };
+    const timer = window.setInterval(() => { void sendHeartbeat(); }, 60_000);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [authPage, router, user]);
 
   async function handleLogout() {
     try {
