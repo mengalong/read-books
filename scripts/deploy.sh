@@ -6,7 +6,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REMOTE_HOST="${REMOTE_HOST:-root@47.115.200.179}"
 REMOTE_DIR="${REMOTE_DIR:-/home/mengalong/website/read-books}"
 REMOTE_NGINX_DIR="${REMOTE_NGINX_DIR:-/home/mengalong/website/nginx}"
-REPOSITORY_URL="${REPOSITORY_URL:-https://github.com/mengalong/read-books.git}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 
 if ! git -C "$ROOT_DIR" diff --quiet || ! git -C "$ROOT_DIR" diff --cached --quiet; then
@@ -17,31 +16,33 @@ fi
 printf '推送 %s 分支到 GitHub...\n' "$DEPLOY_BRANCH"
 git -C "$ROOT_DIR" push origin "$DEPLOY_BRANCH"
 
+SYNC_DIR="$(mktemp -d)"
+trap 'rm -rf "$SYNC_DIR"' EXIT
+git -C "$ROOT_DIR" archive --format=tar "$DEPLOY_BRANCH" | tar -xf - -C "$SYNC_DIR"
+
 printf '同步代码并部署到 %s:%s...\n' "$REMOTE_HOST" "$REMOTE_DIR"
+ssh "$REMOTE_HOST" "mkdir -p '$REMOTE_DIR'"
+rsync -az --delete \
+  --exclude='.env' \
+  --exclude='.git/' \
+  --exclude='data/app.db*' \
+  --exclude='data/uploads/' \
+  --exclude='data/parsed/' \
+  --exclude='apps/web/node_modules/' \
+  --exclude='apps/web/.next/' \
+  --exclude='apps/web/.next-dev/' \
+  "$SYNC_DIR/" "$REMOTE_HOST:$REMOTE_DIR/"
+
 ssh "$REMOTE_HOST" bash -s -- \
-  "$REMOTE_DIR" "$REMOTE_NGINX_DIR" "$REPOSITORY_URL" "$DEPLOY_BRANCH" <<'REMOTE_SCRIPT'
+  "$REMOTE_DIR" "$REMOTE_NGINX_DIR" <<'REMOTE_SCRIPT'
 set -Eeuo pipefail
 
 remote_dir="$1"
 nginx_dir="$2"
-repository_url="$3"
-deploy_branch="$4"
 created_environment=false
 initial_admin_password=""
 
-mkdir -p "$(dirname "$remote_dir")"
-if [[ -d "$remote_dir/.git" ]]; then
-  cd "$remote_dir"
-  git checkout "$deploy_branch"
-  git pull --ff-only origin "$deploy_branch"
-else
-  if [[ -d "$remote_dir" && -n "$(find "$remote_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
-    printf '远程部署目录不是空目录且不是 Git 仓库：%s\n' "$remote_dir" >&2
-    exit 1
-  fi
-  git clone --branch "$deploy_branch" "$repository_url" "$remote_dir"
-  cd "$remote_dir"
-fi
+cd "$remote_dir"
 
 if [[ ! -f .env ]]; then
   initial_admin_password="ReadBooks-$(openssl rand -hex 12)A1"
