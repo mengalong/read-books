@@ -49,6 +49,13 @@ if [[ ! -f .env ]]; then
   sed -i "s/^INITIAL_ADMIN_PASSWORD=.*/INITIAL_ADMIN_PASSWORD=$initial_admin_password/" .env
   chmod 600 .env
   created_environment=true
+else
+  saved_admin_username="$(sed -n 's/^INITIAL_ADMIN_USERNAME=//p' .env | head -n 1)"
+  saved_admin_password="$(sed -n 's/^INITIAL_ADMIN_PASSWORD=//p' .env | head -n 1)"
+  if [[ "$saved_admin_username" == "admin" && "$saved_admin_password" == ReadBooks-*A1 ]]; then
+    created_environment=true
+    initial_admin_password="$saved_admin_password"
+  fi
 fi
 
 install -m 0644 deploy/systemd/read-books-api.service /etc/systemd/system/read-books-api.service
