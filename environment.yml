@@ -4,6 +4,7 @@ channels:
 dependencies:
   - python=3.12
   - nodejs=20
+  - greenlet=3.3
   - pip
   - pip:
       - -e ./apps/api[dev]
