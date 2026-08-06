@@ -1,16 +1,25 @@
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies import require_admin, require_ready_identity
-from app.models import Book, ContentChunk, PdfDocument, Quiz, QuizGenerationTask, User
+from app.models import (
+    Book,
+    ContentChunk,
+    ExamShare,
+    PdfDocument,
+    Quiz,
+    QuizGenerationTask,
+    User,
+)
 from app.services.auth import AuthIdentity, add_audit_log, get_personal_workspace
 from app.schemas import (
     AdminBookCopyRequest,
@@ -67,6 +76,16 @@ def ensure_book_has_no_active_generation(db: Session, book: Book) -> None:
 
 def delete_book_and_files(db: Session, book: Book) -> None:
     file_paths = [pdf.file_path for pdf in book.pdfs if not pdf.file_path.startswith("demo://")]
+    db.execute(
+        update(ExamShare)
+        .where(ExamShare.book_id == book.id)
+        .values(
+            status="source_deleted",
+            book_id=None,
+            quiz_id=None,
+            stopped_at=datetime.now(timezone.utc),
+        )
+    )
     db.delete(book)
     db.commit()
     for file_path in file_paths:
@@ -296,6 +315,15 @@ def delete_pdf(
         select(Quiz.id).where(Quiz.book_id == book_id, Quiz.status != "submitted")
     ).all()
     if draft_quiz_ids:
+        db.execute(
+            update(ExamShare)
+            .where(ExamShare.quiz_id.in_(draft_quiz_ids))
+            .values(
+                status="source_deleted",
+                quiz_id=None,
+                stopped_at=datetime.now(timezone.utc),
+            )
+        )
         db.execute(delete(Quiz).where(Quiz.id.in_(draft_quiz_ids)))
     file_path = pdf.file_path
     db.delete(pdf)

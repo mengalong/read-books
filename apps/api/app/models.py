@@ -74,6 +74,12 @@ class User(TimestampMixin, Base):
     audit_logs: Mapped[list[AuditLog]] = relationship(
         back_populates="actor_user", foreign_keys="AuditLog.actor_user_id"
     )
+    created_exam_shares: Mapped[list[ExamShare]] = relationship(
+        back_populates="owner_user", foreign_keys="ExamShare.owner_user_id"
+    )
+    exam_attempts: Mapped[list[ExamAttempt]] = relationship(
+        back_populates="participant_user", foreign_keys="ExamAttempt.participant_user_id"
+    )
 
 
 class Workspace(TimestampMixin, Base):
@@ -96,6 +102,7 @@ class Workspace(TimestampMixin, Base):
     books: Mapped[list[Book]] = relationship(back_populates="workspace")
     usage_records: Mapped[list[ModelUsageRecord]] = relationship(back_populates="workspace")
     access_visits: Mapped[list[UserAccessVisit]] = relationship(back_populates="workspace")
+    exam_shares: Mapped[list[ExamShare]] = relationship(back_populates="workspace")
 
 
 class WorkspaceMember(Base):
@@ -211,6 +218,7 @@ class Book(TimestampMixin, Base):
     review_tasks: Mapped[list[ReviewTask]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
     )
+    exam_shares: Mapped[list[ExamShare]] = relationship(back_populates="book")
     workspace: Mapped[Workspace | None] = relationship(back_populates="books")
     created_by_user: Mapped[User | None] = relationship(
         back_populates="created_books", foreign_keys=[created_by_user_id]
@@ -280,6 +288,7 @@ class Quiz(TimestampMixin, Base):
     review_tasks: Mapped[list[ReviewTask]] = relationship(
         back_populates="quiz", cascade="all, delete-orphan"
     )
+    exam_shares: Mapped[list[ExamShare]] = relationship(back_populates="quiz")
 
 
 class Question(TimestampMixin, Base):
@@ -408,6 +417,103 @@ class ReviewAnswer(TimestampMixin, Base):
     question: Mapped[Question] = relationship(back_populates="review_answers")
 
 
+class ExamShare(TimestampMixin, Base):
+    __tablename__ = "exam_shares"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    share_code: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    quiz_id: Mapped[str | None] = mapped_column(
+        ForeignKey("quizzes.id", ondelete="SET NULL"), index=True
+    )
+    book_id: Mapped[str | None] = mapped_column(
+        ForeignKey("books.id", ondelete="SET NULL"), index=True
+    )
+    owner_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="RESTRICT"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(30), default="active", index=True)
+    quiz_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
+    snapshot_version: Mapped[int] = mapped_column(Integer, default=1)
+    book_title: Mapped[str] = mapped_column(String(200))
+    book_author: Mapped[str] = mapped_column(String(120), default="")
+    quiz_title: Mapped[str] = mapped_column(String(200))
+    source_mode: Mapped[str] = mapped_column(String(30), default="pdf", index=True)
+    difficulty: Mapped[str] = mapped_column(String(20), default="medium")
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    max_score: Mapped[float] = mapped_column(Float, default=100)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+    quiz: Mapped[Quiz | None] = relationship(back_populates="exam_shares")
+    book: Mapped[Book | None] = relationship(back_populates="exam_shares")
+    owner_user: Mapped[User] = relationship(
+        back_populates="created_exam_shares", foreign_keys=[owner_user_id]
+    )
+    workspace: Mapped[Workspace] = relationship(back_populates="exam_shares")
+    attempts: Mapped[list[ExamAttempt]] = relationship(
+        back_populates="exam_share", cascade="all, delete-orphan"
+    )
+
+
+class ExamAttempt(TimestampMixin, Base):
+    __tablename__ = "exam_attempts"
+    __table_args__ = (UniqueConstraint("exam_share_id", "participant_user_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    exam_share_id: Mapped[str] = mapped_column(
+        ForeignKey("exam_shares.id", ondelete="CASCADE"), index=True
+    )
+    participant_type: Mapped[str] = mapped_column(String(20), index=True)
+    participant_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    participant_name: Mapped[str] = mapped_column(String(120))
+    access_token_hash: Mapped[str | None] = mapped_column(String(128), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(30), default="in_progress", index=True)
+    total_score: Mapped[float | None] = mapped_column(Float)
+    max_score: Mapped[float] = mapped_column(Float, default=100)
+    elapsed_seconds: Mapped[int | None] = mapped_column(Integer)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    grading_error: Mapped[str | None] = mapped_column(Text)
+
+    exam_share: Mapped[ExamShare] = relationship(back_populates="attempts")
+    participant_user: Mapped[User | None] = relationship(
+        back_populates="exam_attempts", foreign_keys=[participant_user_id]
+    )
+    answers: Mapped[list[ExamAnswer]] = relationship(
+        back_populates="exam_attempt", cascade="all, delete-orphan"
+    )
+
+
+class ExamAnswer(TimestampMixin, Base):
+    __tablename__ = "exam_answers"
+    __table_args__ = (UniqueConstraint("exam_attempt_id", "snapshot_question_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    exam_attempt_id: Mapped[str] = mapped_column(
+        ForeignKey("exam_attempts.id", ondelete="CASCADE"), index=True
+    )
+    snapshot_question_id: Mapped[str] = mapped_column(String(36), index=True)
+    selected_answers: Mapped[list[str]] = mapped_column(JSON, default=list)
+    text_answer: Mapped[str | None] = mapped_column(Text)
+    score: Mapped[float] = mapped_column(Float, default=0)
+    max_score: Mapped[float] = mapped_column(Float)
+    is_correct: Mapped[bool] = mapped_column(Boolean, default=False)
+    feedback: Mapped[str] = mapped_column(Text, default="")
+    matched_points: Mapped[list[str]] = mapped_column(JSON, default=list)
+    missing_points: Mapped[list[str]] = mapped_column(JSON, default=list)
+    grading_status: Mapped[str] = mapped_column(String(20), default="completed", index=True)
+
+    exam_attempt: Mapped[ExamAttempt] = relationship(back_populates="answers")
+
+
 class ModelConfiguration(TimestampMixin, Base):
     __tablename__ = "model_configurations"
 
@@ -467,6 +573,8 @@ class ModelUsageRecord(Base):
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
     book_id: Mapped[str | None] = mapped_column(String(36), index=True)
     quiz_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    exam_share_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    exam_attempt_id: Mapped[str | None] = mapped_column(String(36), index=True)
     workspace_id: Mapped[str | None] = mapped_column(
         ForeignKey("workspaces.id", ondelete="SET NULL"), index=True
     )

@@ -1,0 +1,216 @@
+from __future__ import annotations
+
+import threading
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
+
+from app.config import get_settings
+from app.database import SessionLocal
+from app.models import ExamAnswer, ExamAttempt, ExamShare, Question, Quiz
+from app.services.model_config import get_effective_model_configuration
+from app.services.model_usage import new_usage_context
+from app.services.prompt_config import get_effective_prompt_templates
+from app.services.quiz_provider import GradeResult, get_quiz_provider
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+def effective_share_status(share: ExamShare) -> str:
+    if share.status == "active" and share.expires_at and as_utc(share.expires_at) <= utc_now():
+        return "expired"
+    return share.status
+
+
+def serialize_question(question: Question) -> dict[str, Any]:
+    return {
+        "id": question.id,
+        "position": question.position,
+        "question_type": question.question_type,
+        "prompt": question.prompt,
+        "options": list(question.options or []),
+        "correct_answers": list(question.correct_answers or []),
+        "explanation": question.explanation,
+        "knowledge_point": question.knowledge_point,
+        "difficulty": question.difficulty,
+        "estimated_seconds": question.estimated_seconds,
+        "reference_answer": question.reference_answer,
+        "grading_rubric": list(question.grading_rubric or []),
+        "source_evidence": list(question.source_evidence or []),
+        "max_score": question.max_score,
+    }
+
+
+def serialize_quiz(quiz: Quiz) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "quiz_id": quiz.id,
+        "title": quiz.title,
+        "difficulty": quiz.difficulty,
+        "duration_minutes": quiz.duration_minutes,
+        "source_mode": quiz.source_mode,
+        "max_score": quiz.max_score,
+        "questions": [serialize_question(question) for question in quiz.questions],
+    }
+
+
+def snapshot_questions(share: ExamShare) -> list[dict[str, Any]]:
+    questions = share.quiz_snapshot.get("questions", []) if isinstance(share.quiz_snapshot, dict) else []
+    return sorted(
+        [item for item in questions if isinstance(item, dict)],
+        key=lambda item: int(item.get("position", 0)),
+    )
+
+
+def grade_objective(question: dict[str, Any], selected: list[str]) -> GradeResult:
+    selected_set = set(selected)
+    correct_set = set(question.get("correct_answers") or [])
+    max_score = float(question.get("max_score") or 0)
+    if question.get("question_type") == "single":
+        is_correct = selected_set == correct_set
+        return GradeResult(
+            score=max_score if is_correct else 0,
+            is_correct=is_correct,
+            feedback="回答正确。" if is_correct else "答案不正确。",
+            matched_points=list(correct_set & selected_set),
+            missing_points=list(correct_set - selected_set),
+        )
+
+    correct_hits = len(correct_set & selected_set)
+    wrong_hits = len(selected_set - correct_set)
+    accuracy = max(0.0, correct_hits / max(len(correct_set), 1) - wrong_hits / 4)
+    score = round(max_score * accuracy, 1)
+    is_correct = selected_set == correct_set
+    return GradeResult(
+        score=score,
+        is_correct=is_correct,
+        feedback="全部选对。" if is_correct else "本题按选对项计分，错选会扣除部分得分。",
+        matched_points=list(correct_set & selected_set),
+        missing_points=list(correct_set - selected_set),
+    )
+
+
+def unanswered_grade(question: dict[str, Any]) -> GradeResult:
+    if question.get("question_type") == "short":
+        missing = [
+            str(item.get("point", ""))
+            for item in question.get("grading_rubric", [])
+            if isinstance(item, dict) and item.get("point")
+        ]
+    else:
+        missing = list(question.get("correct_answers") or [])
+    return GradeResult(
+        score=0,
+        is_correct=False,
+        feedback="本题未作答，按 0 分处理。",
+        matched_points=[],
+        missing_points=missing,
+    )
+
+
+def _finish_attempt(db: Session, attempt: ExamAttempt) -> None:
+    attempt.total_score = round(sum(answer.score for answer in attempt.answers), 1)
+    attempt.status = "completed"
+    attempt.grading_error = None
+    attempt.completed_at = utc_now()
+    db.commit()
+
+
+def run_exam_grading(attempt_id: str) -> None:
+    with SessionLocal() as db:
+        attempt = db.scalar(
+            select(ExamAttempt)
+            .options(
+                selectinload(ExamAttempt.answers),
+                selectinload(ExamAttempt.exam_share),
+            )
+            .where(ExamAttempt.id == attempt_id)
+        )
+        if attempt is None or attempt.status != "grading":
+            return
+
+        questions = {str(item.get("id")): item for item in snapshot_questions(attempt.exam_share)}
+        pending_answers = [answer for answer in attempt.answers if answer.grading_status == "pending"]
+        if not pending_answers:
+            _finish_attempt(db, attempt)
+            return
+
+        settings = get_settings()
+        configuration = get_effective_model_configuration(db, settings)
+        prompts = get_effective_prompt_templates(db)
+        usage_context = new_usage_context(
+            "exam_grading",
+            f"评分考试《{attempt.exam_share.name}》中的答卷",
+            book_id=attempt.exam_share.book_id,
+            quiz_id=attempt.exam_share.quiz_id,
+            user_id=attempt.exam_share.owner_user_id,
+            workspace_id=attempt.exam_share.workspace_id,
+            exam_share_id=attempt.exam_share_id,
+            exam_attempt_id=attempt.id,
+        )
+        provider = get_quiz_provider(settings, configuration, prompts, usage_context)
+
+        try:
+            for answer in pending_answers:
+                question = questions.get(answer.snapshot_question_id)
+                if question is None:
+                    raise RuntimeError("考试快照中缺少待评分题目")
+                grade = provider.grade_short_answer(SimpleNamespace(**question), answer.text_answer or "")
+                answer.score = grade.score
+                answer.is_correct = grade.is_correct
+                answer.feedback = grade.feedback
+                answer.matched_points = grade.matched_points
+                answer.missing_points = grade.missing_points
+                answer.grading_status = "completed"
+                db.commit()
+            _finish_attempt(db, attempt)
+        except Exception as exc:
+            db.rollback()
+            attempt = db.scalar(
+                select(ExamAttempt)
+                .options(selectinload(ExamAttempt.answers))
+                .where(ExamAttempt.id == attempt_id)
+            )
+            if attempt is None:
+                return
+            attempt.status = "grading_failed"
+            attempt.grading_error = str(exc)[:2000]
+            for answer in attempt.answers:
+                if answer.grading_status == "pending":
+                    answer.grading_status = "failed"
+                    answer.feedback = "问答题评分失败，等待重新评分。"
+            db.commit()
+
+
+def launch_exam_grading(attempt_id: str) -> None:
+    threading.Thread(target=run_exam_grading, args=(attempt_id,), daemon=True).start()
+
+
+def retry_exam_grading(db: Session, attempt: ExamAttempt) -> None:
+    if attempt.status != "grading_failed":
+        raise ValueError("只有评分失败的答卷可以重新评分")
+    retried = False
+    for answer in attempt.answers:
+        if answer.grading_status == "failed":
+            answer.grading_status = "pending"
+            answer.feedback = "等待 AI 评分。"
+            retried = True
+    if not retried:
+        raise ValueError("这份答卷没有需要重新评分的题目")
+    attempt.status = "grading"
+    attempt.grading_error = None
+    db.commit()
+    launch_exam_grading(attempt.id)
+
+
+def recover_exam_grading_tasks(db: Session) -> list[str]:
+    return list(db.scalars(select(ExamAttempt.id).where(ExamAttempt.status == "grading")).all())

@@ -9,7 +9,15 @@ from app.config import get_settings
 from app.database import get_db
 from app.dependencies import require_ready_identity
 from app.services.auth import AuthIdentity
-from app.models import Book, Question, Quiz, QuizGenerationTask, ReviewAnswer, ReviewTask
+from app.models import (
+    Book,
+    ExamShare,
+    Question,
+    Quiz,
+    QuizGenerationTask,
+    ReviewAnswer,
+    ReviewTask,
+)
 from app.schemas import (
     AnswerResult,
     QuestionResponse,
@@ -316,6 +324,11 @@ def delete_quiz(
         book.pre_generation_enabled = False
         book.pre_generation_status = "disabled"
         book.pre_generation_error = None
+    db.execute(
+        update(ExamShare)
+        .where(ExamShare.quiz_id == quiz.id)
+        .values(status="source_deleted", quiz_id=None, stopped_at=datetime.now(timezone.utc))
+    )
     db.delete(quiz)
     db.commit()
 

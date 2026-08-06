@@ -217,6 +217,152 @@ class QuizSubmitRequest(BaseModel):
     elapsed_seconds: int = Field(default=0, ge=0)
 
 
+class ExamShareCreate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class ExamShareUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    status: Literal["active", "stopped"] | None = None
+
+
+class ExamAttemptCreate(BaseModel):
+    participant_name: str | None = Field(default=None, max_length=50)
+
+
+class ExamQuestionResponse(BaseModel):
+    id: str
+    position: int
+    question_type: Literal["single", "multiple", "short"]
+    prompt: str
+    options: list[QuestionOption] = Field(default_factory=list)
+    knowledge_point: str
+    difficulty: str
+    estimated_seconds: int
+    max_score: float
+    correct_answers: list[str] | None = None
+    explanation: str | None = None
+    reference_answer: str | None = None
+    grading_rubric: list[dict[str, Any]] = Field(default_factory=list)
+    source_evidence: list[SourceEvidence] = Field(default_factory=list)
+
+
+class PublicExamResponse(BaseModel):
+    share_code: str
+    name: str
+    status: Literal["active", "stopped", "source_deleted", "expired"]
+    book_title: str
+    book_author: str
+    quiz_title: str
+    owner_display_name: str
+    difficulty: str
+    duration_minutes: int
+    source_mode: Literal["pdf", "model_knowledge"]
+    max_score: float
+    question_count: int
+    single_count: int
+    multiple_count: int
+    short_count: int
+    expires_at: datetime | None
+    authenticated: bool
+    participant_name: str | None = None
+    existing_attempt_id: str | None = None
+    existing_attempt_status: str | None = None
+
+
+class ExamAnswerResponse(BaseModel):
+    question_id: str
+    selected_answers: list[str] = Field(default_factory=list)
+    text_answer: str | None = None
+    score: float
+    max_score: float
+    is_correct: bool
+    feedback: str
+    matched_points: list[str] = Field(default_factory=list)
+    missing_points: list[str] = Field(default_factory=list)
+    grading_status: Literal["pending", "completed", "failed"]
+
+
+class ExamAttemptResponse(BaseModel):
+    id: str
+    exam_share_id: str
+    share_code: str
+    exam_name: str
+    book_title: str
+    quiz_title: str
+    participant_type: Literal["user", "anonymous"]
+    participant_name: str
+    status: Literal["in_progress", "grading", "completed", "grading_failed"]
+    total_score: float | None
+    max_score: float
+    elapsed_seconds: int | None
+    started_at: datetime
+    submitted_at: datetime | None
+    completed_at: datetime | None
+    grading_error: str | None
+    duration_minutes: int
+    source_mode: Literal["pdf", "model_knowledge"]
+    questions: list[ExamQuestionResponse]
+    answers: list[ExamAnswerResponse] = Field(default_factory=list)
+    access_token: str | None = None
+
+
+class ExamAttemptSummary(BaseModel):
+    id: str
+    participant_type: Literal["user", "anonymous"]
+    participant_user_id: str | None
+    participant_name: str
+    status: Literal["in_progress", "grading", "completed", "grading_failed"]
+    total_score: float | None
+    max_score: float
+    score_percentage: float | None
+    elapsed_seconds: int | None
+    started_at: datetime
+    submitted_at: datetime | None
+    completed_at: datetime | None
+    grading_error: str | None
+
+
+class ExamShareSummary(BaseModel):
+    id: str
+    share_code: str
+    name: str
+    status: Literal["active", "stopped", "source_deleted", "expired"]
+    quiz_id: str | None
+    book_id: str | None
+    owner_user_id: str
+    owner_username: str
+    owner_display_name: str
+    workspace_id: str
+    book_title: str
+    book_author: str
+    quiz_title: str
+    source_mode: Literal["pdf", "model_knowledge"]
+    difficulty: str
+    duration_minutes: int
+    max_score: float
+    question_count: int
+    single_count: int
+    multiple_count: int
+    short_count: int
+    started_count: int
+    submitted_count: int
+    grading_count: int
+    grading_failed_count: int
+    completion_rate: float
+    average_score: float | None
+    highest_score: float | None
+    created_at: datetime
+    updated_at: datetime
+    stopped_at: datetime | None
+    expires_at: datetime | None
+    last_attempt_at: datetime | None
+
+
+class ExamShareDetail(ExamShareSummary):
+    attempts: list[ExamAttemptSummary] = Field(default_factory=list)
+
+
 class AnswerResult(ApiModel):
     question_id: str
     selected_answers: list[str]
@@ -378,6 +524,8 @@ class TokenUsageStageResponse(ApiModel):
     id: str
     user_id: str | None = None
     workspace_id: str | None = None
+    exam_share_id: str | None = None
+    exam_attempt_id: str | None = None
     phase: str
     call_number: int
     model_name: str
@@ -401,6 +549,8 @@ class TokenUsageTaskResponse(BaseModel):
     status: Literal["success", "failed"]
     book_id: str | None
     quiz_id: str | None
+    exam_share_id: str | None = None
+    exam_attempt_id: str | None = None
     input_tokens: int
     output_tokens: int
     total_tokens: int

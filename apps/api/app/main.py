@@ -13,10 +13,14 @@ from app.routers.books import admin_router as admin_books_router
 from app.routers.books import router as books_router
 from app.routers.quizzes import router as quizzes_router
 from app.routers.settings import router as settings_router
+from app.routers.exams import admin_router as admin_exams_router
+from app.routers.exams import public_router as public_exams_router
+from app.routers.exams import router as exams_router
 from app.services.demo_data import seed_demo_data
 from app.services.auth import ensure_initial_admin
 from app.services.pdf_parser import parse_pdf_document
 from app.services.quiz_generation import recover_generation_tasks, run_generation_task
+from app.services.exam_sharing import recover_exam_grading_tasks, launch_exam_grading
 
 settings = get_settings()
 
@@ -52,6 +56,10 @@ async def lifespan(_: FastAPI):
         pending_generation_task_ids = recover_generation_tasks(db)
     for task_id in pending_generation_task_ids:
         threading.Thread(target=run_generation_task, args=(task_id,), daemon=True).start()
+    with SessionLocal() as db:
+        pending_exam_attempt_ids = recover_exam_grading_tasks(db)
+    for attempt_id in pending_exam_attempt_ids:
+        launch_exam_grading(attempt_id)
     yield
 
 
@@ -75,6 +83,9 @@ app.include_router(admin_books_router, prefix="/api")
 app.include_router(quizzes_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
+app.include_router(exams_router, prefix="/api")
+app.include_router(admin_exams_router, prefix="/api")
+app.include_router(public_exams_router, prefix="/api")
 
 
 @app.get("/api/health")

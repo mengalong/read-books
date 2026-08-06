@@ -21,6 +21,8 @@ class ModelUsageContext:
     quiz_id: str | None = None
     user_id: str | None = None
     workspace_id: str | None = None
+    exam_share_id: str | None = None
+    exam_attempt_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,8 @@ class ModelUsageTask:
     status: str
     book_id: str | None
     quiz_id: str | None
+    exam_share_id: str | None
+    exam_attempt_id: str | None
     user_id: str | None
     username: str | None
     display_name: str | None
@@ -90,6 +94,8 @@ def new_usage_context(
     quiz_id: str | None = None,
     user_id: str | None = None,
     workspace_id: str | None = None,
+    exam_share_id: str | None = None,
+    exam_attempt_id: str | None = None,
 ) -> ModelUsageContext:
     return ModelUsageContext(
         task_id=str(uuid4()),
@@ -99,6 +105,8 @@ def new_usage_context(
         quiz_id=quiz_id,
         user_id=user_id,
         workspace_id=workspace_id,
+        exam_share_id=exam_share_id,
+        exam_attempt_id=exam_attempt_id,
     )
 
 
@@ -146,6 +154,8 @@ def record_model_usage(event: ModelUsageEvent) -> None:
                 quiz_id=event.context.quiz_id,
                 user_id=event.context.user_id,
                 workspace_id=event.context.workspace_id,
+                exam_share_id=event.context.exam_share_id,
+                exam_attempt_id=event.context.exam_attempt_id,
             )
         )
         db.commit()
@@ -223,6 +233,12 @@ def get_model_usage_report(
                 status="failed" if any(stage.status == "failed" for stage in stages) else "success",
                 book_id=first.book_id,
                 quiz_id=next((stage.quiz_id for stage in stages if stage.quiz_id), None),
+                exam_share_id=next(
+                    (stage.exam_share_id for stage in stages if stage.exam_share_id), None
+                ),
+                exam_attempt_id=next(
+                    (stage.exam_attempt_id for stage in stages if stage.exam_attempt_id), None
+                ),
                 user_id=first.user_id,
                 username=first.user.username if first.user else None,
                 display_name=first.user.display_name if first.user else None,

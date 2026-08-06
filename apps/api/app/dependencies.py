@@ -17,6 +17,14 @@ def get_current_identity(
     return identity
 
 
+def get_optional_identity(
+    request: Request, db: Session = Depends(get_db)
+) -> AuthIdentity | None:
+    settings = get_settings()
+    token = request.cookies.get(settings.session_cookie_name)
+    return authenticate_session(db, token) if token else None
+
+
 def require_ready_identity(
     identity: AuthIdentity = Depends(get_current_identity),
 ) -> AuthIdentity:
