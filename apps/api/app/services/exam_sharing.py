@@ -87,7 +87,7 @@ def snapshot_questions(share: ExamShare) -> list[dict[str, Any]]:
 def _missing_focus_points(question: dict[str, Any], answer: ExamAnswer) -> list[str]:
     option_labels = {
         str(option.get("id")): f'{option.get("id")}. {option.get("text")}'
-        for option in question.get("options", [])
+        for option in question.get("options") or []
         if isinstance(option, dict) and option.get("id") and option.get("text")
     }
     points = [
@@ -113,7 +113,9 @@ def analyze_attempt_learning(
         question = questions.get(answer.snapshot_question_id)
         if question is None or answer.max_score <= 0:
             continue
-        knowledge_point = str(question.get("knowledge_point") or "未标注知识点").strip()
+        knowledge_point = (
+            str(question.get("knowledge_point") or "").strip() or "未标注知识点"
+        )
         item = grouped.setdefault(
             knowledge_point,
             {
@@ -132,17 +134,18 @@ def analyze_attempt_learning(
         item["focus_points"].extend(_missing_focus_points(question, answer))
 
     weak_points: list[dict[str, Any]] = []
+    mastery_points: list[tuple[float, float, str]] = []
     for item in grouped.values():
         score_percentage = round(item["score"] / item["max_score"] * 100, 1)
+        mastery_points.append(
+            (score_percentage, -item["max_score"], item["knowledge_point"])
+        )
         if score_percentage >= 60:
             continue
         focus_points = list(dict.fromkeys(item["focus_points"]))[:4]
         knowledge_point = item["knowledge_point"]
         if focus_points:
-            recommendation = (
-                f"重点补足：{'、'.join(focus_points)}。"
-                "建议回到相关章节核对原文，再用自己的语言复述关键内容。"
-            )
+            recommendation = "建议回到相关章节核对原文，再围绕待补充内容用自己的语言复述关键关系。"
         elif "short" in item["question_types"]:
             recommendation = "重点补全核心论述、因果关系和关键细节，并对照参考答案重新组织一次完整表达。"
         elif "multiple" in item["question_types"]:
@@ -169,9 +172,18 @@ def analyze_attempt_learning(
         )
     )
     if not weak_points:
-        return [], None
+        if not mastery_points:
+            return [], None
+        _, _, knowledge_point = min(mastery_points)
+        return (
+            [],
+            f"本次未发现得分率低于 60% 的薄弱知识点。建议继续巩固“{knowledge_point}”，并通过间隔复习保持掌握。",
+        )
     primary = weak_points[0]
-    direction = f'优先深入掌握“{primary["knowledge_point"]}”。{primary["recommendation"]}'
+    direction = f'优先深入掌握“{primary["knowledge_point"]}”。'
+    if primary["focus_points"]:
+        direction += f'重点补足：{"、".join(primary["focus_points"])}。'
+    direction += primary["recommendation"]
     return weak_points, direction
 
 

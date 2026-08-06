@@ -275,7 +275,7 @@ def test_logged_user_reuses_attempt_and_short_answer_is_graded(client):
     assert result["total_score"] > 40
     assert len(result["answers"]) == 2
     assert result["weak_knowledge_points"] == []
-    assert result["recommended_direction"] is None
+    assert "未发现得分率低于 60%" in result["recommended_direction"]
 
 
 def test_share_stop_source_deletion_and_workspace_permissions(client):

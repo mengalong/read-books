@@ -406,6 +406,7 @@ export type ReviewTaskSummary = HistoryItem & { attempt_number: number };
 
 export type ExamShareStatus = "active" | "stopped" | "source_deleted" | "expired";
 export type ExamAttemptStatus = "in_progress" | "grading" | "completed" | "grading_failed";
+export type ExamDeviceType = "desktop" | "mobile" | "tablet" | "unknown";
 
 export type ExamQuestion = {
   id: string;
@@ -437,6 +438,16 @@ export type ExamAnswer = {
   grading_status: "pending" | "completed" | "failed";
 };
 
+export type ExamWeakKnowledgePoint = {
+  knowledge_point: string;
+  score: number;
+  max_score: number;
+  score_percentage: number;
+  question_count: number;
+  focus_points: string[];
+  recommendation: string;
+};
+
 export type ExamAttempt = {
   id: string;
   exam_share_id: string;
@@ -454,10 +465,17 @@ export type ExamAttempt = {
   submitted_at: string | null;
   completed_at: string | null;
   grading_error: string | null;
+  device_type: ExamDeviceType | null;
+  user_agent: string | null;
+  started_ip_address: string | null;
+  submitted_ip_address: string | null;
+  ip_changed: boolean;
   duration_minutes: number;
   source_mode: SourceMode;
   questions: ExamQuestion[];
   answers: ExamAnswer[];
+  weak_knowledge_points: ExamWeakKnowledgePoint[];
+  recommended_direction: string | null;
   access_token: string | null;
 };
 
@@ -475,6 +493,10 @@ export type ExamAttemptSummary = {
   submitted_at: string | null;
   completed_at: string | null;
   grading_error: string | null;
+  device_type: ExamDeviceType | null;
+  started_ip_address: string | null;
+  submitted_ip_address: string | null;
+  ip_changed: boolean;
 };
 
 export type ExamShare = {

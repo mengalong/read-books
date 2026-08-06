@@ -3492,11 +3492,10 @@ p {
   border-bottom: 0;
 }
 
-.exam-table td:first-child,
-.exam-table td:nth-child(3),
-.exam-table td:nth-child(4) {
+.exam-cell-stack {
   display: grid;
   gap: 4px;
+  min-width: 0;
 }
 
 .exam-table td:first-child strong {
@@ -3591,11 +3590,174 @@ p {
   padding: 22px 24px 25px;
 }
 
+.attempt-table {
+  min-width: 1180px;
+}
+
+.attempt-table th:nth-child(1) {
+  width: 120px;
+}
+
+.attempt-table th:nth-child(2) {
+  width: 108px;
+}
+
+.attempt-table th:nth-child(3) {
+  width: 155px;
+}
+
+.attempt-table th:nth-child(4),
+.attempt-table th:nth-child(5) {
+  width: 96px;
+}
+
+.attempt-score-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+.attempt-device-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.attempt-device-cell > span,
+.attempt-device-cell .ip-change-warning {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.attempt-device-cell > span {
+  color: #52615d !important;
+  font-size: 11px !important;
+}
+
+.attempt-device-cell .ip-change-warning {
+  color: var(--red);
+}
+
 .participant-type {
   align-items: center;
   color: #52615d !important;
   display: inline-flex;
   gap: 5px;
+}
+
+.exam-score-panel {
+  margin-bottom: 18px;
+  padding: 22px 24px 24px;
+}
+
+.exam-score-panel .section-title h2 {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+}
+
+.score-chart-layout {
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 30px minmax(0, 1fr);
+  margin-top: 22px;
+}
+
+.score-chart-axis {
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  font-size: 9px;
+  height: 220px;
+  justify-content: space-between;
+  padding-top: 1px;
+  text-align: right;
+}
+
+.score-chart-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-top: 8px;
+}
+
+.score-chart-plot {
+  height: 260px;
+  position: relative;
+}
+
+.score-chart-grid {
+  height: 220px;
+  inset: 0 0 auto;
+  pointer-events: none;
+  position: absolute;
+}
+
+.score-chart-grid i {
+  border-top: 1px solid #e7ebe8;
+  left: 0;
+  position: absolute;
+  right: 0;
+}
+
+.score-chart-bars {
+  display: grid;
+  gap: 14px;
+  grid-auto-columns: minmax(64px, 1fr);
+  grid-auto-flow: column;
+  height: 260px;
+  padding: 0 12px;
+  position: relative;
+}
+
+.score-chart-item {
+  display: grid;
+  grid-template-rows: 220px 40px;
+  min-width: 64px;
+}
+
+.score-bar-track {
+  align-items: flex-end;
+  display: flex;
+  justify-content: center;
+}
+
+.score-bar {
+  border-radius: 4px 4px 0 0;
+  min-height: 2px;
+  position: relative;
+  width: 34px;
+}
+
+.score-bar.high {
+  background: #4f8f73;
+}
+
+.score-bar.medium {
+  background: #d6a33e;
+}
+
+.score-bar.low {
+  background: var(--red);
+}
+
+.score-bar strong {
+  color: var(--ink);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  left: 50%;
+  position: absolute;
+  top: -21px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.score-chart-item > span {
+  color: #52615d;
+  font-size: 10px;
+  line-height: 1.35;
+  overflow: hidden;
+  padding-top: 8px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .attempt-detail-modal {
@@ -3614,6 +3776,171 @@ p {
 
 .attempt-summary-strip strong {
   color: var(--green);
+}
+
+.attempt-security-strip {
+  background: #f7f9f8;
+  border: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 10px;
+  padding: 11px 13px;
+}
+
+.attempt-security-strip > div {
+  display: grid;
+  gap: 4px;
+}
+
+.attempt-security-strip span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.attempt-security-strip strong {
+  align-items: center;
+  display: flex;
+  font-size: 11px;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.attempt-user-agent {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 14px;
+  padding: 0 1px 10px;
+}
+
+.attempt-user-agent summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.attempt-user-agent code {
+  color: #52615d;
+  display: block;
+  font-size: 10px;
+  line-height: 1.6;
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.exam-learning-analysis {
+  background: #f3f7f5;
+  border-left: 4px solid #6caa8e;
+  margin-bottom: 20px;
+  padding: 16px 18px;
+}
+
+.exam-learning-analysis.has-weakness {
+  background: #fdf4f1;
+  border-left-color: var(--red);
+}
+
+.learning-analysis-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+}
+
+.learning-analysis-heading > svg {
+  color: var(--green);
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.has-weakness .learning-analysis-heading > svg {
+  color: var(--red);
+}
+
+.learning-analysis-heading h2 {
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.learning-analysis-heading p,
+.weak-knowledge-item p {
+  color: #52615d;
+  font-size: 11px;
+  line-height: 1.7;
+  margin-top: 5px;
+}
+
+.weak-knowledge-list {
+  border-top: 1px solid #ecdcd7;
+  margin-top: 13px;
+}
+
+.weak-knowledge-item {
+  padding: 12px 0 4px;
+}
+
+.weak-knowledge-item + .weak-knowledge-item {
+  border-top: 1px solid #ecdcd7;
+}
+
+.additional-weak-points {
+  border-top: 1px solid #ecdcd7;
+  margin-top: 9px;
+  padding-top: 10px;
+}
+
+.additional-weak-points summary {
+  color: #8f4133;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.additional-weak-points[open] summary {
+  margin-bottom: 5px;
+}
+
+.weak-knowledge-title {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.weak-knowledge-title strong {
+  font-size: 12px;
+}
+
+.weak-knowledge-title span {
+  color: var(--red);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.weak-focus-points {
+  display: grid;
+  gap: 3px;
+  margin-top: 7px;
+}
+
+.weak-focus-points span {
+  color: #76524a;
+  font-size: 10px;
+  line-height: 1.5;
+  padding-left: 12px;
+  position: relative;
+}
+
+.weak-focus-points span::before {
+  content: "";
+  background: var(--red);
+  border-radius: 50%;
+  height: 4px;
+  left: 1px;
+  position: absolute;
+  top: 6px;
+  width: 4px;
 }
 
 .attempt-detail-modal .toast-error {
@@ -3974,11 +4301,6 @@ p {
   padding: 10px 12px;
 }
 
-.admin-exam-table td:nth-child(2) {
-  display: grid;
-  gap: 4px;
-}
-
 @media (max-width: 980px) {
   .app-sidebar {
     flex-basis: 196px;
@@ -4315,6 +4637,10 @@ p {
     align-items: flex-start;
     display: grid;
     gap: 6px;
+  }
+
+  .attempt-security-strip {
+    grid-template-columns: 1fr;
   }
 
   .attempt-question-list {
