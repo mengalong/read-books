@@ -27,14 +27,28 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
+        if_not_exists=True,
     )
-    op.create_index("ix_wechat_users_openid", "wechat_users", ["openid"], unique=True)
-    op.create_index("ix_wechat_users_unionid", "wechat_users", ["unionid"], unique=True)
+    op.create_index(
+        "ix_wechat_users_openid",
+        "wechat_users",
+        ["openid"],
+        unique=True,
+        if_not_exists=True,
+    )
+    op.create_index(
+        "ix_wechat_users_unionid",
+        "wechat_users",
+        ["unionid"],
+        unique=True,
+        if_not_exists=True,
+    )
     op.create_index(
         "ix_wechat_users_last_login_at",
         "wechat_users",
         ["last_login_at"],
         unique=False,
+        if_not_exists=True,
     )
 
     op.create_table(
@@ -51,16 +65,36 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["wechat_user_id"], ["wechat_users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
+        if_not_exists=True,
     )
     op.create_index(
         "ix_wechat_sessions_wechat_user_id",
         "wechat_sessions",
         ["wechat_user_id"],
         unique=False,
+        if_not_exists=True,
     )
-    op.create_index("ix_wechat_sessions_token_hash", "wechat_sessions", ["token_hash"], unique=True)
-    op.create_index("ix_wechat_sessions_expires_at", "wechat_sessions", ["expires_at"], unique=False)
-    op.create_index("ix_wechat_sessions_revoked_at", "wechat_sessions", ["revoked_at"], unique=False)
+    op.create_index(
+        "ix_wechat_sessions_token_hash",
+        "wechat_sessions",
+        ["token_hash"],
+        unique=True,
+        if_not_exists=True,
+    )
+    op.create_index(
+        "ix_wechat_sessions_expires_at",
+        "wechat_sessions",
+        ["expires_at"],
+        unique=False,
+        if_not_exists=True,
+    )
+    op.create_index(
+        "ix_wechat_sessions_revoked_at",
+        "wechat_sessions",
+        ["revoked_at"],
+        unique=False,
+        if_not_exists=True,
+    )
 
     op.create_table(
         "wechat_oauth_states",
@@ -73,30 +107,35 @@ def upgrade() -> None:
         sa.Column("created_ip_address", sa.String(length=80), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
+        if_not_exists=True,
     )
     op.create_index(
         "ix_wechat_oauth_states_state_hash",
         "wechat_oauth_states",
         ["state_hash"],
         unique=True,
+        if_not_exists=True,
     )
     op.create_index(
         "ix_wechat_oauth_states_share_code",
         "wechat_oauth_states",
         ["share_code"],
         unique=False,
+        if_not_exists=True,
     )
     op.create_index(
         "ix_wechat_oauth_states_expires_at",
         "wechat_oauth_states",
         ["expires_at"],
         unique=False,
+        if_not_exists=True,
     )
     op.create_index(
         "ix_wechat_oauth_states_consumed_at",
         "wechat_oauth_states",
         ["consumed_at"],
         unique=False,
+        if_not_exists=True,
     )
 
     op.create_table(
@@ -112,33 +151,51 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["updated_by_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
+        if_not_exists=True,
     )
     op.create_index(
         "ix_wechat_login_configurations_updated_by_user_id",
         "wechat_login_configurations",
         ["updated_by_user_id"],
         unique=False,
+        if_not_exists=True,
     )
 
+    inspector = sa.inspect(op.get_bind())
+    attempt_columns = {item["name"] for item in inspector.get_columns("exam_attempts")}
+    attempt_indexes = {item["name"] for item in inspector.get_indexes("exam_attempts")}
+    attempt_uniques = {
+        item["name"] for item in inspector.get_unique_constraints("exam_attempts")
+    }
+    attempt_foreign_keys = {
+        item["name"] for item in inspector.get_foreign_keys("exam_attempts")
+    }
     with op.batch_alter_table("exam_attempts") as batch_op:
-        batch_op.add_column(sa.Column("participant_wechat_user_id", sa.String(length=36)))
-        batch_op.add_column(sa.Column("participant_avatar_url", sa.Text()))
-        batch_op.create_foreign_key(
-            "fk_exam_attempts_wechat_user",
-            "wechat_users",
-            ["participant_wechat_user_id"],
-            ["id"],
-            ondelete="SET NULL",
-        )
-        batch_op.create_unique_constraint(
-            "uq_exam_attempt_share_wechat",
-            ["exam_share_id", "participant_wechat_user_id"],
-        )
-        batch_op.create_index(
-            "ix_exam_attempts_participant_wechat_user_id",
-            ["participant_wechat_user_id"],
-            unique=False,
-        )
+        if "participant_wechat_user_id" not in attempt_columns:
+            batch_op.add_column(
+                sa.Column("participant_wechat_user_id", sa.String(length=36))
+            )
+        if "participant_avatar_url" not in attempt_columns:
+            batch_op.add_column(sa.Column("participant_avatar_url", sa.Text()))
+        if "fk_exam_attempts_wechat_user" not in attempt_foreign_keys:
+            batch_op.create_foreign_key(
+                "fk_exam_attempts_wechat_user",
+                "wechat_users",
+                ["participant_wechat_user_id"],
+                ["id"],
+                ondelete="SET NULL",
+            )
+        if "uq_exam_attempt_share_wechat" not in attempt_uniques:
+            batch_op.create_unique_constraint(
+                "uq_exam_attempt_share_wechat",
+                ["exam_share_id", "participant_wechat_user_id"],
+            )
+        if "ix_exam_attempts_participant_wechat_user_id" not in attempt_indexes:
+            batch_op.create_index(
+                "ix_exam_attempts_participant_wechat_user_id",
+                ["participant_wechat_user_id"],
+                unique=False,
+            )
 
 
 def downgrade() -> None:
