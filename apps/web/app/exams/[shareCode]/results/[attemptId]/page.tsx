@@ -1,13 +1,15 @@
 "use client";
 
-import { Check, CircleX, Clock3, LoaderCircle } from "lucide-react";
+import { Check, CircleX, Clock3, Download, LoaderCircle } from "lucide-react";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { ExamAttemptReport } from "@/components/exam-attempt-report";
 import { ErrorState } from "@/components/ui";
 import { ExamLearningAnalysis } from "@/components/exam-learning-analysis";
 import { ApiError, getPublicExamResult } from "@/lib/api";
 import { readExamAccess } from "@/lib/exam-access";
+import { downloadElementAsPng } from "@/lib/export-image";
 import { formatDuration, formatScore, scorePercentage } from "@/lib/format";
 import type { ExamAttempt } from "@/lib/types";
 
@@ -15,6 +17,9 @@ export default function PublicExamResultPage() {
   const params = useParams<{ shareCode: string; attemptId: string }>();
   const [result, setResult] = useState<ExamAttempt | null>(null);
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [renderReport, setRenderReport] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,12 +50,37 @@ export default function PublicExamResultPage() {
 
   const percent = scorePercentage(result.total_score, result.max_score) || 0;
   const low = percent < 60;
+
+  async function saveResult() {
+    if (!result) return;
+    setSaving(true);
+    setError("");
+    setRenderReport(true);
+    try {
+      await waitForReportRender();
+      if (!reportRef.current) throw new Error("报告内容尚未完成渲染");
+      await downloadElementAsPng(reportRef.current, `${result.exam_name}-${result.participant_name}-答题报告`);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : "答题报告保存失败");
+    } finally {
+      setSaving(false);
+      setRenderReport(false);
+    }
+  }
+
   return <div className="public-exam-page public-result-page">
     {error && <div className="toast-error">{error}</div>}
-    <section className="result-header"><div className={`result-score ${low ? "low" : ""}`}><div className="score-number"><strong>{formatScore(result.total_score)}</strong><span>/ {formatScore(result.max_score)}</span></div><div className="score-copy"><div className="eyebrow">Exam complete</div><h1>{percent >= 80 ? "完成得很好" : percent >= 60 ? "考试已经完成" : "还有一些内容值得再复习"}</h1><p>{result.exam_name} · {result.participant_name}<br />用时 {formatDuration(result.elapsed_seconds)} · 得分率 {percent}%</p></div></div></section>
+    <section className="result-header"><div className={`result-score ${low ? "low" : ""}`}><div className="score-number"><strong>{formatScore(result.total_score)}</strong><span>/ {formatScore(result.max_score)}</span></div><div className="score-copy"><div className="eyebrow">Exam complete</div><h1>{percent >= 80 ? "完成得很好" : percent >= 60 ? "考试已经完成" : "还有一些内容值得再复习"}</h1><p>{result.exam_name} · {result.participant_name}<br />用时 {formatDuration(result.elapsed_seconds)} · 得分率 {percent}%</p></div></div><button className="button button-secondary public-save-report" disabled={saving} onClick={() => void saveResult()} type="button">{saving ? <LoaderCircle className="spin" size={15} /> : <Download size={15} />}{saving ? "正在生成……" : "保存结果长图"}</button></section>
     <div className="public-result-note">公开结果不展示 PDF 文件名、页码和原文摘录。</div>
     <ExamLearningAnalysis recommendedDirection={result.recommended_direction} weakPoints={result.weak_knowledge_points || []} />
     <div className="section-title"><h2>逐题结果</h2><span>{result.questions.length} 道题</span></div>
     {result.questions.map((question, index) => { const answer = answerMap.get(question.id); if (!answer) return null; const selectedText = question.question_type === "short" ? answer.text_answer || "未作答" : question.options.filter((option) => answer.selected_answers.includes(option.id)).map((option) => `${option.id}. ${option.text}`).join("；") || "未作答"; const correctText = question.question_type === "short" ? question.reference_answer : question.options.filter((option) => question.correct_answers?.includes(option.id)).map((option) => `${option.id}. ${option.text}`).join("；"); return <article className={`result-question ${answer.is_correct ? "correct" : "incorrect"}`} key={question.id}><div className="question-card-header"><span className="question-number">第 {index + 1} 题 · {question.knowledge_point}</span><span className={answer.score / answer.max_score >= 0.6 ? "score-good" : "score-low"}>{formatScore(answer.score)} / {formatScore(answer.max_score)} 分</span></div><h3>{question.prompt}</h3><div className="result-answer-row"><div><strong>你的答案：</strong>{selectedText}</div><div><strong>{question.question_type === "short" ? "参考答案" : "正确答案"}：</strong>{correctText || "—"}</div></div><div className="result-feedback">{answer.is_correct ? <Check size={14} /> : <CircleX size={14} />}{answer.feedback} {question.explanation}</div></article>; })}
+    {renderReport && <ExamAttemptReport attempt={result} ref={reportRef} />}
   </div>;
+}
+
+function waitForReportRender() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+  });
 }

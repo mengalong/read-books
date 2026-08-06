@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { stat } from "node:fs/promises";
 
 const currentUser = {
   id: "admin-1",
@@ -233,11 +234,22 @@ test("考试详情展示成绩柱状图、风控信息和个人学习方向", as
   expect(await attemptRow.locator("td").nth(3).evaluate((element) => getComputedStyle(element).display)).toBe("table-cell");
   expect(await attemptRow.locator("td").nth(4).evaluate((element) => getComputedStyle(element).display)).toBe("table-cell");
   await expect(attemptRow.getByText("提交 IP 已变化")).toBeVisible();
+  const actionCell = attemptRow.locator("td").last();
+  expect(await actionCell.evaluate((element) => getComputedStyle(element).position)).toBe("sticky");
+  await expect(page.getByRole("button", { name: "查看林同学的答卷" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "下载林同学的答题报告" })).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "下载林同学的答题报告" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("红楼梦读书考试-林同学-答题报告.png");
+  expect((await stat(await download.path())).size).toBeGreaterThan(1000);
 
   await page.getByRole("button", { name: "查看林同学的答卷" }).click();
   await expect(page.getByRole("heading", { name: "薄弱知识与深入方向" })).toBeVisible();
   await expect(page.getByText("凤姐以福寿之说奉承贾母")).toBeVisible();
   await expect(page.getByText("203.0.113.11")).toBeVisible();
+  await expect(page.getByRole("button", { name: "导出报告" })).toBeVisible();
 });
 
 test("公开结果展示答案但不展示 PDF 原文", async ({ page }) => {
@@ -320,4 +332,9 @@ test("公开结果展示答案但不展示 PDF 原文", async ({ page }) => {
   await expect(page.getByText("优先深入掌握“人物语言”，重点核对人物回应方式。")).toBeVisible();
   await expect(page.getByText("测试书.pdf")).toHaveCount(0);
   await expect(page.locator(".result-score")).toHaveClass(/low/);
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "保存结果长图" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("红楼梦读书考试-匿名读者-答题报告.png");
+  expect((await stat(await download.path())).size).toBeGreaterThan(1000);
 });

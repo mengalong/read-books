@@ -1,12 +1,14 @@
 "use client";
 
-import { ArrowLeft, BarChart3, Check, CircleX, Copy, Eye, LoaderCircle, Monitor, RefreshCw, RotateCcw, ShieldAlert, Smartphone, Tablet, UserRound, X } from "lucide-react";
+import { ArrowLeft, BarChart3, Check, CircleX, Copy, Download, Eye, LoaderCircle, Monitor, RefreshCw, RotateCcw, ShieldAlert, Smartphone, Tablet, UserRound, X } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { ExamAttemptReport } from "@/components/exam-attempt-report";
 import { EmptyState, ErrorState, EvidenceList } from "@/components/ui";
 import { ExamLearningAnalysis } from "@/components/exam-learning-analysis";
 import { ApiError, getAdminExamAttempt, getAdminExamShare, getExamAttemptForOwner, getExamShare, retryAdminExamAttemptGrading, retryExamAttemptGrading } from "@/lib/api";
+import { downloadElementAsPng } from "@/lib/export-image";
 import { formatDateTime, formatDuration, formatScore } from "@/lib/format";
 import type { ExamAttempt, ExamAttemptSummary, ExamDeviceType, ExamQuestion, ExamShare, ExamShareStatus } from "@/lib/types";
 
@@ -36,9 +38,12 @@ export function ExamShareDetailView({ shareId, admin = false }: { shareId: strin
   const [selectedAttempt, setSelectedAttempt] = useState<ExamAttempt | null>(null);
   const [loading, setLoading] = useState(true);
   const [attemptLoading, setAttemptLoading] = useState(false);
+  const [exportingAttemptId, setExportingAttemptId] = useState<string | null>(null);
+  const [reportAttempt, setReportAttempt] = useState<ExamAttempt | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
+  const reportRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     setError("");
@@ -110,6 +115,25 @@ export function ExamShareDetailView({ shareId, admin = false }: { shareId: strin
     }
   }
 
+  async function exportAttempt(attemptId: string) {
+    setExportingAttemptId(attemptId);
+    setError("");
+    try {
+      const attempt = selectedAttempt?.id === attemptId
+        ? selectedAttempt
+        : await (admin ? getAdminExamAttempt(shareId, attemptId) : getExamAttemptForOwner(shareId, attemptId));
+      setReportAttempt(attempt);
+      await waitForReportRender();
+      if (!reportRef.current) throw new Error("报告内容尚未完成渲染");
+      await downloadElementAsPng(reportRef.current, `${attempt.exam_name}-${attempt.participant_name}-答题报告`);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : "答题报告导出失败");
+    } finally {
+      setExportingAttemptId(null);
+      setReportAttempt(null);
+    }
+  }
+
   if (loading) return <div className="page-wrap"><div className="loading-state">正在读取考试详情……</div></div>;
   if (!share) return <div className="page-wrap"><ErrorState message={error || "未找到这个考试活动"} /></div>;
 
@@ -135,14 +159,14 @@ export function ExamShareDetailView({ shareId, admin = false }: { shareId: strin
 
       <section className="content-panel exam-attempt-panel">
         <div className="section-title"><h2>答题记录</h2><span>{completedAttempts.length} 份已完成 · {share.grading_count} 份评分中</span></div>
-        {!share.attempts?.length ? <EmptyState title="还没有参与者" detail="分享链接被打开并开始答题后，记录会出现在这里。" /> : <div className="exam-table-wrap"><table className="exam-table attempt-table"><thead><tr><th>参与者</th><th>身份</th><th>终端 / IP</th><th>状态</th><th>得分</th><th>用时</th><th>开始时间</th><th>提交时间</th><th>操作</th></tr></thead><tbody>{share.attempts.map((attempt) => <tr key={attempt.id}>
+        {!share.attempts?.length ? <EmptyState title="还没有参与者" detail="分享链接被打开并开始答题后，记录会出现在这里。" /> : <div className="exam-table-wrap"><table className="exam-table attempt-table"><thead><tr><th>参与者</th><th>身份</th><th>终端 / IP</th><th>状态</th><th>得分</th><th>用时</th><th>开始时间</th><th>提交时间</th><th className="attempt-actions-cell">操作</th></tr></thead><tbody>{share.attempts.map((attempt) => <tr key={attempt.id}>
           <td><strong>{attempt.participant_name}</strong></td>
           <td><span className="participant-type"><UserRound size={13} />{attempt.participant_type === "user" ? "登录用户" : "匿名参与者"}</span></td>
           <td><div className="attempt-device-cell"><span>{deviceIcon(attempt.device_type)}{attempt.device_type ? deviceTypeLabels[attempt.device_type] : "历史记录未采集"}</span><small>{attempt.started_ip_address || "IP 未采集"}</small>{attempt.ip_changed && <small className="ip-change-warning"><ShieldAlert size={11} />提交 IP 已变化</small>}</div></td>
           <td><div className="exam-cell-stack"><span className={`exam-status attempt-status-${attempt.status}`}>{attemptStatusLabels[attempt.status]}</span>{attempt.grading_error && <small className="score-low" title={attempt.grading_error}>需要重新评分</small>}</div></td>
           <td className={`attempt-score-cell ${attempt.score_percentage !== null && attempt.score_percentage < 60 ? "score-low" : "score-good"}`}>{attempt.total_score === null ? "—" : `${formatScore(attempt.total_score)} / ${formatScore(attempt.max_score)}`}</td>
           <td>{formatDuration(attempt.elapsed_seconds)}</td><td>{formatDateTime(attempt.started_at)}</td><td>{formatDateTime(attempt.submitted_at)}</td>
-          <td><button aria-label={`查看${attempt.participant_name}的答卷`} className="button button-quiet" disabled={attemptLoading} onClick={() => void openAttempt(attempt.id)} title="查看答卷" type="button"><Eye size={15} /></button></td>
+          <td className="attempt-actions-cell"><div className="attempt-action-buttons"><button aria-label={`查看${attempt.participant_name}的答卷`} className="button button-quiet" disabled={attemptLoading} onClick={() => void openAttempt(attempt.id)} title="查看答卷" type="button"><Eye size={15} /></button>{attempt.status === "completed" && <button aria-label={`下载${attempt.participant_name}的答题报告`} className="button button-quiet" disabled={exportingAttemptId !== null} onClick={() => void exportAttempt(attempt.id)} title="下载报告长图" type="button">{exportingAttemptId === attempt.id ? <LoaderCircle className="spin" size={15} /> : <Download size={15} />}</button>}</div></td>
         </tr>)}</tbody></table></div>}
       </section>
 
@@ -159,10 +183,17 @@ export function ExamShareDetailView({ shareId, admin = false }: { shareId: strin
         {selectedAttempt.status === "grading" && <div className="grading-state"><LoaderCircle className="spin" size={18} />问答题正在评分，结果会自动更新。</div>}
         {selectedAttempt.status === "completed" && <ExamLearningAnalysis recommendedDirection={selectedAttempt.recommended_direction} weakPoints={selectedAttempt.weak_knowledge_points || []} />}
         <div className="attempt-question-list">{selectedAttempt.questions.map((question, index) => <AttemptQuestion key={question.id} question={question} answer={selectedAttempt.answers.find((item) => item.question_id === question.id)} index={index} sourceMode={selectedAttempt.source_mode} />)}</div>
-        <div className="modal-actions"><button className="button button-secondary" onClick={() => setSelectedAttempt(null)} type="button">关闭</button><button aria-label="刷新答卷" className="button button-primary" onClick={() => void openAttempt(selectedAttempt.id)} type="button"><RefreshCw size={15} />刷新结果</button></div>
+        <div className="modal-actions"><button className="button button-secondary" onClick={() => setSelectedAttempt(null)} type="button">关闭</button>{selectedAttempt.status === "completed" && <button className="button button-secondary" disabled={exportingAttemptId !== null} onClick={() => void exportAttempt(selectedAttempt.id)} type="button">{exportingAttemptId === selectedAttempt.id ? <LoaderCircle className="spin" size={15} /> : <Download size={15} />}导出报告</button>}<button aria-label="刷新答卷" className="button button-primary" onClick={() => void openAttempt(selectedAttempt.id)} type="button"><RefreshCw size={15} />刷新结果</button></div>
       </section></div>}
+      {reportAttempt && <ExamAttemptReport attempt={reportAttempt} includeSecurity ref={reportRef} />}
     </div>
   );
+}
+
+function waitForReportRender() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+  });
 }
 
 function deviceIcon(deviceType: ExamDeviceType | null) {
