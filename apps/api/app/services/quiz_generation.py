@@ -21,6 +21,11 @@ from app.services.model_config import get_effective_model_configuration
 from app.services.model_usage import attach_quiz_to_usage, new_usage_context
 from app.services.prompt_config import get_effective_prompt_templates
 from app.services.quiz_provider import get_quiz_provider
+from app.services.score_allocation import (
+    QUIZ_TOTAL_SCORE,
+    allocate_question_scores,
+    normalize_rubric_scores,
+)
 
 settings = get_settings()
 
@@ -277,6 +282,16 @@ def run_generation_task(task_id: str) -> None:
                 task.current_phase = f"已完成第 {position} / {task.total_questions} 道题"
                 db.commit()
 
+            allocated_scores = allocate_question_scores(
+                item.question_type for item in generated
+            )
+            for item, max_score in zip(generated, allocated_scores, strict=True):
+                item.max_score = max_score
+                if item.question_type == "short":
+                    item.grading_rubric = normalize_rubric_scores(
+                        item.grading_rubric, max_score
+                    )
+
             quiz = Quiz(
                 book_id=task.book_id,
                 title=f"第 {generation_number + 1} 套复习试卷",
@@ -284,7 +299,7 @@ def run_generation_task(task_id: str) -> None:
                 duration_minutes=task.duration_minutes,
                 status="ready",
                 source_mode=task.source_mode,
-                max_score=sum(item.max_score for item in generated),
+                max_score=QUIZ_TOTAL_SCORE,
                 generation_task_id=task.id,
             )
             db.add(quiz)

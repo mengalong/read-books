@@ -2,6 +2,7 @@ from pathlib import Path
 import time
 
 import fitz
+import pytest
 from sqlalchemy import select
 
 from app.database import SessionLocal
@@ -281,6 +282,12 @@ def test_quiz_summary_counts_question_types_and_delete_cascades_reviews(client):
     quiz_list = client.get(f"/api/books/{book_id}/quizzes")
     assert quiz_list.status_code == 200
     assert {key: quiz_list.json()[0][key] for key in expected_summary} == expected_summary
+    quiz_detail = client.get(f"/api/quizzes/{quiz_id}")
+    assert quiz_detail.status_code == 200
+    assert quiz_detail.json()["max_score"] == 100
+    assert [
+        question["max_score"] for question in quiz_detail.json()["questions"]
+    ] == [16.7, 27.8, 55.5]
 
     review = client.post(f"/api/quizzes/{quiz_id}/reviews")
     assert review.status_code == 200
@@ -289,6 +296,12 @@ def test_quiz_summary_counts_question_types_and_delete_cascades_reviews(client):
         questions = db.scalars(
             select(Question).where(Question.quiz_id == quiz_id).order_by(Question.position)
         ).all()
+        short_question = next(
+            question for question in questions if question.question_type == "short"
+        )
+        assert sum(
+            item["score"] for item in short_question.grading_rubric
+        ) == pytest.approx(short_question.max_score)
         answers = [
             {
                 "question_id": question.id,
@@ -542,6 +555,8 @@ def test_book_without_pdf_uses_model_knowledge_mode_with_real_provider(client, m
     quiz = client.get(f"/api/quizzes/{task['quiz_id']}")
     assert quiz.status_code == 200
     assert quiz.json()["source_mode"] == "model_knowledge"
+    assert quiz.json()["max_score"] == 100
+    assert quiz.json()["questions"][0]["max_score"] == 100
     assert quiz.json()["questions"][0]["source_evidence"] == []
 
 
