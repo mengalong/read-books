@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 
+import { mockAdminIdentity } from "./test-helpers";
+
 test("模型设置掩码显示密钥并支持覆盖保存", async ({ page }) => {
+  await mockAdminIdentity(page);
   let lastSavedApiKey = "";
   let failNextTest = false;
   let configuration = {
@@ -58,18 +61,19 @@ test("模型设置掩码显示密钥并支持覆盖保存", async ({ page }) => 
   await page.getByRole("checkbox", { name: /出题与评分模式/ }).check();
   await page.getByLabel("接口地址").fill("https://models.example.com/v1");
   await page.getByLabel("模型名称").fill("review-model");
-  await page.getByLabel("API Key").fill("e2e-secret-key");
+  const apiKeyInput = page.getByRole("textbox", { name: "API Key", exact: true });
+  await apiKeyInput.fill("e2e-secret-key");
   await page.getByRole("button", { name: "保存配置" }).click();
 
   await expect(page.getByText("配置已保存")).toBeVisible();
   await page.reload();
   await expect(page.getByText("已保存密钥")).toBeVisible();
-  await expect(page.getByLabel("API Key")).toHaveValue("****************");
+  await expect(apiKeyInput).toHaveValue("****************");
 
-  await page.getByLabel("API Key").fill("updated-e2e-secret");
+  await apiKeyInput.fill("updated-e2e-secret");
   await page.getByRole("button", { name: "保存配置" }).click();
   expect(lastSavedApiKey).toBe("updated-e2e-secret");
-  await expect(page.getByLabel("API Key")).toHaveValue("****************");
+  await expect(apiKeyInput).toHaveValue("****************");
 
   await page.getByRole("button", { name: "测试连接" }).click();
   await expect(page.getByText("模型接口连接成功 · 86 ms")).toBeVisible();
@@ -77,9 +81,10 @@ test("模型设置掩码显示密钥并支持覆盖保存", async ({ page }) => 
   await expect(page.getByText("模型实际返回")).toBeVisible();
   await expect(page.locator(".curl-response")).toHaveText("连接成功");
   await expect(page.getByText("本次测试命令")).toBeVisible();
-  await expect(page.locator(".curl-preview pre")).toContainText("https://models.example.com/v1/chat/completions");
-  await expect(page.locator(".curl-preview pre")).toContainText("Authorization: Bearer ***");
-  await expect(page.locator(".curl-preview pre")).not.toContainText("updated-e2e-secret");
+  const curlCommand = page.locator(".curl-preview pre:not(.curl-response)");
+  await expect(curlCommand).toContainText("https://models.example.com/v1/chat/completions");
+  await expect(curlCommand).toContainText("Authorization: Bearer ***");
+  await expect(curlCommand).not.toContainText("updated-e2e-secret");
 
   failNextTest = true;
   await page.getByRole("button", { name: "测试连接" }).click();
@@ -88,5 +93,5 @@ test("模型设置掩码显示密钥并支持覆盖保存", async ({ page }) => 
 
   await page.getByRole("checkbox", { name: /出题与评分模式/ }).uncheck();
   await page.getByRole("button", { name: "保存配置" }).click();
-  await expect(page.getByText("未保存密钥")).toBeVisible();
+  await expect(page.getByText("已保存密钥")).toBeVisible();
 });

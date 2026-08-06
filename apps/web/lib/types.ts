@@ -28,6 +28,19 @@ export type ModelConnectionTestResult = {
   tested_at: string;
 };
 
+export type WechatLoginConfiguration = {
+  id: string;
+  enabled: boolean;
+  required_for_public_exams: boolean;
+  app_id: string;
+  app_secret_configured: boolean;
+  callback_base_url: string;
+  callback_url: string;
+  configuration_complete: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
 export type PromptType = "generation" | "grading";
 
 export type PromptTemplate = {
@@ -455,8 +468,9 @@ export type ExamAttempt = {
   exam_name: string;
   book_title: string;
   quiz_title: string;
-  participant_type: "user" | "anonymous";
+  participant_type: "user" | "wechat" | "anonymous";
   participant_name: string;
+  participant_avatar_url: string | null;
   status: ExamAttemptStatus;
   total_score: number | null;
   max_score: number;
@@ -481,9 +495,10 @@ export type ExamAttempt = {
 
 export type ExamAttemptSummary = {
   id: string;
-  participant_type: "user" | "anonymous";
+  participant_type: "user" | "wechat" | "anonymous";
   participant_user_id: string | null;
   participant_name: string;
+  participant_avatar_url: string | null;
   status: ExamAttemptStatus;
   total_score: number | null;
   max_score: number;
@@ -554,7 +569,11 @@ export type PublicExam = {
   short_count: number;
   expires_at: string | null;
   authenticated: boolean;
+  identity_type: "user" | "wechat" | "anonymous";
   participant_name: string | null;
+  participant_avatar_url: string | null;
+  wechat_login_enabled: boolean;
+  wechat_login_required: boolean;
   existing_attempt_id: string | null;
   existing_attempt_status: ExamAttemptStatus | null;
 };

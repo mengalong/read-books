@@ -1,11 +1,11 @@
 "use client";
 
-import { ArrowRight, BookOpenText, CalendarClock, Clock3, ListChecks, ShieldCheck, UserRound } from "lucide-react";
+import { ArrowRight, BookOpenText, CalendarClock, Clock3, ListChecks, LogOut, ScanLine, ShieldCheck, UserRound } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { ErrorState } from "@/components/ui";
-import { ApiError, getPublicExam, startPublicExam } from "@/lib/api";
+import { ApiError, getPublicExam, getWechatLoginUrl, logoutWechat, startPublicExam } from "@/lib/api";
 import { readExamAccess, saveExamAccess } from "@/lib/exam-access";
 import { formatDateTime } from "@/lib/format";
 import type { PublicExam } from "@/lib/types";
@@ -30,6 +30,8 @@ export default function PublicExamEntryPage() {
   useEffect(() => {
     const saved = readExamAccess(params.shareCode);
     setSavedAttemptId(saved?.attemptId || null);
+    const wechatError = new URLSearchParams(window.location.search).get("wechat_error");
+    if (wechatError) setError(wechatError);
     getPublicExam(params.shareCode, saved?.token)
       .then((data) => {
         setExam(data);
@@ -46,19 +48,33 @@ export default function PublicExamEntryPage() {
 
   async function handleStart() {
     if (!exam) return;
-    if (!exam.authenticated && participantName.trim().length < 2) {
+    if (exam.identity_type === "anonymous" && participantName.trim().length < 2) {
       setError("请填写 2-50 个字符的答题名称");
       return;
     }
     setStarting(true);
     setError("");
     try {
-      const attempt = await startPublicExam(params.shareCode, exam.authenticated ? undefined : participantName.trim());
+      const attempt = await startPublicExam(params.shareCode, exam.identity_type === "anonymous" ? participantName.trim() : undefined);
       saveExamAccess(params.shareCode, { attemptId: attempt.id, token: attempt.access_token });
       openAttempt(attempt.id, attempt.status);
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "考试开始失败");
       setStarting(false);
+    }
+  }
+
+  function handleWechatLogin() {
+    window.location.assign(getWechatLoginUrl(params.shareCode));
+  }
+
+  async function handleWechatLogout() {
+    setError("");
+    try {
+      await logoutWechat();
+      window.location.reload();
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "微信身份退出失败");
     }
   }
 
@@ -83,11 +99,15 @@ export default function PublicExamEntryPage() {
         </div>
 
         {error && <div className="toast-error">{error}</div>}
-        {canOpenExisting && existingAttemptId ? <div className="public-exam-action"><div><strong>{historicalAttempt ? "你参加过这场考试" : "发现尚未结束的答题记录"}</strong><span>{historicalAttempt ? "可以继续查看之前的答题记录和学习报告。" : unavailable ? "分享已经停止，但已开始的答卷仍可继续完成。" : "同一考试只保留一份有效答卷。"}</span></div><button className="button button-primary" onClick={() => openAttempt(existingAttemptId, exam.existing_attempt_status)} type="button">{historicalAttempt ? "查看答题记录" : "继续答题"}<ArrowRight size={15} /></button></div> : unavailable ? <div className="public-exam-unavailable"><strong>{unavailableMessages[exam.status] || "这场考试当前不能开始答题。"}</strong>{exam.status === "expired" && <span>已提交的参与者仍可通过原答题身份查看历史记录。</span>}</div> : <div className="public-exam-action">
-          <div className="public-participant-field"><label htmlFor="participant-name">答题身份</label>{exam.authenticated ? <div className="signed-participant"><UserRound size={15} />{exam.participant_name}<span>登录用户</span></div> : <input autoComplete="name" id="participant-name" maxLength={50} onChange={(event) => setParticipantName(event.target.value)} placeholder="填写你的答题名称" value={participantName} />}</div>
-          <button className="button button-primary" disabled={starting} onClick={() => void handleStart()} type="button">{starting ? "正在准备……" : "开始答题"}<ArrowRight size={15} /></button>
+        {canOpenExisting && existingAttemptId ? <div className="public-exam-action"><div><strong>{historicalAttempt ? "你参加过这场考试" : "发现尚未结束的答题记录"}</strong><span>{historicalAttempt ? "可以继续查看之前的答题记录和学习报告。" : unavailable ? "分享已经停止，但已开始的答卷仍可继续完成。" : "同一考试只保留一份有效答卷。"}</span></div><button className="button button-primary" onClick={() => openAttempt(existingAttemptId, exam.existing_attempt_status)} type="button">{historicalAttempt ? "查看答题记录" : "继续答题"}<ArrowRight size={15} /></button></div> : unavailable ? <div className="public-exam-unavailable"><strong>{unavailableMessages[exam.status] || "这场考试当前不能开始答题。"}</strong>{exam.status === "expired" && <span>已提交的参与者仍可通过原答题身份查看历史记录。</span>}</div> : <div className="public-exam-action public-exam-identity-action">
+          <div className="public-participant-field"><label htmlFor="participant-name">答题身份</label>
+            {exam.identity_type === "user" && <div className="signed-participant"><UserRound size={15} />{exam.participant_name}<span>平台用户</span></div>}
+            {exam.identity_type === "wechat" && <div className="wechat-participant"><span className="wechat-avatar">{exam.participant_avatar_url ? <img alt="" src={exam.participant_avatar_url} /> : <UserRound size={17} />}</span><span><strong>{exam.participant_name}</strong><small><ScanLine size={12} />微信认证</small></span><button aria-label="退出微信身份" className="button button-quiet" onClick={() => void handleWechatLogout()} title="退出微信身份" type="button"><LogOut size={14} /></button></div>}
+            {exam.identity_type === "anonymous" && <>{exam.wechat_login_enabled && <button className="button wechat-login-button" onClick={handleWechatLogin} type="button"><ScanLine size={17} />微信登录答题</button>}{exam.wechat_login_enabled && !exam.wechat_login_required && <div className="identity-divider"><span>或使用答题名称</span></div>}{!exam.wechat_login_required && <input autoComplete="name" id="participant-name" maxLength={50} onChange={(event) => setParticipantName(event.target.value)} placeholder="填写你的答题名称" value={participantName} />}</>}
+          </div>
+          {!(exam.identity_type === "anonymous" && exam.wechat_login_required) && <button className="button button-primary" disabled={starting} onClick={() => void handleStart()} type="button">{starting ? "正在准备……" : "开始答题"}<ArrowRight size={15} /></button>}
         </div>}
-        <div className="public-privacy-note"><ShieldCheck size={16} /><span>你的答题名称、答案、成绩和提交时间将对考试分享者可见。公开结果不会展示书籍 PDF 的文件名、页码或原文摘录。</span></div>
+        <div className="public-privacy-note"><ShieldCheck size={16} /><span>你的身份名称、头像、答案、成绩、提交时间、终端和 IP 将对考试分享者可见。微信认证用于识别同一微信账号，不等同于实名身份认证。</span></div>
       </main>
     </div>
   );

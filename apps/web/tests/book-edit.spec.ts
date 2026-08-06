@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 
+import { mockAdminIdentity } from "./test-helpers";
+
 test("修改书籍信息并返回详情页", async ({ page }) => {
+  await mockAdminIdentity(page);
   let savedPayload: Record<string, unknown> | null = null;
   const book = {
     id: "book-edit",

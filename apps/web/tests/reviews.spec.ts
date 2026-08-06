@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { mockAdminIdentity } from "./test-helpers";
+
 const reviews = [
   {
     id: "review-1",
@@ -40,6 +42,7 @@ const reviews = [
 ];
 
 test("复习记录按回车搜索并使用统一时间格式", async ({ page }) => {
+  await mockAdminIdentity(page);
   const requestUrls: string[] = [];
   await page.route("**/api/reviews**", async (route) => {
     const requestUrl = route.request().url();
@@ -56,9 +59,10 @@ test("复习记录按回车搜索并使用统一时间格式", async ({ page }) 
   await expect(page.getByRole("cell", { name: "2026-08-03 18:02:00" })).toBeVisible();
 
   const searchInput = page.getByLabel("按书名或作者搜索复习记录");
+  const requestCountBeforeTyping = requestUrls.length;
   await searchInput.fill("红楼梦");
   await page.waitForTimeout(350);
-  expect(requestUrls).toHaveLength(1);
+  expect(requestUrls).toHaveLength(requestCountBeforeTyping);
   await expect(page.getByText("2 条记录")).toBeVisible();
 
   await searchInput.press("Enter");

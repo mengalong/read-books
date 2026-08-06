@@ -74,6 +74,9 @@ WEB_PORT=3000
 WEB_ORIGIN=http://books.mengalong.cn
 SEED_DEMO_DATA=false
 SESSION_COOKIE_SECURE=false
+WECHAT_LOGIN_ENABLED=false
+WECHAT_LOGIN_REQUIRED=false
+WECHAT_CALLBACK_BASE_URL=
 OCR_ENABLED=false
 NEXT_PUBLIC_API_BASE_URL=/api
 ```
@@ -100,4 +103,6 @@ NEXT_PUBLIC_API_BASE_URL=/api
 4. 将 `.env` 中 `WEB_ORIGIN` 改为 `https://books.mengalong.cn`。
 5. 将 `SESSION_COOKIE_SECURE` 改为 `true`，然后重启服务。
 
-在 HTTPS 完成前，不应通过公网传输正式账号密码或模型 API Key。
+6. 在“系统管理 / 微信登录”保存微信开放平台 AppID、AppSecret 和 `https://books.mengalong.cn`，确认微信开放平台授权回调域已经配置为 `books.mengalong.cn` 后再开启微信登录。
+
+在 HTTPS 完成前，不应通过公网传输正式账号密码或模型 API Key，也不能启用微信登录。后端会拒绝在生产环境保存 HTTP 微信回调地址。

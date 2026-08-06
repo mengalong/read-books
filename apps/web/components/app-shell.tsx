@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, BookMarked, BookOpenText, ClipboardCheck, Clock3, FileCode2, History, LibraryBig, LogOut, Plus, Settings2, Users } from "lucide-react";
+import { Activity, BarChart3, BookMarked, BookOpenText, ClipboardCheck, Clock3, FileCode2, History, LibraryBig, LogOut, Plus, ScanLine, Settings2, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -19,6 +19,7 @@ const navigation = [
 const systemNavigation = [
   { href: "/settings/books", label: "书籍管理", icon: BookMarked },
   { href: "/settings/model", label: "模型设置", icon: Settings2 },
+  { href: "/settings/wechat", label: "微信登录", icon: ScanLine },
   { href: "/settings/prompts", label: "提示词管理", icon: FileCode2 },
   { href: "/settings/token-usage", label: "Token 用量", icon: BarChart3 },
   { href: "/settings/access-statistics", label: "访问统计", icon: Activity },

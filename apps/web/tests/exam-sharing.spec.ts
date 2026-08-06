@@ -30,7 +30,11 @@ const publicExam = {
   short_count: 2,
   expires_at: null,
   authenticated: false,
+  identity_type: "anonymous",
   participant_name: null,
+  participant_avatar_url: null,
+  wechat_login_enabled: false,
+  wechat_login_required: false,
   existing_attempt_id: null,
   existing_attempt_status: null,
 };
@@ -159,6 +163,49 @@ test("参加过考试的匿名用户可以从原浏览器查看历史答卷", as
   await expect(page).toHaveURL(/\/exams\/public-code\/results\/attempt-completed$/);
 });
 
+test("要求微信认证时不再允许手填身份开始答题", async ({ page }) => {
+  await page.route("**/api/auth/me", async (route) => {
+    await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "请先登录" }) });
+  });
+  await page.route("**/api/public/exams/public-code", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ...publicExam, wechat_login_enabled: true, wechat_login_required: true }),
+    });
+  });
+
+  await page.goto("/exams/public-code");
+  await expect(page.getByRole("button", { name: "微信登录答题" })).toBeVisible();
+  await expect(page.getByPlaceholder("填写你的答题名称")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "开始答题" })).toHaveCount(0);
+});
+
+test("微信参与者再次进入可以查看历史答卷", async ({ page }) => {
+  await page.route("**/api/auth/me", async (route) => {
+    await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "请先登录" }) });
+  });
+  await page.route("**/api/public/exams/public-code", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...publicExam,
+        authenticated: true,
+        identity_type: "wechat",
+        participant_name: "微信读者",
+        participant_avatar_url: "https://example.com/wechat-avatar.png",
+        wechat_login_enabled: true,
+        existing_attempt_id: "wechat-attempt-completed",
+        existing_attempt_status: "completed",
+      }),
+    });
+  });
+
+  await page.goto("/exams/public-code");
+  await expect(page.getByText("你参加过这场考试")).toBeVisible();
+  await page.getByRole("button", { name: "查看答题记录" }).click();
+  await expect(page).toHaveURL(/\/results\/wechat-attempt-completed$/);
+});
+
 test("考试管理展示分享链接和答题统计", async ({ page }) => {
   await page.route("**/api/auth/me", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(currentUser) });
@@ -186,9 +233,10 @@ test("考试管理展示分享链接和答题统计", async ({ page }) => {
 test("考试详情展示成绩柱状图、风控信息和个人学习方向", async ({ page }) => {
   const attemptSummary = {
     id: "attempt-completed",
-    participant_type: "anonymous",
+    participant_type: "wechat",
     participant_user_id: null,
     participant_name: "林同学",
+    participant_avatar_url: "https://example.com/wechat-avatar.png",
     status: "completed",
     total_score: 42.5,
     max_score: 100,
@@ -210,8 +258,9 @@ test("考试详情展示成绩柱状图、风控信息和个人学习方向", as
     exam_name: "红楼梦读书考试",
     book_title: "红楼梦",
     quiz_title: "第 2 套复习试卷",
-    participant_type: "anonymous",
+    participant_type: "wechat",
     participant_name: "林同学",
+    participant_avatar_url: "https://example.com/wechat-avatar.png",
     status: "completed",
     total_score: 42.5,
     max_score: 100,
@@ -283,6 +332,8 @@ test("考试详情展示成绩柱状图、风控信息和个人学习方向", as
   const attemptRow = page.locator(".attempt-table tbody tr").first();
   await expect(attemptRow.locator("td").nth(3)).toContainText("已完成");
   await expect(attemptRow.locator("td").nth(4)).toContainText("42.5 / 100");
+  await expect(attemptRow.getByText("微信认证")).toBeVisible();
+  await expect(attemptRow.locator(".participant-avatar img")).toHaveCount(1);
   expect(await attemptRow.locator("td").nth(3).evaluate((element) => getComputedStyle(element).display)).toBe("table-cell");
   expect(await attemptRow.locator("td").nth(4).evaluate((element) => getComputedStyle(element).display)).toBe("table-cell");
   await expect(attemptRow.getByText("提交 IP 已变化")).toBeVisible();
@@ -314,6 +365,7 @@ test("公开结果展示答案但不展示 PDF 原文", async ({ page }) => {
     quiz_title: "第 2 套复习试卷",
     participant_type: "anonymous",
     participant_name: "匿名读者",
+    participant_avatar_url: null,
     status: "completed",
     total_score: 40,
     max_score: 100,

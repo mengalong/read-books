@@ -30,6 +30,7 @@ import type {
   ExamShare,
   ExamShareStatus,
   PublicExam,
+  WechatLoginConfiguration,
 } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
@@ -341,6 +342,14 @@ export function getPublicExamResult(attemptId: string, token?: string | null) {
   });
 }
 
+export function getWechatLoginUrl(shareCode: string) {
+  return `${API_BASE}/public/wechat/login?${new URLSearchParams({ share_code: shareCode })}`;
+}
+
+export function logoutWechat() {
+  return apiFetch<void>("/public/wechat/logout", { method: "POST" });
+}
+
 export function startReview(quizId: string) {
   return apiFetch<ReviewTask>(`/quizzes/${quizId}/reviews`, { method: "POST" });
 }
@@ -394,6 +403,23 @@ export function getHistory(bookId: string) {
 
 export function getModelConfiguration() {
   return apiFetch<ModelConfiguration>("/settings/model");
+}
+
+export function getWechatLoginConfiguration() {
+  return apiFetch<WechatLoginConfiguration>("/settings/wechat-login");
+}
+
+export function updateWechatLoginConfiguration(payload: {
+  enabled: boolean;
+  required_for_public_exams: boolean;
+  app_id: string;
+  app_secret?: string;
+  callback_base_url: string;
+}) {
+  return apiFetch<WechatLoginConfiguration>("/settings/wechat-login", {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function updateModelConfiguration(payload: {

@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 
+import { mockAdminIdentity } from "./test-helpers";
+
 test("结果页区分实际得分与得分率", async ({ page }) => {
+  await mockAdminIdentity(page);
   await page.route("**/api/reviews/score-display/result", async (route) => {
     await route.fulfill({
       contentType: "application/json",

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { mockAdminIdentity } from "./test-helpers";
+
 function createBook(id: string, title: string, author: string) {
   return {
     id,
@@ -34,6 +36,7 @@ function createBook(id: string, title: string, author: string) {
 }
 
 test("书架输入完成后按回车搜索", async ({ page }) => {
+  await mockAdminIdentity(page);
   const books = [createBook("book-1", "红楼梦", "曹雪芹"), createBook("book-2", "流俗地", "黎紫书")];
   const requestUrls: string[] = [];
   await page.route("**/api/books**", async (route) => {
@@ -50,9 +53,10 @@ test("书架输入完成后按回车搜索", async ({ page }) => {
   await expect(page.getByText("2 本", { exact: true })).toBeVisible();
 
   const searchInput = page.getByLabel("搜索书名或作者");
+  const requestCountBeforeTyping = requestUrls.length;
   await searchInput.fill("红楼梦");
   await page.waitForTimeout(350);
-  expect(requestUrls).toHaveLength(1);
+  expect(requestUrls).toHaveLength(requestCountBeforeTyping);
   await expect(page.getByText("2 本", { exact: true })).toBeVisible();
 
   await searchInput.press("Enter");
