@@ -287,7 +287,11 @@ class PublicExamResponse(BaseModel):
     short_count: int
     expires_at: datetime | None
     authenticated: bool
+    identity_type: Literal["user", "wechat", "anonymous"] = "anonymous"
     participant_name: str | None = None
+    participant_avatar_url: str | None = None
+    wechat_login_enabled: bool = False
+    wechat_login_required: bool = False
     existing_attempt_id: str | None = None
     existing_attempt_status: str | None = None
 
@@ -322,8 +326,9 @@ class ExamAttemptResponse(BaseModel):
     exam_name: str
     book_title: str
     quiz_title: str
-    participant_type: Literal["user", "anonymous"]
+    participant_type: Literal["user", "wechat", "anonymous"]
     participant_name: str
+    participant_avatar_url: str | None = None
     status: Literal["in_progress", "grading", "completed", "grading_failed"]
     total_score: float | None
     max_score: float
@@ -348,9 +353,10 @@ class ExamAttemptResponse(BaseModel):
 
 class ExamAttemptSummary(BaseModel):
     id: str
-    participant_type: Literal["user", "anonymous"]
+    participant_type: Literal["user", "wechat", "anonymous"]
     participant_user_id: str | None
     participant_name: str
+    participant_avatar_url: str | None = None
     status: Literal["in_progress", "grading", "completed", "grading_failed"]
     total_score: float | None
     max_score: float
@@ -510,6 +516,27 @@ class ModelConfigurationResponse(ApiModel):
     last_test_message: str | None = None
     last_tested_at: datetime | None = None
     last_test_latency_ms: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class WechatLoginConfigurationUpdate(BaseModel):
+    enabled: bool = False
+    required_for_public_exams: bool = False
+    app_id: str = Field(default="", max_length=128)
+    app_secret: str | None = Field(default=None, max_length=500)
+    callback_base_url: str = Field(default="", max_length=2_000)
+
+
+class WechatLoginConfigurationResponse(ApiModel):
+    id: str
+    enabled: bool
+    required_for_public_exams: bool
+    app_id: str
+    app_secret_configured: bool
+    callback_base_url: str
+    callback_url: str
+    configuration_complete: bool
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

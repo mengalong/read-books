@@ -462,7 +462,14 @@ class ExamShare(TimestampMixin, Base):
 
 class ExamAttempt(TimestampMixin, Base):
     __tablename__ = "exam_attempts"
-    __table_args__ = (UniqueConstraint("exam_share_id", "participant_user_id"),)
+    __table_args__ = (
+        UniqueConstraint("exam_share_id", "participant_user_id"),
+        UniqueConstraint(
+            "exam_share_id",
+            "participant_wechat_user_id",
+            name="uq_exam_attempt_share_wechat",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     exam_share_id: Mapped[str] = mapped_column(
@@ -472,7 +479,11 @@ class ExamAttempt(TimestampMixin, Base):
     participant_user_id: Mapped[str | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
+    participant_wechat_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("wechat_users.id", ondelete="SET NULL"), index=True
+    )
     participant_name: Mapped[str] = mapped_column(String(120))
+    participant_avatar_url: Mapped[str | None] = mapped_column(Text)
     access_token_hash: Mapped[str | None] = mapped_column(String(128), unique=True, index=True)
     status: Mapped[str] = mapped_column(String(30), default="in_progress", index=True)
     total_score: Mapped[float | None] = mapped_column(Float)
@@ -490,6 +501,9 @@ class ExamAttempt(TimestampMixin, Base):
     exam_share: Mapped[ExamShare] = relationship(back_populates="attempts")
     participant_user: Mapped[User | None] = relationship(
         back_populates="exam_attempts", foreign_keys=[participant_user_id]
+    )
+    participant_wechat_user: Mapped[WechatUser | None] = relationship(
+        back_populates="exam_attempts", foreign_keys=[participant_wechat_user_id]
     )
     answers: Mapped[list[ExamAnswer]] = relationship(
         back_populates="exam_attempt", cascade="all, delete-orphan"
@@ -516,6 +530,69 @@ class ExamAnswer(TimestampMixin, Base):
     grading_status: Mapped[str] = mapped_column(String(20), default="completed", index=True)
 
     exam_attempt: Mapped[ExamAttempt] = relationship(back_populates="answers")
+
+
+class WechatUser(TimestampMixin, Base):
+    __tablename__ = "wechat_users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    openid: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    unionid: Mapped[str | None] = mapped_column(String(128), unique=True, index=True)
+    nickname: Mapped[str] = mapped_column(String(120))
+    avatar_url: Mapped[str | None] = mapped_column(Text)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+    sessions: Mapped[list[WechatSession]] = relationship(
+        back_populates="wechat_user", cascade="all, delete-orphan"
+    )
+    exam_attempts: Mapped[list[ExamAttempt]] = relationship(
+        back_populates="participant_wechat_user",
+        foreign_keys="ExamAttempt.participant_wechat_user_id",
+    )
+
+
+class WechatSession(TimestampMixin, Base):
+    __tablename__ = "wechat_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    wechat_user_id: Mapped[str] = mapped_column(
+        ForeignKey("wechat_users.id", ondelete="CASCADE"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+    ip_address: Mapped[str | None] = mapped_column(String(80))
+
+    wechat_user: Mapped[WechatUser] = relationship(back_populates="sessions")
+
+
+class WechatOAuthState(Base):
+    __tablename__ = "wechat_oauth_states"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    state_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    browser_nonce_hash: Mapped[str] = mapped_column(String(128))
+    share_code: Mapped[str] = mapped_column(String(80), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    created_ip_address: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class WechatLoginConfiguration(TimestampMixin, Base):
+    __tablename__ = "wechat_login_configurations"
+
+    id: Mapped[str] = mapped_column(String(20), primary_key=True, default="default")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    required_for_public_exams: Mapped[bool] = mapped_column(Boolean, default=False)
+    app_id: Mapped[str] = mapped_column(String(128), default="")
+    app_secret: Mapped[str | None] = mapped_column(Text)
+    callback_base_url: Mapped[str] = mapped_column(Text, default="")
+    updated_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
 
 
 class ModelConfiguration(TimestampMixin, Base):

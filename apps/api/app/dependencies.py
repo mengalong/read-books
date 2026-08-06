@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.services.auth import AuthIdentity, authenticate_session
+from app.services.wechat_auth import WechatIdentity, authenticate_wechat_session
 
 
 def get_current_identity(
@@ -23,6 +24,14 @@ def get_optional_identity(
     settings = get_settings()
     token = request.cookies.get(settings.session_cookie_name)
     return authenticate_session(db, token) if token else None
+
+
+def get_optional_wechat_identity(
+    request: Request, db: Session = Depends(get_db)
+) -> WechatIdentity | None:
+    settings = get_settings()
+    token = request.cookies.get(settings.wechat_session_cookie_name)
+    return authenticate_wechat_session(db, token) if token else None
 
 
 def require_ready_identity(

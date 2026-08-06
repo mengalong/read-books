@@ -10,7 +10,13 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
-from app.dependencies import get_optional_identity, require_admin, require_ready_identity
+from app.config import get_settings
+from app.dependencies import (
+    get_optional_identity,
+    get_optional_wechat_identity,
+    require_admin,
+    require_ready_identity,
+)
 from app.models import Book, ExamAnswer, ExamAttempt, ExamShare, Quiz
 from app.schemas import (
     AnswerSubmission,
@@ -39,10 +45,15 @@ from app.services.exam_sharing import (
     snapshot_questions,
     unanswered_grade,
 )
+from app.services.wechat_auth import (
+    WechatIdentity,
+    effective_configuration as effective_wechat_configuration,
+)
 
 router = APIRouter(tags=["exam-shares"])
 admin_router = APIRouter(prefix="/admin/exam-shares", tags=["admin-exam-shares"])
 public_router = APIRouter(prefix="/public", tags=["public-exams"])
+settings = get_settings()
 
 
 def utc_now() -> datetime:
@@ -143,6 +154,7 @@ def to_attempt_summary(attempt: ExamAttempt) -> ExamAttemptSummary:
         participant_type=attempt.participant_type,
         participant_user_id=attempt.participant_user_id,
         participant_name=attempt.participant_name,
+        participant_avatar_url=attempt.participant_avatar_url,
         status=attempt.status,
         total_score=attempt.total_score,
         max_score=attempt.max_score,
@@ -270,6 +282,7 @@ def to_attempt_response(
         quiz_title=attempt.exam_share.quiz_title,
         participant_type=attempt.participant_type,
         participant_name=attempt.participant_name,
+        participant_avatar_url=attempt.participant_avatar_url,
         status=attempt.status,
         total_score=attempt.total_score,
         max_score=attempt.max_score,
@@ -317,10 +330,17 @@ def to_attempt_response(
 def verify_public_attempt_access(
     attempt: ExamAttempt,
     identity: AuthIdentity | None,
+    wechat_identity: WechatIdentity | None,
     attempt_token: str | None,
 ) -> None:
     if attempt.participant_type == "user":
         if identity is not None and identity.user.id == attempt.participant_user_id:
+            return
+    elif attempt.participant_type == "wechat":
+        if (
+            wechat_identity is not None
+            and wechat_identity.user.id == attempt.participant_wechat_user_id
+        ):
             return
     elif attempt.access_token_hash and attempt_token:
         if hmac.compare_digest(attempt.access_token_hash, hash_session_token(attempt_token)):
@@ -543,6 +563,7 @@ def get_public_exam(
     x_exam_attempt_token: str | None = Header(default=None),
     db: Session = Depends(get_db),
     identity: AuthIdentity | None = Depends(get_optional_identity),
+    wechat_identity: WechatIdentity | None = Depends(get_optional_wechat_identity),
 ) -> PublicExamResponse:
     share = db.scalar(
         share_statement().where(ExamShare.share_code == share_code)
@@ -559,6 +580,15 @@ def get_public_exam(
             ),
             None,
         )
+    elif wechat_identity:
+        existing = next(
+            (
+                attempt
+                for attempt in share.attempts
+                if attempt.participant_wechat_user_id == wechat_identity.user.id
+            ),
+            None,
+        )
     elif x_exam_attempt_token:
         token_hash = hash_session_token(x_exam_attempt_token)
         existing = next(
@@ -571,6 +601,23 @@ def get_public_exam(
             None,
         )
     question_count, single_count, multiple_count, short_count = question_counts(share)
+    wechat_configuration = effective_wechat_configuration(db, settings)
+    wechat_login_enabled = wechat_configuration.login_available
+    wechat_login_required = (
+        wechat_login_enabled and wechat_configuration.required_for_public_exams
+    )
+    if identity:
+        identity_type = "user"
+        participant_name = identity.user.display_name
+        participant_avatar_url = None
+    elif wechat_identity:
+        identity_type = "wechat"
+        participant_name = wechat_identity.user.nickname
+        participant_avatar_url = wechat_identity.user.avatar_url
+    else:
+        identity_type = "anonymous"
+        participant_name = None
+        participant_avatar_url = None
     return PublicExamResponse(
         share_code=share.share_code,
         name=share.name,
@@ -588,8 +635,12 @@ def get_public_exam(
         multiple_count=multiple_count,
         short_count=short_count,
         expires_at=share.expires_at,
-        authenticated=identity is not None,
-        participant_name=identity.user.display_name if identity else None,
+        authenticated=identity is not None or wechat_identity is not None,
+        identity_type=identity_type,
+        participant_name=participant_name,
+        participant_avatar_url=participant_avatar_url,
+        wechat_login_enabled=wechat_login_enabled,
+        wechat_login_required=wechat_login_required,
         existing_attempt_id=existing.id if existing else None,
         existing_attempt_status=existing.status if existing else None,
     )
@@ -606,6 +657,7 @@ def start_public_exam_attempt(
     request: Request,
     db: Session = Depends(get_db),
     identity: AuthIdentity | None = Depends(get_optional_identity),
+    wechat_identity: WechatIdentity | None = Depends(get_optional_wechat_identity),
 ) -> ExamAttemptResponse:
     share = db.scalar(share_statement().where(ExamShare.share_code == share_code))
     if share is None:
@@ -619,6 +671,7 @@ def start_public_exam_attempt(
         raise HTTPException(status_code=409, detail=detail)
 
     access_token = None
+    wechat_configuration = effective_wechat_configuration(db, settings)
     if identity:
         existing = next(
             (
@@ -632,14 +685,40 @@ def start_public_exam_attempt(
             return to_attempt_response(existing)
         participant_type = "user"
         participant_user_id = identity.user.id
+        participant_wechat_user_id = None
         participant_name = identity.user.display_name
+        participant_avatar_url = None
+        access_token_hash = None
+    elif wechat_identity:
+        existing = next(
+            (
+                attempt
+                for attempt in share.attempts
+                if attempt.participant_wechat_user_id == wechat_identity.user.id
+            ),
+            None,
+        )
+        if existing:
+            return to_attempt_response(existing)
+        participant_type = "wechat"
+        participant_user_id = None
+        participant_wechat_user_id = wechat_identity.user.id
+        participant_name = wechat_identity.user.nickname
+        participant_avatar_url = wechat_identity.user.avatar_url
         access_token_hash = None
     else:
+        if (
+            wechat_configuration.login_available
+            and wechat_configuration.required_for_public_exams
+        ):
+            raise HTTPException(status_code=401, detail="请先完成微信登录认证")
         participant_name = (payload.participant_name or "").strip()
         if len(participant_name) < 2:
             raise HTTPException(status_code=422, detail="答题名称需要填写 2-50 个字符")
         participant_type = "anonymous"
         participant_user_id = None
+        participant_wechat_user_id = None
+        participant_avatar_url = None
         access_token = secrets.token_urlsafe(48)
         access_token_hash = hash_session_token(access_token)
 
@@ -647,7 +726,9 @@ def start_public_exam_attempt(
         exam_share_id=share.id,
         participant_type=participant_type,
         participant_user_id=participant_user_id,
+        participant_wechat_user_id=participant_wechat_user_id,
         participant_name=participant_name,
+        participant_avatar_url=participant_avatar_url,
         access_token_hash=access_token_hash,
         status="in_progress",
         max_score=share.max_score,
@@ -667,10 +748,11 @@ def public_attempt_dependency(
     attempt_id: str,
     db: Session,
     identity: AuthIdentity | None,
+    wechat_identity: WechatIdentity | None,
     attempt_token: str | None,
 ) -> ExamAttempt:
     attempt = get_attempt_or_404(db, attempt_id)
-    verify_public_attempt_access(attempt, identity, attempt_token)
+    verify_public_attempt_access(attempt, identity, wechat_identity, attempt_token)
     if attempt.status == "in_progress" and effective_share_status(attempt.exam_share) == "expired":
         raise HTTPException(status_code=409, detail="你来晚了，考试已经结束")
     return attempt
@@ -682,8 +764,11 @@ def get_public_exam_attempt(
     x_exam_attempt_token: str | None = Header(default=None),
     db: Session = Depends(get_db),
     identity: AuthIdentity | None = Depends(get_optional_identity),
+    wechat_identity: WechatIdentity | None = Depends(get_optional_wechat_identity),
 ) -> ExamAttemptResponse:
-    attempt = public_attempt_dependency(attempt_id, db, identity, x_exam_attempt_token)
+    attempt = public_attempt_dependency(
+        attempt_id, db, identity, wechat_identity, x_exam_attempt_token
+    )
     return to_attempt_response(attempt)
 
 
@@ -699,8 +784,11 @@ def submit_public_exam_attempt(
     x_exam_attempt_token: str | None = Header(default=None),
     db: Session = Depends(get_db),
     identity: AuthIdentity | None = Depends(get_optional_identity),
+    wechat_identity: WechatIdentity | None = Depends(get_optional_wechat_identity),
 ) -> ExamAttemptResponse:
-    attempt = public_attempt_dependency(attempt_id, db, identity, x_exam_attempt_token)
+    attempt = public_attempt_dependency(
+        attempt_id, db, identity, wechat_identity, x_exam_attempt_token
+    )
     if attempt.status != "in_progress":
         raise HTTPException(status_code=409, detail="这份答卷已经提交")
     if len({item.question_id for item in payload.answers}) != len(payload.answers):
@@ -776,8 +864,11 @@ def get_public_exam_result(
     x_exam_attempt_token: str | None = Header(default=None),
     db: Session = Depends(get_db),
     identity: AuthIdentity | None = Depends(get_optional_identity),
+    wechat_identity: WechatIdentity | None = Depends(get_optional_wechat_identity),
 ) -> ExamAttemptResponse:
-    attempt = public_attempt_dependency(attempt_id, db, identity, x_exam_attempt_token)
+    attempt = public_attempt_dependency(
+        attempt_id, db, identity, wechat_identity, x_exam_attempt_token
+    )
     if attempt.status == "in_progress":
         raise HTTPException(status_code=409, detail="交卷后才能查看结果")
     return to_attempt_response(attempt)

@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = False
     login_max_failed_attempts: int = 5
     login_lock_minutes: int = 15
+    wechat_login_enabled: bool = False
+    wechat_login_required: bool = False
+    wechat_app_id: str = ""
+    wechat_app_secret: str | None = Field(default=None, repr=False)
+    wechat_callback_base_url: str = ""
+    wechat_session_cookie_name: str = "huijuan_wechat_session"
+    wechat_oauth_cookie_name: str = "huijuan_wechat_oauth"
+    wechat_session_ttl_hours: int = 24 * 30
+    wechat_oauth_state_ttl_minutes: int = 10
     ocr_enabled: bool = True
     ocr_command: str = "swift"
     ocr_script: Path = PROJECT_ROOT / "scripts/pdf_ocr.swift"

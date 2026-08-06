@@ -13,6 +13,7 @@ from app.routers.books import admin_router as admin_books_router
 from app.routers.books import router as books_router
 from app.routers.quizzes import router as quizzes_router
 from app.routers.settings import router as settings_router
+from app.routers.wechat import router as wechat_router
 from app.routers.exams import admin_router as admin_exams_router
 from app.routers.exams import public_router as public_exams_router
 from app.routers.exams import router as exams_router
@@ -82,6 +83,7 @@ app.include_router(books_router, prefix="/api")
 app.include_router(admin_books_router, prefix="/api")
 app.include_router(quizzes_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
+app.include_router(wechat_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(exams_router, prefix="/api")
 app.include_router(admin_exams_router, prefix="/api")
