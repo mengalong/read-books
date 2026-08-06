@@ -8,6 +8,7 @@ import { ExamAttemptReport } from "@/components/exam-attempt-report";
 import { EmptyState, ErrorState, EvidenceList } from "@/components/ui";
 import { ExamLearningAnalysis } from "@/components/exam-learning-analysis";
 import { ApiError, getAdminExamAttempt, getAdminExamShare, getExamAttemptForOwner, getExamShare, retryAdminExamAttemptGrading, retryExamAttemptGrading } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
 import { downloadElementAsPng } from "@/lib/export-image";
 import { formatDateTime, formatDuration, formatScore } from "@/lib/format";
 import type { ExamAttempt, ExamAttemptSummary, ExamDeviceType, ExamQuestion, ExamShare, ExamShareStatus } from "@/lib/types";
@@ -84,9 +85,14 @@ export function ExamShareDetailView({ shareId, admin = false }: { shareId: strin
 
   async function copyLink() {
     if (!share) return;
-    await navigator.clipboard.writeText(`${window.location.origin}/exams/${share.share_code}`);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    setError("");
+    try {
+      await copyText(`${window.location.origin}/exams/${share.share_code}`);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setError("链接复制失败，请手动选择下方分享链接进行复制");
+    }
   }
 
   async function openAttempt(attemptId: string) {

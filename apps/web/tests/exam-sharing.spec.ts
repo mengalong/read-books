@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { stat } from "node:fs/promises";
 
+import { mockInsecureClipboard, readCopiedText } from "./test-helpers";
+
 const currentUser = {
   id: "admin-1",
   username: "admin",
@@ -207,6 +209,7 @@ test("微信参与者再次进入可以查看历史答卷", async ({ page }) => 
 });
 
 test("考试管理展示分享链接和答题统计", async ({ page }) => {
+  await mockInsecureClipboard(page);
   await page.route("**/api/auth/me", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(currentUser) });
   });
@@ -220,6 +223,9 @@ test("考试管理展示分享链接和答题统计", async ({ page }) => {
   await expect(page.getByText("3 / 4")).toBeVisible();
   await expect(page.getByText("78.5%")).toBeVisible();
   await expect(page.getByRole("button", { name: "复制考试链接" })).toBeVisible();
+  await page.getByRole("button", { name: "复制考试链接" }).click();
+  await expect(page.getByRole("button", { name: "考试链接已复制" })).toBeVisible();
+  expect(await readCopiedText(page)).toBe("http://localhost:3000/exams/public-code");
   await page.getByRole("button", { name: "设置考试有效期" }).click();
   await expect(page.getByRole("heading", { name: "设置考试有效期" })).toBeVisible();
   await expect(page.getByText("关闭后考试长期有效。")).toBeVisible();
@@ -231,6 +237,7 @@ test("考试管理展示分享链接和答题统计", async ({ page }) => {
 });
 
 test("考试详情展示成绩柱状图、风控信息和个人学习方向", async ({ page }) => {
+  await mockInsecureClipboard(page);
   const attemptSummary = {
     id: "attempt-completed",
     participant_type: "wechat",
@@ -327,6 +334,9 @@ test("考试详情展示成绩柱状图、风控信息和个人学习方向", as
   });
 
   await page.goto("/exam-management/share-1");
+  await page.getByRole("button", { name: "复制链接" }).click();
+  await expect(page.getByRole("button", { name: "已复制" })).toBeVisible();
+  expect(await readCopiedText(page)).toBe("http://localhost:3000/exams/public-code");
   await expect(page.getByRole("img", { name: "已完成参与者实际得分柱状图" })).toBeVisible();
   await expect(page.locator(".score-bar")).toContainText("42.5");
   const attemptRow = page.locator(".attempt-table tbody tr").first();
@@ -353,6 +363,84 @@ test("考试详情展示成绩柱状图、风控信息和个人学习方向", as
   await expect(page.getByText("凤姐以福寿之说奉承贾母")).toBeVisible();
   await expect(page.getByText("203.0.113.11")).toBeVisible();
   await expect(page.getByRole("button", { name: "导出报告" })).toBeVisible();
+});
+
+test("创建考试后可以在 HTTP 页面复制分享链接", async ({ page }) => {
+  await mockInsecureClipboard(page);
+  const book = {
+    id: "book-share",
+    workspace_id: "workspace-1",
+    owner_user_id: "admin-1",
+    owner_display_name: "系统管理员",
+    title: "红楼梦",
+    author: "曹雪芹",
+    description: "考试分享测试书籍",
+    cover_color: "#2F6B5F",
+    language: "中文",
+    reading_status: "finished",
+    shelf_status: "active",
+    tags: [],
+    created_at: "2026-08-06T08:00:00Z",
+    updated_at: "2026-08-06T08:00:00Z",
+    pre_generation_enabled: false,
+    pre_generation_status: "disabled",
+    pre_generation_error: null,
+    pre_generation_quiz_id: null,
+    active_generation_task_id: null,
+    active_generation_status: null,
+    active_generation_completed_questions: 0,
+    active_generation_total_questions: 0,
+    active_generation_phase: null,
+    stats: {
+      pdf_count: 1,
+      completed_pdf_count: 1,
+      chunk_count: 0,
+      quiz_count: 1,
+      average_score: null,
+      last_reviewed_at: null,
+      next_review_date: null,
+    },
+    pdfs: [],
+    quizzes: [{
+      id: "quiz-share",
+      book_id: "book-share",
+      title: "第 1 套复习试卷",
+      difficulty: "medium",
+      duration_minutes: 15,
+      status: "ready",
+      source_mode: "pdf",
+      question_count: 2,
+      single_count: 1,
+      multiple_count: 0,
+      short_count: 1,
+      max_score: 100,
+      created_at: "2026-08-06T08:00:00Z",
+      review_count: 0,
+      latest_score: null,
+      last_reviewed_at: null,
+    }],
+  };
+  await page.route("**/api/auth/me", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(currentUser) });
+  });
+  await page.route("**/api/books/book-share", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(book) });
+  });
+  await page.route("**/api/quizzes/quiz-share/exam-shares", async (route) => {
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify({ ...examShare, id: "created-share", share_code: "created-code" }),
+    });
+  });
+
+  await page.goto("/books/book-share");
+  await page.getByTitle("分享考试").click();
+  await page.getByRole("button", { name: "生成考试链接" }).click();
+  await expect(page.getByText("考试链接已创建")).toBeVisible();
+  await page.getByRole("button", { name: "复制考试链接" }).click();
+  await expect(page.getByRole("button", { name: "复制考试链接" })).toContainText("已复制");
+  expect(await readCopiedText(page)).toBe("http://localhost:3000/exams/created-code");
 });
 
 test("公开结果展示答案但不展示 PDF 原文", async ({ page }) => {

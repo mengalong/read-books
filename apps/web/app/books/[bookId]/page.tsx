@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { BookCover, EmptyState, ErrorState, NextReview, SourceModeNotice, StatusBadge, formatPdfMeta } from "@/components/ui";
 import { ApiError, createExamShare, deleteBook, deletePdf, deleteQuiz, getBook, getChunks, restoreBook, unlistBook, uploadPdf } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
 import { formatDate, formatDateTime, scorePercentage } from "@/lib/format";
 import type { BookDetail, Chunk, ExamShare, PdfDocument, QuizSummary } from "@/lib/types";
 
@@ -141,9 +142,14 @@ export default function BookDetailPage() {
 
   async function copyShareLink() {
     if (!createdShare) return;
-    await navigator.clipboard.writeText(`${window.location.origin}/exams/${createdShare.share_code}`);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    setError("");
+    try {
+      await copyText(`${window.location.origin}/exams/${createdShare.share_code}`);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setError("链接复制失败，请手动选择分享链接进行复制");
+    }
   }
 
   async function handleShelfStatus() {
