@@ -26,6 +26,10 @@ import type {
   AdminBookCopyResult,
   AccessGranularity,
   AccessStatisticsReport,
+  ExamAttempt,
+  ExamShare,
+  ExamShareStatus,
+  PublicExam,
 } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
@@ -228,6 +232,111 @@ export function getBookQuizzes(bookId: string) {
 
 export function deleteQuiz(quizId: string) {
   return apiFetch<void>(`/quizzes/${quizId}`, { method: "DELETE" });
+}
+
+export function createExamShare(quizId: string, name?: string) {
+  return apiFetch<ExamShare>(`/quizzes/${quizId}/exam-shares`, {
+    method: "POST",
+    body: JSON.stringify({ ...(name ? { name } : {}) }),
+  });
+}
+
+export function getExamShares(filters: { search?: string; status?: ExamShareStatus; createdFrom?: string; createdTo?: string } = {}) {
+  const params = new URLSearchParams();
+  if (filters.search) params.set("search", filters.search);
+  if (filters.status) params.set("status", filters.status);
+  if (filters.createdFrom) params.set("created_from", filters.createdFrom);
+  if (filters.createdTo) params.set("created_to", filters.createdTo);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<ExamShare[]>(`/exam-shares${suffix}`);
+}
+
+export function getExamShare(shareId: string) {
+  return apiFetch<ExamShare>(`/exam-shares/${shareId}`);
+}
+
+export function updateExamShare(shareId: string, payload: { name?: string; status?: "active" | "stopped" }) {
+  return apiFetch<ExamShare>(`/exam-shares/${shareId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getExamAttemptForOwner(shareId: string, attemptId: string) {
+  return apiFetch<ExamAttempt>(`/exam-shares/${shareId}/attempts/${attemptId}`);
+}
+
+export function retryExamAttemptGrading(shareId: string, attemptId: string) {
+  return apiFetch<ExamAttempt>(`/exam-shares/${shareId}/attempts/${attemptId}/retry-grading`, {
+    method: "POST",
+  });
+}
+
+export function getAdminExamShares(filters: { search?: string; ownerId?: string; status?: ExamShareStatus; createdFrom?: string; createdTo?: string } = {}) {
+  const params = new URLSearchParams();
+  if (filters.search) params.set("search", filters.search);
+  if (filters.ownerId) params.set("owner_id", filters.ownerId);
+  if (filters.status) params.set("status", filters.status);
+  if (filters.createdFrom) params.set("created_from", filters.createdFrom);
+  if (filters.createdTo) params.set("created_to", filters.createdTo);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<ExamShare[]>(`/admin/exam-shares${suffix}`);
+}
+
+export function getAdminExamShare(shareId: string) {
+  return apiFetch<ExamShare>(`/admin/exam-shares/${shareId}`);
+}
+
+export function getAdminExamAttempt(shareId: string, attemptId: string) {
+  return apiFetch<ExamAttempt>(`/admin/exam-shares/${shareId}/attempts/${attemptId}`);
+}
+
+export function retryAdminExamAttemptGrading(shareId: string, attemptId: string) {
+  return apiFetch<ExamAttempt>(`/admin/exam-shares/${shareId}/attempts/${attemptId}/retry-grading`, {
+    method: "POST",
+  });
+}
+
+export function getPublicExam(shareCode: string) {
+  return apiFetch<PublicExam>(`/public/exams/${shareCode}`);
+}
+
+export function startPublicExam(shareCode: string, participantName?: string) {
+  return apiFetch<ExamAttempt>(`/public/exams/${shareCode}/attempts`, {
+    method: "POST",
+    body: JSON.stringify({ ...(participantName ? { participant_name: participantName } : {}) }),
+  });
+}
+
+function attemptHeaders(token?: string | null): HeadersInit | undefined {
+  return token ? { "X-Exam-Attempt-Token": token } : undefined;
+}
+
+export function getPublicExamAttempt(attemptId: string, token?: string | null) {
+  return apiFetch<ExamAttempt>(`/public/exam-attempts/${attemptId}`, {
+    headers: attemptHeaders(token),
+  });
+}
+
+export function submitPublicExamAttempt(
+  attemptId: string,
+  payload: {
+    elapsed_seconds: number;
+    answers: { question_id: string; selected_answers: string[]; text_answer?: string }[];
+  },
+  token?: string | null,
+) {
+  return apiFetch<ExamAttempt>(`/public/exam-attempts/${attemptId}/submit`, {
+    method: "POST",
+    headers: attemptHeaders(token),
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getPublicExamResult(attemptId: string, token?: string | null) {
+  return apiFetch<ExamAttempt>(`/public/exam-attempts/${attemptId}/result`, {
+    headers: attemptHeaders(token),
+  });
 }
 
 export function startReview(quizId: string) {

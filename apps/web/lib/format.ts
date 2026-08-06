@@ -47,6 +47,12 @@ export function formatDuration(seconds: number | null | undefined) {
   return `${minutes}分${String(remaining).padStart(2, "0")}秒`;
 }
 
+export function elapsedSecondsSince(value: string) {
+  const startedAt = parseServerDate(value).getTime();
+  if (Number.isNaN(startedAt)) return 0;
+  return Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+}
+
 export function formatScore(value: number | null | undefined) {
   if (value === null || value === undefined) return "—";
   return value.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
@@ -72,6 +78,13 @@ export function statusLabel(status: string) {
     not_copied: "未复制原文",
     active: "已上架",
     unlisted: "已下架",
+    stopped: "已停止",
+    source_deleted: "原试卷已删除",
+    expired: "已过期",
+    grading: "评分中",
+    grading_failed: "评分失败",
+    anonymous: "匿名参与者",
+    user: "登录用户",
   };
   return labels[status] || status;
 }

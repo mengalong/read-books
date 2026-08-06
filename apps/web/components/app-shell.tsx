@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, BookMarked, BookOpenText, Clock3, FileCode2, History, LibraryBig, LogOut, Plus, Settings2, Users } from "lucide-react";
+import { Activity, BarChart3, BookMarked, BookOpenText, ClipboardCheck, Clock3, FileCode2, History, LibraryBig, LogOut, Plus, Settings2, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -13,6 +13,7 @@ const navigation = [
   { href: "/", label: "我的书架", icon: LibraryBig },
   { href: "/books/new", label: "添加书籍", icon: Plus },
   { href: "/reviews", label: "复习记录", icon: History },
+  { href: "/exam-management", label: "考试管理", icon: ClipboardCheck },
 ];
 
 const systemNavigation = [
@@ -22,6 +23,7 @@ const systemNavigation = [
   { href: "/settings/token-usage", label: "Token 用量", icon: BarChart3 },
   { href: "/settings/access-statistics", label: "访问统计", icon: Activity },
   { href: "/settings/users", label: "用户管理", icon: Users },
+  { href: "/settings/exams", label: "考试管理", icon: ClipboardCheck },
 ];
 
 const buildUpdatedAt = process.env.NEXT_PUBLIC_BUILD_UPDATED_AT || "";
@@ -33,6 +35,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const authPage = pathname === "/login" || pathname === "/change-password";
+  const publicExamPage = pathname.startsWith("/exams/");
 
   const loadUser = useCallback(async () => {
     setLoading(true);
@@ -50,19 +53,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     } catch (reason: unknown) {
       setUser(null);
       if (reason instanceof ApiError && reason.status === 401) {
-        if (pathname !== "/login") router.replace("/login");
+        if (!publicExamPage && pathname !== "/login") router.replace("/login");
       } else {
         setError(reason instanceof ApiError ? reason.message : "账户状态加载失败");
       }
     } finally {
       setLoading(false);
     }
-  }, [authPage, pathname, router]);
+  }, [authPage, pathname, publicExamPage, router]);
 
   useEffect(() => { void loadUser(); }, [loadUser]);
 
   useEffect(() => {
-    if (!user || authPage) return;
+    if (!user || authPage || publicExamPage) return;
     let sending = false;
     const sendHeartbeat = async () => {
       if (document.visibilityState !== "visible" || sending) return;
@@ -87,7 +90,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [authPage, router, user]);
+  }, [authPage, publicExamPage, router, user]);
 
   async function handleLogout() {
     try {
@@ -100,6 +103,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (loading) return <div className="auth-loading">正在确认账户状态……</div>;
   if (authPage) return <div className="auth-layout">{children}</div>;
+  if (publicExamPage) return <div className="public-exam-layout">{children}</div>;
   if (!user) {
     return error ? (
       <div className="auth-loading auth-error"><span>{error}</span><button className="button button-secondary" onClick={() => void loadUser()} type="button">重新连接</button></div>

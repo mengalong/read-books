@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.database import SessionLocal
 from app.main import app
-from app.models import Book, Question, Quiz
+from app.models import Book, ExamAnswer, ExamAttempt, Question, Quiz
 from app.services.auth import create_user_with_workspace
 
 
@@ -109,6 +109,33 @@ def create_exam_share(client, quiz_id: str, name: str = "读书复习公开考�
     )
     assert response.status_code == 201
     return response.json()
+
+
+def test_exam_share_name_rejects_blank_values(client):
+    _, quiz_id = create_shareable_quiz(client, "活动名称校验测试书")
+
+    blank_create = client.post(
+        f"/api/quizzes/{quiz_id}/exam-shares",
+        json={"name": "   "},
+    )
+    assert blank_create.status_code == 422
+
+    share = create_exam_share(client, quiz_id)
+    blank_update = client.patch(
+        f"/api/exam-shares/{share['id']}",
+        json={"name": "\t\n"},
+    )
+    assert blank_update.status_code == 422
+    null_update = client.patch(
+        f"/api/exam-shares/{share['id']}",
+        json={"name": None},
+    )
+    assert null_update.status_code == 422
+
+    invalid_range = client.get(
+        "/api/exam-shares?created_from=2026-08-07&created_to=2026-08-06"
+    )
+    assert invalid_range.status_code == 422
 
 
 def test_anonymous_exam_flow_hides_sources_and_answers(client):
@@ -279,3 +306,52 @@ def test_share_stop_source_deletion_and_workspace_permissions(client):
     assert source_deleted.json()["status"] == "source_deleted"
     assert source_deleted.json()["quiz_id"] is None
     assert len(source_deleted.json()["attempts"]) == 1
+
+
+def test_admin_can_retry_failed_exam_grading(client, monkeypatch):
+    _, quiz_id = create_shareable_quiz(client, "管理员重试评分测试书")
+    share = create_exam_share(client, quiz_id, "管理员重试评分考试")
+    started = client.post(
+        f"/api/public/exams/{share['share_code']}/attempts",
+        json={},
+    )
+    assert started.status_code == 201
+    attempt_id = started.json()["id"]
+    short_question_id = next(
+        question["id"]
+        for question in started.json()["questions"]
+        if question["question_type"] == "short"
+    )
+    submitted = client.post(
+        f"/api/public/exam-attempts/{attempt_id}/submit",
+        json={"answers": [], "elapsed_seconds": 30},
+    )
+    assert submitted.status_code == 202
+
+    with SessionLocal() as db:
+        attempt = db.get(ExamAttempt, attempt_id)
+        answer = db.query(ExamAnswer).filter_by(
+            exam_attempt_id=attempt_id,
+            snapshot_question_id=short_question_id,
+        ).one()
+        attempt.status = "grading_failed"
+        attempt.grading_error = "测试评分失败"
+        answer.grading_status = "failed"
+        answer.feedback = "等待重新评分。"
+        db.commit()
+
+    monkeypatch.setattr(
+        "app.services.exam_sharing.launch_exam_grading",
+        lambda _: None,
+    )
+    retried = client.post(
+        f"/api/admin/exam-shares/{share['id']}/attempts/{attempt_id}/retry-grading"
+    )
+    assert retried.status_code == 202
+    assert retried.json()["status"] == "grading"
+    assert retried.json()["grading_error"] is None
+    assert next(
+        answer
+        for answer in retried.json()["answers"]
+        if answer["question_id"] == short_question_id
+    )["grading_status"] == "pending"

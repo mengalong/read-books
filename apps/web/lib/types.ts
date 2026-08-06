@@ -403,3 +403,136 @@ export type HistoryItem = {
 };
 
 export type ReviewTaskSummary = HistoryItem & { attempt_number: number };
+
+export type ExamShareStatus = "active" | "stopped" | "source_deleted" | "expired";
+export type ExamAttemptStatus = "in_progress" | "grading" | "completed" | "grading_failed";
+
+export type ExamQuestion = {
+  id: string;
+  position: number;
+  question_type: QuestionType;
+  prompt: string;
+  options: QuestionOption[];
+  knowledge_point: string;
+  difficulty: string;
+  estimated_seconds: number;
+  max_score: number;
+  correct_answers: string[] | null;
+  explanation: string | null;
+  reference_answer: string | null;
+  grading_rubric: { point: string; keywords?: string[]; score?: number }[];
+  source_evidence: SourceEvidence[];
+};
+
+export type ExamAnswer = {
+  question_id: string;
+  selected_answers: string[];
+  text_answer: string | null;
+  score: number;
+  max_score: number;
+  is_correct: boolean;
+  feedback: string;
+  matched_points: string[];
+  missing_points: string[];
+  grading_status: "pending" | "completed" | "failed";
+};
+
+export type ExamAttempt = {
+  id: string;
+  exam_share_id: string;
+  share_code: string;
+  exam_name: string;
+  book_title: string;
+  quiz_title: string;
+  participant_type: "user" | "anonymous";
+  participant_name: string;
+  status: ExamAttemptStatus;
+  total_score: number | null;
+  max_score: number;
+  elapsed_seconds: number | null;
+  started_at: string;
+  submitted_at: string | null;
+  completed_at: string | null;
+  grading_error: string | null;
+  duration_minutes: number;
+  source_mode: SourceMode;
+  questions: ExamQuestion[];
+  answers: ExamAnswer[];
+  access_token: string | null;
+};
+
+export type ExamAttemptSummary = {
+  id: string;
+  participant_type: "user" | "anonymous";
+  participant_user_id: string | null;
+  participant_name: string;
+  status: ExamAttemptStatus;
+  total_score: number | null;
+  max_score: number;
+  score_percentage: number | null;
+  elapsed_seconds: number | null;
+  started_at: string;
+  submitted_at: string | null;
+  completed_at: string | null;
+  grading_error: string | null;
+};
+
+export type ExamShare = {
+  id: string;
+  share_code: string;
+  name: string;
+  status: ExamShareStatus;
+  quiz_id: string | null;
+  book_id: string | null;
+  owner_user_id: string;
+  owner_username: string;
+  owner_display_name: string;
+  workspace_id: string;
+  book_title: string;
+  book_author: string;
+  quiz_title: string;
+  source_mode: SourceMode;
+  difficulty: string;
+  duration_minutes: number;
+  max_score: number;
+  question_count: number;
+  single_count: number;
+  multiple_count: number;
+  short_count: number;
+  started_count: number;
+  submitted_count: number;
+  grading_count: number;
+  grading_failed_count: number;
+  completion_rate: number;
+  average_score: number | null;
+  highest_score: number | null;
+  created_at: string;
+  updated_at: string;
+  stopped_at: string | null;
+  expires_at: string | null;
+  last_attempt_at: string | null;
+  attempts?: ExamAttemptSummary[];
+};
+
+export type PublicExam = {
+  share_code: string;
+  name: string;
+  status: ExamShareStatus;
+  book_title: string;
+  book_author: string;
+  quiz_title: string;
+  owner_display_name: string;
+  difficulty: string;
+  duration_minutes: number;
+  source_mode: SourceMode;
+  max_score: number;
+  question_count: number;
+  single_count: number;
+  multiple_count: number;
+  short_count: number;
+  expires_at: string | null;
+  authenticated: boolean;
+  participant_name: string | null;
+  existing_attempt_id: string | null;
+  existing_attempt_status: ExamAttemptStatus | null;
+};

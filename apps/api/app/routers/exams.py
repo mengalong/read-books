@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hmac
 import secrets
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -48,6 +48,23 @@ def utc_now() -> datetime:
 
 def client_ip(request: Request) -> str | None:
     return request.client.host[:80] if request.client else None
+
+
+def apply_created_date_range(statement, created_from: date | None, created_to: date | None):
+    if created_from and created_to and created_from > created_to:
+        raise HTTPException(status_code=422, detail="开始日期不能晚于结束日期")
+    beijing_timezone = timezone(timedelta(hours=8))
+    if created_from:
+        start = datetime.combine(created_from, time.min, tzinfo=beijing_timezone).astimezone(timezone.utc)
+        statement = statement.where(ExamShare.created_at >= start)
+    if created_to:
+        end = datetime.combine(
+            created_to + timedelta(days=1),
+            time.min,
+            tzinfo=beijing_timezone,
+        ).astimezone(timezone.utc)
+        statement = statement.where(ExamShare.created_at < end)
+    return statement
 
 
 def share_statement():
@@ -356,6 +373,8 @@ def list_exam_shares(
     share_status: Literal["active", "stopped", "source_deleted", "expired"] | None = Query(
         default=None, alias="status"
     ),
+    created_from: date | None = Query(default=None),
+    created_to: date | None = Query(default=None),
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> list[ExamShareSummary]:
@@ -372,6 +391,7 @@ def list_exam_shares(
                 ExamShare.quiz_title.ilike(keyword),
             )
         )
+    statement = apply_created_date_range(statement, created_from, created_to)
     shares = list(db.scalars(statement.order_by(ExamShare.created_at.desc())).unique().all())
     summaries = [to_share_summary(share) for share in shares]
     return [item for item in summaries if not share_status or item.status == share_status]
@@ -397,11 +417,13 @@ def update_exam_share(
     share = get_owned_share_or_404(db, share_id, identity)
     changes = payload.model_dump(exclude_unset=True)
     if "name" in changes:
-        share.name = str(changes["name"]).strip()
+        if changes["name"] is None:
+            raise HTTPException(status_code=422, detail="考试活动名称不能为空")
+        share.name = changes["name"]
     new_status = changes.get("status")
     if new_status and new_status != share.status:
-        if new_status == "active" and (share.quiz_id is None or share.book_id is None):
-            raise HTTPException(status_code=409, detail="原试卷已经删除，不能恢复分享")
+        if share.quiz_id is None or share.book_id is None:
+            raise HTTPException(status_code=409, detail="原试卷已经删除，不能修改分享状态")
         share.status = new_status
         share.stopped_at = utc_now() if new_status == "stopped" else None
         add_audit_log(
@@ -695,6 +717,8 @@ def list_admin_exam_shares(
     share_status: Literal["active", "stopped", "source_deleted", "expired"] | None = Query(
         default=None, alias="status"
     ),
+    created_from: date | None = Query(default=None),
+    created_to: date | None = Query(default=None),
     db: Session = Depends(get_db),
     _: AuthIdentity = Depends(require_admin),
 ) -> list[ExamShareSummary]:
@@ -710,6 +734,7 @@ def list_admin_exam_shares(
                 ExamShare.quiz_title.ilike(keyword),
             )
         )
+    statement = apply_created_date_range(statement, created_from, created_to)
     shares = list(db.scalars(statement.order_by(ExamShare.created_at.desc())).unique().all())
     summaries = [to_share_summary(share) for share in shares]
     return [item for item in summaries if not share_status or item.status == share_status]
@@ -761,3 +786,35 @@ def get_admin_exam_attempt(
     )
     db.commit()
     return to_attempt_response(attempt, manager_view=True)
+
+
+@admin_router.post(
+    "/{share_id}/attempts/{attempt_id}/retry-grading",
+    response_model=ExamAttemptResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def retry_admin_exam_attempt_grading(
+    share_id: str,
+    attempt_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_admin),
+) -> ExamAttemptResponse:
+    share = get_admin_share_or_404(db, share_id)
+    attempt = get_attempt_or_404(db, attempt_id)
+    if attempt.exam_share_id != share.id:
+        raise HTTPException(status_code=404, detail="未找到这份答卷")
+    add_audit_log(
+        db,
+        actor_user_id=identity.user.id,
+        action="admin.exam_attempt_grading_retried",
+        target_type="exam_attempt",
+        target_id=attempt.id,
+        details={"exam_share_id": share.id, "owner_user_id": share.owner_user_id},
+        ip_address=client_ip(request),
+    )
+    try:
+        retry_exam_grading(db, attempt)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return to_attempt_response(get_attempt_or_404(db, attempt.id), manager_view=True)

@@ -1,14 +1,14 @@
 "use client";
 
-import { AlertCircle, Archive, ArchiveRestore, ArrowLeft, BookOpen, CheckCircle2, FileText, History, LoaderCircle, PencilLine, Play, Sparkles, Trash2, UploadCloud } from "lucide-react";
+import { AlertCircle, Archive, ArchiveRestore, ArrowLeft, BookOpen, Check, CheckCircle2, Copy, FileText, History, LoaderCircle, PencilLine, Play, Share2, Sparkles, Trash2, UploadCloud, X } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { BookCover, EmptyState, ErrorState, NextReview, SourceModeNotice, StatusBadge, formatPdfMeta } from "@/components/ui";
-import { ApiError, deleteBook, deletePdf, deleteQuiz, getBook, getChunks, restoreBook, unlistBook, uploadPdf } from "@/lib/api";
+import { ApiError, createExamShare, deleteBook, deletePdf, deleteQuiz, getBook, getChunks, restoreBook, unlistBook, uploadPdf } from "@/lib/api";
 import { formatDate, formatDateTime, scorePercentage } from "@/lib/format";
-import type { BookDetail, Chunk, PdfDocument, QuizSummary } from "@/lib/types";
+import type { BookDetail, Chunk, ExamShare, PdfDocument, QuizSummary } from "@/lib/types";
 
 const difficultyLabels: Record<string, string> = {
   easy: "基础",
@@ -26,6 +26,11 @@ export default function BookDetailPage() {
   const [uploading, setUploading] = useState(false);
   const [deletingQuizId, setDeletingQuizId] = useState<string | null>(null);
   const [managingBook, setManagingBook] = useState(false);
+  const [sharingQuiz, setSharingQuiz] = useState<QuizSummary | null>(null);
+  const [shareName, setShareName] = useState("");
+  const [createdShare, setCreatedShare] = useState<ExamShare | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
 
   async function refresh(loadChunks = true) {
@@ -84,7 +89,7 @@ export default function BookDetailPage() {
   }
 
   async function handleDeleteQuiz(quiz: QuizSummary) {
-    if (!window.confirm(`确定删除“${quiz.title}”吗？该试卷下的复习记录也会一并删除，且无法恢复。`)) return;
+    if (!window.confirm(`确定删除“${quiz.title}”吗？该试卷下的复习记录会一并删除；已分享的考试将停止，但历史答卷会继续保留。`)) return;
     setDeletingQuizId(quiz.id);
     setError("");
     try {
@@ -95,6 +100,43 @@ export default function BookDetailPage() {
     } finally {
       setDeletingQuizId(null);
     }
+  }
+
+  function openShare(quiz: QuizSummary) {
+    if (!book) return;
+    setSharingQuiz(quiz);
+    setShareName(`${book.title} · ${quiz.title}`);
+    setCreatedShare(null);
+    setCopied(false);
+    setError("");
+  }
+
+  function closeShare() {
+    if (!sharing) {
+      setSharingQuiz(null);
+      setCreatedShare(null);
+    }
+  }
+
+  async function handleCreateShare(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!sharingQuiz) return;
+    setSharing(true);
+    setError("");
+    try {
+      setCreatedShare(await createExamShare(sharingQuiz.id, shareName.trim()));
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "考试链接创建失败");
+    } finally {
+      setSharing(false);
+    }
+  }
+
+  async function copyShareLink() {
+    if (!createdShare) return;
+    await navigator.clipboard.writeText(`${window.location.origin}/exams/${createdShare.share_code}`);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
   }
 
   async function handleShelfStatus() {
@@ -194,6 +236,7 @@ export default function BookDetailPage() {
             <div className="quiz-library-stats"><span>已复习 {quiz.review_count} 次</span><strong>{latestPercent === null ? "暂无成绩" : `最近得分率 ${latestPercent}%`}</strong></div>
             <div className="quiz-library-actions">
               {isActive && <Link className="button button-secondary" href={`/quizzes/${quiz.id}`}><Play size={15} />选择这套</Link>}
+              {isActive && <button className="button button-quiet" onClick={() => openShare(quiz)} title="分享考试" type="button"><Share2 size={16} /></button>}
               <button
                 aria-label={`删除${quiz.title}`}
                 className="button button-quiet quiz-delete-button"
@@ -234,6 +277,22 @@ export default function BookDetailPage() {
           {chunks.length > 0 && <p className="field-hint" style={{ marginTop: 17 }}><BookOpen size={13} style={{ verticalAlign: "-3px", marginRight: 4 }} />测试中的每道题都会保留同样的页码和原文片段。</p>}
         </section>
       </div>
+
+      {sharingQuiz && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) closeShare(); }} role="presentation">
+        <section aria-labelledby="share-exam-title" aria-modal="true" className="modal-panel exam-share-modal" role="dialog">
+          <div className="modal-heading"><div><span className="eyebrow">Share exam</span><h2 id="share-exam-title">分享“{sharingQuiz.title}”</h2></div><button aria-label="关闭分享弹窗" className="modal-close" disabled={sharing} onClick={closeShare} title="关闭" type="button"><X size={18} /></button></div>
+          {createdShare ? <div className="share-created-panel">
+            <div className="share-created-status"><CheckCircle2 size={18} /><div><strong>考试链接已创建</strong><span>持有链接的登录用户和匿名参与者都可以答题。</span></div></div>
+            <label className="field"><span>分享链接</span><div className="share-link-field"><input readOnly value={`${typeof window === "undefined" ? "" : window.location.origin}/exams/${createdShare.share_code}`} /><button aria-label="复制考试链接" className="button button-secondary" onClick={() => void copyShareLink()} title="复制链接" type="button">{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? "已复制" : "复制"}</button></div></label>
+            <div className="modal-actions"><button className="button button-secondary" onClick={closeShare} type="button">关闭</button><Link className="button button-primary" href={`/exam-management/${createdShare.id}`}><Share2 size={15} />查看考试</Link></div>
+          </div> : <form onSubmit={handleCreateShare}>
+            <div className="share-quiz-summary"><strong>{book.title}</strong><span>难度：{difficultyLabels[sharingQuiz.difficulty] || sharingQuiz.difficulty} · {sharingQuiz.question_count} 道题 · {sharingQuiz.duration_minutes} 分钟</span><span>单选 {sharingQuiz.single_count} · 多选 {sharingQuiz.multiple_count} · 问答 {sharingQuiz.short_count}</span></div>
+            <label className="field"><span>考试活动名称</span><input maxLength={200} onChange={(event) => setShareName(event.target.value)} required value={shareName} /></label>
+            <div className="copy-scope-note">公开答题页不会展示 PDF 文件名、页码或原文摘录。参与者提交后可以查看分数、答案和解析。</div>
+            <div className="modal-actions"><button className="button button-secondary" disabled={sharing} onClick={closeShare} type="button">取消</button><button className="button button-primary" disabled={sharing || !shareName.trim()} type="submit"><Share2 size={15} />{sharing ? "正在创建……" : "生成考试链接"}</button></div>
+          </form>}
+        </section>
+      </div>}
     </div>
   );
 }

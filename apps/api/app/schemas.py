@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ApiModel(BaseModel):
@@ -220,10 +220,30 @@ class QuizSubmitRequest(BaseModel):
 class ExamShareCreate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("考试活动名称不能为空")
+        return value
+
 
 class ExamShareUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     status: Literal["active", "stopped"] | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            raise ValueError("考试活动名称不能为空")
+        return value
 
 
 class ExamAttemptCreate(BaseModel):
