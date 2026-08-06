@@ -157,6 +157,10 @@ def test_anonymous_exam_flow_hides_sources_and_answers(client):
         started = public_client.post(
             f"/api/public/exams/{share['share_code']}/attempts",
             json={"participant_name": "匿名读者"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148",
+                "X-Forwarded-For": "203.0.113.10, 127.0.0.1",
+            },
         )
         assert started.status_code == 201
         attempt = started.json()
@@ -164,11 +168,16 @@ def test_anonymous_exam_flow_hides_sources_and_answers(client):
         assert token
         assert all(question["correct_answers"] is None for question in attempt["questions"])
         assert all(question["source_evidence"] == [] for question in attempt["questions"])
+        assert attempt["device_type"] is None
+        assert attempt["started_ip_address"] is None
 
         denied = public_client.get(f"/api/public/exam-attempts/{attempt['id']}")
         assert denied.status_code == 404
 
-        headers = {"X-Exam-Attempt-Token": token}
+        headers = {
+            "X-Exam-Attempt-Token": token,
+            "X-Forwarded-For": "203.0.113.11, 127.0.0.1",
+        }
         submitted = public_client.post(
             f"/api/public/exam-attempts/{attempt['id']}/submit",
             json={"answers": [], "elapsed_seconds": 12},
@@ -189,16 +198,35 @@ def test_anonymous_exam_flow_hides_sources_and_answers(client):
         assert result_body["questions"][1]["grading_rubric"] == []
         assert len(result_body["answers"]) == 2
         assert all(answer["score"] == 0 for answer in result_body["answers"])
+        assert [
+            item["knowledge_point"] for item in result_body["weak_knowledge_points"]
+        ] == ["遗忘检测", "主动回忆"]
+        assert result_body["weak_knowledge_points"][0]["focus_points"] == [
+            "能够暴露遗忘点",
+            "能够加强记忆",
+        ]
+        assert "遗忘检测" in result_body["recommended_direction"]
+        assert result_body["submitted_ip_address"] is None
 
     detail = client.get(f"/api/exam-shares/{share['id']}")
     assert detail.status_code == 200
     assert detail.json()["started_count"] == 1
     assert detail.json()["submitted_count"] == 1
+    summary = detail.json()["attempts"][0]
+    assert summary["device_type"] == "mobile"
+    assert summary["started_ip_address"] == "203.0.113.10"
+    assert summary["submitted_ip_address"] == "203.0.113.11"
+    assert summary["ip_changed"] is True
     manager_attempt = client.get(
         f"/api/exam-shares/{share['id']}/attempts/{attempt['id']}"
     )
     assert manager_attempt.status_code == 200
     assert manager_attempt.json()["questions"][0]["source_evidence"][0]["page_number"] == 8
+    assert manager_attempt.json()["device_type"] == "mobile"
+    assert manager_attempt.json()["started_ip_address"] == "203.0.113.10"
+    assert manager_attempt.json()["submitted_ip_address"] == "203.0.113.11"
+    assert manager_attempt.json()["ip_changed"] is True
+    assert "iPhone" in manager_attempt.json()["user_agent"]
 
 
 def test_logged_user_reuses_attempt_and_short_answer_is_graded(client):
@@ -246,6 +274,8 @@ def test_logged_user_reuses_attempt_and_short_answer_is_graded(client):
     assert result["status"] == "completed"
     assert result["total_score"] > 40
     assert len(result["answers"]) == 2
+    assert result["weak_knowledge_points"] == []
+    assert result["recommended_direction"] is None
 
 
 def test_share_stop_source_deletion_and_workspace_permissions(client):

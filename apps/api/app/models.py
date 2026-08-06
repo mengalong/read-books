@@ -482,6 +482,10 @@ class ExamAttempt(TimestampMixin, Base):
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     grading_error: Mapped[str | None] = mapped_column(Text)
+    device_type: Mapped[str | None] = mapped_column(String(20))
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+    started_ip_address: Mapped[str | None] = mapped_column(String(80))
+    submitted_ip_address: Mapped[str | None] = mapped_column(String(80))
 
     exam_share: Mapped[ExamShare] = relationship(back_populates="attempts")
     participant_user: Mapped[User | None] = relationship(

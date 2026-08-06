@@ -28,6 +28,8 @@ from app.schemas import (
 )
 from app.services.auth import AuthIdentity, add_audit_log, hash_session_token
 from app.services.exam_sharing import (
+    analyze_attempt_learning,
+    detect_device_type,
     effective_share_status,
     grade_objective,
     launch_exam_grading,
@@ -47,7 +49,18 @@ def utc_now() -> datetime:
 
 
 def client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+    if forwarded:
+        return forwarded[:80]
     return request.client.host[:80] if request.client else None
+
+
+def attempt_ip_changed(attempt: ExamAttempt) -> bool:
+    return bool(
+        attempt.started_ip_address
+        and attempt.submitted_ip_address
+        and attempt.started_ip_address != attempt.submitted_ip_address
+    )
 
 
 def apply_created_date_range(statement, created_from: date | None, created_to: date | None):
@@ -138,6 +151,10 @@ def to_attempt_summary(attempt: ExamAttempt) -> ExamAttemptSummary:
         submitted_at=attempt.submitted_at,
         completed_at=attempt.completed_at,
         grading_error=attempt.grading_error,
+        device_type=attempt.device_type,
+        started_ip_address=attempt.started_ip_address,
+        submitted_ip_address=attempt.submitted_ip_address,
+        ip_changed=attempt_ip_changed(attempt),
     )
 
 
@@ -230,6 +247,7 @@ def to_attempt_response(
     access_token: str | None = None,
 ) -> ExamAttemptResponse:
     reveal_answers = manager_view or attempt.status == "completed"
+    weak_knowledge_points, recommended_direction = analyze_attempt_learning(attempt)
     questions = snapshot_questions(attempt.exam_share)
     answers = sorted(
         attempt.answers,
@@ -259,6 +277,11 @@ def to_attempt_response(
         submitted_at=attempt.submitted_at,
         completed_at=attempt.completed_at,
         grading_error=attempt.grading_error if manager_view else None,
+        device_type=attempt.device_type if manager_view else None,
+        user_agent=attempt.user_agent if manager_view else None,
+        started_ip_address=attempt.started_ip_address if manager_view else None,
+        submitted_ip_address=attempt.submitted_ip_address if manager_view else None,
+        ip_changed=attempt_ip_changed(attempt) if manager_view else False,
         duration_minutes=attempt.exam_share.duration_minutes,
         source_mode=attempt.exam_share.source_mode,
         questions=[
@@ -284,6 +307,8 @@ def to_attempt_response(
             )
             for answer in answers
         ] if reveal_answers else [],
+        weak_knowledge_points=weak_knowledge_points if reveal_answers else [],
+        recommended_direction=recommended_direction if reveal_answers else None,
         access_token=access_token,
     )
 
@@ -543,6 +568,7 @@ def get_public_exam(
 def start_public_exam_attempt(
     share_code: str,
     payload: ExamAttemptCreate,
+    request: Request,
     db: Session = Depends(get_db),
     identity: AuthIdentity | None = Depends(get_optional_identity),
 ) -> ExamAttemptResponse:
@@ -586,6 +612,9 @@ def start_public_exam_attempt(
         status="in_progress",
         max_score=share.max_score,
         started_at=utc_now(),
+        device_type=detect_device_type(request.headers.get("user-agent")),
+        user_agent=(request.headers.get("user-agent") or "")[:500] or None,
+        started_ip_address=client_ip(request),
     )
     share.last_attempt_at = attempt.started_at
     db.add(attempt)
@@ -624,6 +653,7 @@ def get_public_exam_attempt(
 def submit_public_exam_attempt(
     attempt_id: str,
     payload: QuizSubmitRequest,
+    request: Request,
     x_exam_attempt_token: str | None = Header(default=None),
     db: Session = Depends(get_db),
     identity: AuthIdentity | None = Depends(get_optional_identity),
@@ -685,6 +715,7 @@ def submit_public_exam_attempt(
     now = utc_now()
     attempt.elapsed_seconds = payload.elapsed_seconds
     attempt.submitted_at = now
+    attempt.submitted_ip_address = client_ip(request)
     if has_pending_grading:
         attempt.status = "grading"
     else:

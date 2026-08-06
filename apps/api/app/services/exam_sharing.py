@@ -25,6 +25,19 @@ def as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
+def detect_device_type(user_agent: str | None) -> str:
+    value = (user_agent or "").lower()
+    if not value:
+        return "unknown"
+    if "ipad" in value or "tablet" in value or ("android" in value and "mobile" not in value):
+        return "tablet"
+    if any(marker in value for marker in ("mobile", "iphone", "ipod", "windows phone")):
+        return "mobile"
+    if any(marker in value for marker in ("windows", "macintosh", "x11", "linux", "cros")):
+        return "desktop"
+    return "unknown"
+
+
 def effective_share_status(share: ExamShare) -> str:
     if share.status == "active" and share.expires_at and as_utc(share.expires_at) <= utc_now():
         return "expired"
@@ -69,6 +82,97 @@ def snapshot_questions(share: ExamShare) -> list[dict[str, Any]]:
         [item for item in questions if isinstance(item, dict)],
         key=lambda item: int(item.get("position", 0)),
     )
+
+
+def _missing_focus_points(question: dict[str, Any], answer: ExamAnswer) -> list[str]:
+    option_labels = {
+        str(option.get("id")): f'{option.get("id")}. {option.get("text")}'
+        for option in question.get("options", [])
+        if isinstance(option, dict) and option.get("id") and option.get("text")
+    }
+    points = [
+        option_labels.get(str(point), str(point).strip())
+        for point in answer.missing_points or []
+        if str(point).strip()
+    ]
+    return list(dict.fromkeys(points))
+
+
+def analyze_attempt_learning(
+    attempt: ExamAttempt,
+) -> tuple[list[dict[str, Any]], str | None]:
+    if attempt.status != "completed":
+        return [], None
+
+    questions = {
+        str(question.get("id")): question
+        for question in snapshot_questions(attempt.exam_share)
+    }
+    grouped: dict[str, dict[str, Any]] = {}
+    for answer in attempt.answers:
+        question = questions.get(answer.snapshot_question_id)
+        if question is None or answer.max_score <= 0:
+            continue
+        knowledge_point = str(question.get("knowledge_point") or "未标注知识点").strip()
+        item = grouped.setdefault(
+            knowledge_point,
+            {
+                "knowledge_point": knowledge_point,
+                "score": 0.0,
+                "max_score": 0.0,
+                "question_count": 0,
+                "focus_points": [],
+                "question_types": set(),
+            },
+        )
+        item["score"] += float(answer.score or 0)
+        item["max_score"] += float(answer.max_score)
+        item["question_count"] += 1
+        item["question_types"].add(str(question.get("question_type") or ""))
+        item["focus_points"].extend(_missing_focus_points(question, answer))
+
+    weak_points: list[dict[str, Any]] = []
+    for item in grouped.values():
+        score_percentage = round(item["score"] / item["max_score"] * 100, 1)
+        if score_percentage >= 60:
+            continue
+        focus_points = list(dict.fromkeys(item["focus_points"]))[:4]
+        knowledge_point = item["knowledge_point"]
+        if focus_points:
+            recommendation = (
+                f"重点补足：{'、'.join(focus_points)}。"
+                "建议回到相关章节核对原文，再用自己的语言复述关键内容。"
+            )
+        elif "short" in item["question_types"]:
+            recommendation = "重点补全核心论述、因果关系和关键细节，并对照参考答案重新组织一次完整表达。"
+        elif "multiple" in item["question_types"]:
+            recommendation = "重点厘清相关要素之间的关系与选项边界，避免漏选或混淆相近表述。"
+        else:
+            recommendation = "重点核对相关章节中的关键事实、人物关系或核心概念，并进行一次主动回忆。"
+        weak_points.append(
+            {
+                "knowledge_point": knowledge_point,
+                "score": round(item["score"], 2),
+                "max_score": round(item["max_score"], 2),
+                "score_percentage": score_percentage,
+                "question_count": item["question_count"],
+                "focus_points": focus_points,
+                "recommendation": recommendation,
+            }
+        )
+
+    weak_points.sort(
+        key=lambda item: (
+            item["score_percentage"],
+            -item["max_score"],
+            item["knowledge_point"],
+        )
+    )
+    if not weak_points:
+        return [], None
+    primary = weak_points[0]
+    direction = f'优先深入掌握“{primary["knowledge_point"]}”。{primary["recommendation"]}'
+    return weak_points, direction
 
 
 def grade_objective(question: dict[str, Any], selected: list[str]) -> GradeResult:

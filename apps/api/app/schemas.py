@@ -303,6 +303,16 @@ class ExamAnswerResponse(BaseModel):
     grading_status: Literal["pending", "completed", "failed"]
 
 
+class ExamWeakKnowledgePoint(BaseModel):
+    knowledge_point: str
+    score: float
+    max_score: float
+    score_percentage: float
+    question_count: int
+    focus_points: list[str] = Field(default_factory=list)
+    recommendation: str
+
+
 class ExamAttemptResponse(BaseModel):
     id: str
     exam_share_id: str
@@ -320,10 +330,17 @@ class ExamAttemptResponse(BaseModel):
     submitted_at: datetime | None
     completed_at: datetime | None
     grading_error: str | None
+    device_type: Literal["desktop", "mobile", "tablet", "unknown"] | None = None
+    user_agent: str | None = None
+    started_ip_address: str | None = None
+    submitted_ip_address: str | None = None
+    ip_changed: bool = False
     duration_minutes: int
     source_mode: Literal["pdf", "model_knowledge"]
     questions: list[ExamQuestionResponse]
     answers: list[ExamAnswerResponse] = Field(default_factory=list)
+    weak_knowledge_points: list[ExamWeakKnowledgePoint] = Field(default_factory=list)
+    recommended_direction: str | None = None
     access_token: str | None = None
 
 
@@ -341,6 +358,10 @@ class ExamAttemptSummary(BaseModel):
     submitted_at: datetime | None
     completed_at: datetime | None
     grading_error: str | None
+    device_type: Literal["desktop", "mobile", "tablet", "unknown"] | None = None
+    started_ip_address: str | None = None
+    submitted_ip_address: str | None = None
+    ip_changed: bool = False
 
 
 class ExamShareSummary(BaseModel):
