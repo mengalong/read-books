@@ -22,7 +22,7 @@ git -C "$ROOT_DIR" archive --format=tar "$DEPLOY_BRANCH" | tar -xf - -C "$SYNC_D
 
 printf '同步代码并部署到 %s:%s...\n' "$REMOTE_HOST" "$REMOTE_DIR"
 ssh "$REMOTE_HOST" "mkdir -p '$REMOTE_DIR'"
-rsync -az --delete \
+rsync -az \
   --exclude='.env' \
   --exclude='.git/' \
   --exclude='data/app.db*' \

@@ -23,7 +23,7 @@ scripts/deploy.sh
 部署脚本会依次完成：
 
 1. 检查本地工作区没有未提交改动并推送 `main`。
-2. 将已提交版本同步到远端，不依赖远端旧版 Git，并保留 `.env`、SQLite、上传文件和解析数据。
+2. 将已提交版本增量同步到远端，不依赖远端旧版 Git，不执行远端删除，并保留 `.env`、SQLite、上传文件和解析数据。
 3. 首次部署创建生产 `.env`，自动生成管理员临时密码。
 4. 创建或更新 Conda 环境（Python 3.12、Node.js 20），通过 Conda 安装兼容 CentOS 7 的 `greenlet 3.1.1`，使用 PyMuPDF 1.25 轮子，并通过 `npm ci` 安装前端锁定依赖。
 5. 构建 Next.js、执行 Alembic 迁移并启动两个 systemd 服务。
