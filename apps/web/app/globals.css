@@ -4343,6 +4343,46 @@ p {
   margin-top: 17px;
 }
 
+.share-expiry-setting {
+  align-items: center;
+  background: #f7faf8;
+  border: 1px solid #dfe8e3;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-top: 17px;
+  padding: 13px 14px;
+}
+
+.share-expiry-setting > div {
+  display: grid;
+  gap: 4px;
+}
+
+.share-expiry-setting strong {
+  font-size: 12px;
+}
+
+.share-expiry-setting > div > span {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.expiry-editor-modal {
+  max-width: 520px;
+}
+
+.expiry-editor-modal .modal-heading p {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 5px;
+}
+
+.expiry-editor-modal .field {
+  margin-top: 17px;
+}
+
 .share-quiz-summary {
   border-bottom: 1px solid var(--line);
   display: grid;
@@ -4583,9 +4623,20 @@ p {
 .public-exam-unavailable {
   background: var(--red-soft);
   color: #984635;
+  display: grid;
   font-size: 13px;
+  gap: 5px;
   padding: 16px;
   text-align: center;
+}
+
+.public-exam-unavailable strong {
+  font-size: 14px;
+}
+
+.public-exam-unavailable span {
+  color: #a76052;
+  font-size: 11px;
 }
 
 .exam-answering-page {

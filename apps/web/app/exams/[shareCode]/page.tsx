@@ -1,19 +1,20 @@
 "use client";
 
-import { ArrowRight, BookOpenText, Clock3, ListChecks, ShieldCheck, UserRound } from "lucide-react";
+import { ArrowRight, BookOpenText, CalendarClock, Clock3, ListChecks, ShieldCheck, UserRound } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { ErrorState } from "@/components/ui";
 import { ApiError, getPublicExam, startPublicExam } from "@/lib/api";
 import { readExamAccess, saveExamAccess } from "@/lib/exam-access";
+import { formatDateTime } from "@/lib/format";
 import type { PublicExam } from "@/lib/types";
 
 const difficultyLabels: Record<string, string> = { easy: "基础", medium: "适中", hard: "深入" };
 const unavailableMessages: Record<string, string> = {
   stopped: "分享者已经停止这场考试。",
   source_deleted: "这场考试关联的原试卷已经删除。",
-  expired: "这场考试已经过期。",
+  expired: "你来晚了，考试已经结束",
 };
 
 export default function PublicExamEntryPage() {
@@ -29,7 +30,7 @@ export default function PublicExamEntryPage() {
   useEffect(() => {
     const saved = readExamAccess(params.shareCode);
     setSavedAttemptId(saved?.attemptId || null);
-    getPublicExam(params.shareCode)
+    getPublicExam(params.shareCode, saved?.token)
       .then((data) => {
         setExam(data);
         setParticipantName(data.participant_name || "");
@@ -66,6 +67,8 @@ export default function PublicExamEntryPage() {
 
   const existingAttemptId = exam.existing_attempt_id || savedAttemptId;
   const unavailable = exam.status !== "active";
+  const historicalAttempt = Boolean(existingAttemptId && exam.existing_attempt_status && exam.existing_attempt_status !== "in_progress");
+  const canOpenExisting = Boolean(existingAttemptId && (historicalAttempt || exam.status !== "expired"));
   return (
     <div className="public-exam-page">
       <header className="public-exam-brand"><span className="brand-mark">卷</span><div><strong>回卷</strong><span>分享考试</span></div></header>
@@ -76,10 +79,11 @@ export default function PublicExamEntryPage() {
           <div><ListChecks size={18} /><span><small>题目构成</small>{exam.question_count} 题 · 单选 {exam.single_count} · 多选 {exam.multiple_count} · 问答 {exam.short_count}</span></div>
           <div><Clock3 size={18} /><span><small>预计用时</small>{exam.duration_minutes} 分钟 · {difficultyLabels[exam.difficulty] || exam.difficulty}难度</span></div>
           <div><UserRound size={18} /><span><small>分享者</small>{exam.owner_display_name}</span></div>
+          <div><CalendarClock size={18} /><span><small>答题期限</small>{exam.expires_at ? formatDateTime(exam.expires_at) : "长期有效"}</span></div>
         </div>
 
         {error && <div className="toast-error">{error}</div>}
-        {existingAttemptId ? <div className="public-exam-action"><div><strong>{exam.existing_attempt_status === "completed" ? "你已经完成这场考试" : "发现尚未结束的答题记录"}</strong><span>{unavailable ? "分享已经停止，但已开始的答卷仍可继续完成。" : "同一考试只保留一份有效答卷。"}</span></div><button className="button button-primary" onClick={() => openAttempt(existingAttemptId, exam.existing_attempt_status)} type="button">{exam.existing_attempt_status === "completed" ? "查看结果" : "继续答题"}<ArrowRight size={15} /></button></div> : unavailable ? <div className="public-exam-unavailable">{unavailableMessages[exam.status] || "这场考试当前不能开始答题。"}</div> : <div className="public-exam-action">
+        {canOpenExisting && existingAttemptId ? <div className="public-exam-action"><div><strong>{historicalAttempt ? "你参加过这场考试" : "发现尚未结束的答题记录"}</strong><span>{historicalAttempt ? "可以继续查看之前的答题记录和学习报告。" : unavailable ? "分享已经停止，但已开始的答卷仍可继续完成。" : "同一考试只保留一份有效答卷。"}</span></div><button className="button button-primary" onClick={() => openAttempt(existingAttemptId, exam.existing_attempt_status)} type="button">{historicalAttempt ? "查看答题记录" : "继续答题"}<ArrowRight size={15} /></button></div> : unavailable ? <div className="public-exam-unavailable"><strong>{unavailableMessages[exam.status] || "这场考试当前不能开始答题。"}</strong>{exam.status === "expired" && <span>已提交的参与者仍可通过原答题身份查看历史记录。</span>}</div> : <div className="public-exam-action">
           <div className="public-participant-field"><label htmlFor="participant-name">答题身份</label>{exam.authenticated ? <div className="signed-participant"><UserRound size={15} />{exam.participant_name}<span>登录用户</span></div> : <input autoComplete="name" id="participant-name" maxLength={50} onChange={(event) => setParticipantName(event.target.value)} placeholder="填写你的答题名称" value={participantName} />}</div>
           <button className="button button-primary" disabled={starting} onClick={() => void handleStart()} type="button">{starting ? "正在准备……" : "开始答题"}<ArrowRight size={15} /></button>
         </div>}

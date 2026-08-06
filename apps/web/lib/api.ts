@@ -234,10 +234,10 @@ export function deleteQuiz(quizId: string) {
   return apiFetch<void>(`/quizzes/${quizId}`, { method: "DELETE" });
 }
 
-export function createExamShare(quizId: string, name?: string) {
+export function createExamShare(quizId: string, payload: { name?: string; expires_at?: string | null }) {
   return apiFetch<ExamShare>(`/quizzes/${quizId}/exam-shares`, {
     method: "POST",
-    body: JSON.stringify({ ...(name ? { name } : {}) }),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -255,7 +255,7 @@ export function getExamShare(shareId: string) {
   return apiFetch<ExamShare>(`/exam-shares/${shareId}`);
 }
 
-export function updateExamShare(shareId: string, payload: { name?: string; status?: "active" | "stopped" }) {
+export function updateExamShare(shareId: string, payload: { name?: string; status?: "active" | "stopped"; expires_at?: string | null }) {
   return apiFetch<ExamShare>(`/exam-shares/${shareId}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
@@ -297,8 +297,10 @@ export function retryAdminExamAttemptGrading(shareId: string, attemptId: string)
   });
 }
 
-export function getPublicExam(shareCode: string) {
-  return apiFetch<PublicExam>(`/public/exams/${shareCode}`);
+export function getPublicExam(shareCode: string, attemptToken?: string | null) {
+  return apiFetch<PublicExam>(`/public/exams/${shareCode}`, {
+    headers: attemptHeaders(attemptToken),
+  });
 }
 
 export function startPublicExam(shareCode: string, participantName?: string) {

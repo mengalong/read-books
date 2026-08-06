@@ -108,6 +108,55 @@ test("分享停止后仍允许继续已经开始的匿名答卷", async ({ page 
   await page.goto("/exams/public-code");
   await expect(page.getByText("分享已经停止，但已开始的答卷仍可继续完成。")).toBeVisible();
   await expect(page.getByRole("button", { name: "继续答题" })).toBeVisible();
+  expect(await page.evaluate(() => window.localStorage.getItem("huijuan:exam:public-code"))).toContain("attempt-in-progress");
+});
+
+test("考试过期后提示已经结束并禁止开始答题", async ({ page }) => {
+  await page.route("**/api/auth/me", async (route) => {
+    await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "请先登录" }) });
+  });
+  await page.route("**/api/public/exams/public-code", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ ...publicExam, status: "expired", expires_at: "2026-08-06T08:30:00Z" }),
+    });
+  });
+
+  await page.goto("/exams/public-code");
+  await expect(page.getByText("你来晚了，考试已经结束", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "开始答题" })).toHaveCount(0);
+  await expect(page.getByText("2026-08-06 16:30:00")).toBeVisible();
+});
+
+test("参加过考试的匿名用户可以从原浏览器查看历史答卷", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      "huijuan:exam:public-code",
+      JSON.stringify({ attemptId: "attempt-completed", token: "saved-attempt-token" }),
+    );
+  });
+  await page.route("**/api/auth/me", async (route) => {
+    await route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify({ detail: "请先登录" }) });
+  });
+  await page.route("**/api/public/exams/public-code", async (route) => {
+    expect(route.request().headers()["x-exam-attempt-token"]).toBe("saved-attempt-token");
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...publicExam,
+        status: "expired",
+        expires_at: "2026-08-06T08:30:00Z",
+        existing_attempt_id: "attempt-completed",
+        existing_attempt_status: "completed",
+      }),
+    });
+  });
+
+  await page.goto("/exams/public-code");
+  await expect(page.getByText("你参加过这场考试")).toBeVisible();
+  await expect(page.getByRole("button", { name: "查看答题记录" })).toBeVisible();
+  await page.getByRole("button", { name: "查看答题记录" }).click();
+  await expect(page).toHaveURL(/\/exams\/public-code\/results\/attempt-completed$/);
 });
 
 test("考试管理展示分享链接和答题统计", async ({ page }) => {
@@ -124,6 +173,9 @@ test("考试管理展示分享链接和答题统计", async ({ page }) => {
   await expect(page.getByText("3 / 4")).toBeVisible();
   await expect(page.getByText("78.5%")).toBeVisible();
   await expect(page.getByRole("button", { name: "复制考试链接" })).toBeVisible();
+  await page.getByRole("button", { name: "设置考试有效期" }).click();
+  await expect(page.getByRole("heading", { name: "设置考试有效期" })).toBeVisible();
+  await expect(page.getByText("关闭后考试长期有效。")).toBeVisible();
   const activityRow = page.locator(".exam-management-table tbody tr").first();
   await expect(activityRow.locator("td").nth(2)).toContainText("3 / 4");
   await expect(activityRow.locator("td").nth(3)).toContainText("78.5%");

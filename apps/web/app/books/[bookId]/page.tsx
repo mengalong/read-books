@@ -28,6 +28,8 @@ export default function BookDetailPage() {
   const [managingBook, setManagingBook] = useState(false);
   const [sharingQuiz, setSharingQuiz] = useState<QuizSummary | null>(null);
   const [shareName, setShareName] = useState("");
+  const [shareHasExpiry, setShareHasExpiry] = useState(false);
+  const [shareExpiresAt, setShareExpiresAt] = useState("");
   const [createdShare, setCreatedShare] = useState<ExamShare | null>(null);
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -106,6 +108,8 @@ export default function BookDetailPage() {
     if (!book) return;
     setSharingQuiz(quiz);
     setShareName(`${book.title} · ${quiz.title}`);
+    setShareHasExpiry(false);
+    setShareExpiresAt(defaultExpirationValue());
     setCreatedShare(null);
     setCopied(false);
     setError("");
@@ -124,7 +128,10 @@ export default function BookDetailPage() {
     setSharing(true);
     setError("");
     try {
-      setCreatedShare(await createExamShare(sharingQuiz.id, shareName.trim()));
+      setCreatedShare(await createExamShare(sharingQuiz.id, {
+        name: shareName.trim(),
+        expires_at: shareHasExpiry ? new Date(shareExpiresAt).toISOString() : null,
+      }));
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "考试链接创建失败");
     } finally {
@@ -282,12 +289,17 @@ export default function BookDetailPage() {
         <section aria-labelledby="share-exam-title" aria-modal="true" className="modal-panel exam-share-modal" role="dialog">
           <div className="modal-heading"><div><span className="eyebrow">Share exam</span><h2 id="share-exam-title">分享“{sharingQuiz.title}”</h2></div><button aria-label="关闭分享弹窗" className="modal-close" disabled={sharing} onClick={closeShare} title="关闭" type="button"><X size={18} /></button></div>
           {createdShare ? <div className="share-created-panel">
-            <div className="share-created-status"><CheckCircle2 size={18} /><div><strong>考试链接已创建</strong><span>持有链接的登录用户和匿名参与者都可以答题。</span></div></div>
+            <div className="share-created-status"><CheckCircle2 size={18} /><div><strong>考试链接已创建</strong><span>{createdShare.expires_at ? `答题截止到 ${formatDateTime(createdShare.expires_at)}` : "考试长期有效，可在考试管理中随时调整。"}</span></div></div>
             <label className="field"><span>分享链接</span><div className="share-link-field"><input readOnly value={`${typeof window === "undefined" ? "" : window.location.origin}/exams/${createdShare.share_code}`} /><button aria-label="复制考试链接" className="button button-secondary" onClick={() => void copyShareLink()} title="复制链接" type="button">{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? "已复制" : "复制"}</button></div></label>
             <div className="modal-actions"><button className="button button-secondary" onClick={closeShare} type="button">关闭</button><Link className="button button-primary" href={`/exam-management/${createdShare.id}`}><Share2 size={15} />查看考试</Link></div>
           </div> : <form onSubmit={handleCreateShare}>
             <div className="share-quiz-summary"><strong>{book.title}</strong><span>难度：{difficultyLabels[sharingQuiz.difficulty] || sharingQuiz.difficulty} · {sharingQuiz.question_count} 道题 · {sharingQuiz.duration_minutes} 分钟</span><span>单选 {sharingQuiz.single_count} · 多选 {sharingQuiz.multiple_count} · 问答 {sharingQuiz.short_count}</span></div>
             <label className="field"><span>考试活动名称</span><input maxLength={200} onChange={(event) => setShareName(event.target.value)} required value={shareName} /></label>
+            <div className="share-expiry-setting">
+              <div><strong>设置考试有效期</strong><span>{shareHasExpiry ? "到期后不能继续答题，历史结果仍可查看。" : "当前设置为长期有效。"}</span></div>
+              <label className="switch-control" htmlFor="share-has-expiry"><input checked={shareHasExpiry} id="share-has-expiry" onChange={(event) => setShareHasExpiry(event.target.checked)} type="checkbox" /><span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span><span className="switch-label">{shareHasExpiry ? "已开启" : "未开启"}</span></label>
+            </div>
+            {shareHasExpiry && <label className="field"><span>答题截止时间</span><input min={toDateTimeLocal(new Date())} onChange={(event) => setShareExpiresAt(event.target.value)} required type="datetime-local" value={shareExpiresAt} /><small>按当前设备的本地时间填写，保存后统一按北京时间展示。</small></label>}
             <div className="copy-scope-note">公开答题页不会展示 PDF 文件名、页码或原文摘录。参与者提交后可以查看分数、答案和解析。</div>
             <div className="modal-actions"><button className="button button-secondary" disabled={sharing} onClick={closeShare} type="button">取消</button><button className="button button-primary" disabled={sharing || !shareName.trim()} type="submit"><Share2 size={15} />{sharing ? "正在创建……" : "生成考试链接"}</button></div>
           </form>}
@@ -295,4 +307,13 @@ export default function BookDetailPage() {
       </div>}
     </div>
   );
+}
+
+function defaultExpirationValue() {
+  return toDateTimeLocal(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+}
+
+function toDateTimeLocal(value: Date) {
+  const offset = value.getTimezoneOffset() * 60_000;
+  return new Date(value.getTime() - offset).toISOString().slice(0, 16);
 }

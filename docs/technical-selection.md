@@ -312,6 +312,8 @@ export type AppConfig = {
 
 `ExamAttempt` 保存 `device_type`、`user_agent`、`started_ip_address` 和 `submitted_ip_address`。终端类型由 User-Agent 在服务端归类，IP 优先读取 Nginx 传递的首个 `X-Forwarded-For`，字段长度受限；仅授权管理响应返回这些字段，公开参与响应固定隐藏。开始和提交 IP 不同只生成辅助风险标记，不参与身份唯一性、自动封禁或作弊判定。
 
+考试有效期沿用 `ExamShare.expires_at` UTC 字段。创建和更新接口拒绝早于当前时间的截止时间，读取时通过 `effective_share_status` 动态计算 `expired`，不批量改写活动状态。过期活动拒绝新建答卷，并拒绝加载或提交仍为 `in_progress` 的答卷；已提交、评分中、评分失败和已完成答卷不受有效期限制，保证历史结果可追溯。
+
 答题报告使用前端共享的 `ExamAttemptReport` 组件生成固定宽度、完整展开的报告 DOM，再通过 `html2canvas` 转为 PNG 下载。报告只在用户触发导出时临时挂载，下载完成立即卸载，不在服务器保存派生图片。渲染时根据内容高度和总像素数动态降低缩放比例，避免长答卷超过浏览器 Canvas 尺寸限制。管理端报告使用授权答卷响应并可展示终端/IP；公开结果报告使用已脱敏响应，不能通过前端参数补回风控或 PDF 来源字段。
 
 ### 8.7 Mock 数据原则

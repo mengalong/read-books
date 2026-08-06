@@ -1,10 +1,11 @@
 import time
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
 from app.database import SessionLocal
 from app.main import app
-from app.models import Book, ExamAnswer, ExamAttempt, Question, Quiz
+from app.models import Book, ExamAnswer, ExamAttempt, ExamShare, Question, Quiz
 from app.services.auth import create_user_with_workspace
 
 
@@ -136,6 +137,84 @@ def test_exam_share_name_rejects_blank_values(client):
         "/api/exam-shares?created_from=2026-08-07&created_to=2026-08-06"
     )
     assert invalid_range.status_code == 422
+
+
+def test_exam_expiration_blocks_answering_but_keeps_completed_history(client):
+    _, quiz_id = create_shareable_quiz(client, "考试有效期测试书")
+    future = datetime.now(timezone.utc) + timedelta(days=2)
+    created = client.post(
+        f"/api/quizzes/{quiz_id}/exam-shares",
+        json={"name": "限时考试", "expires_at": future.isoformat()},
+    )
+    assert created.status_code == 201
+    share = created.json()
+    assert share["expires_at"] is not None
+
+    past_update = client.patch(
+        f"/api/exam-shares/{share['id']}",
+        json={"expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()},
+    )
+    assert past_update.status_code == 422
+
+    with TestClient(app) as public_client:
+        in_progress = public_client.post(
+            f"/api/public/exams/{share['share_code']}/attempts",
+            json={"participant_name": "未交卷读者"},
+        ).json()
+        completed = public_client.post(
+            f"/api/public/exams/{share['share_code']}/attempts",
+            json={"participant_name": "已交卷读者"},
+        ).json()
+        completed_headers = {"X-Exam-Attempt-Token": completed["access_token"]}
+        submitted = public_client.post(
+            f"/api/public/exam-attempts/{completed['id']}/submit",
+            json={"answers": [], "elapsed_seconds": 18},
+            headers=completed_headers,
+        )
+        assert submitted.status_code == 202
+
+        with SessionLocal() as db:
+            db_share = db.get(ExamShare, share["id"])
+            db_share.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            db.commit()
+
+        intro = public_client.get(
+            f"/api/public/exams/{share['share_code']}",
+            headers=completed_headers,
+        )
+        assert intro.status_code == 200
+        assert intro.json()["status"] == "expired"
+        assert intro.json()["existing_attempt_id"] == completed["id"]
+        assert intro.json()["existing_attempt_status"] == "completed"
+
+        late_start = public_client.post(
+            f"/api/public/exams/{share['share_code']}/attempts",
+            json={"participant_name": "迟到读者"},
+        )
+        assert late_start.status_code == 409
+        assert late_start.json()["detail"] == "你来晚了，考试已经结束"
+
+        in_progress_headers = {"X-Exam-Attempt-Token": in_progress["access_token"]}
+        blocked_attempt = public_client.get(
+            f"/api/public/exam-attempts/{in_progress['id']}",
+            headers=in_progress_headers,
+        )
+        assert blocked_attempt.status_code == 409
+        assert blocked_attempt.json()["detail"] == "你来晚了，考试已经结束"
+
+        history = public_client.get(
+            f"/api/public/exam-attempts/{completed['id']}/result",
+            headers=completed_headers,
+        )
+        assert history.status_code == 200
+        assert history.json()["participant_name"] == "已交卷读者"
+
+    cleared = client.patch(
+        f"/api/exam-shares/{share['id']}",
+        json={"expires_at": None},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["expires_at"] is None
 
 
 def test_anonymous_exam_flow_hides_sources_and_answers(client):

@@ -29,6 +29,7 @@ from app.schemas import (
 from app.services.auth import AuthIdentity, add_audit_log, hash_session_token
 from app.services.exam_sharing import (
     analyze_attempt_learning,
+    as_utc,
     detect_device_type,
     effective_share_status,
     grade_objective,
@@ -355,6 +356,9 @@ def create_exam_share(
         raise HTTPException(status_code=409, detail="试卷题目数据不完整，不能创建考试分享")
 
     name = (payload.name or f"{quiz.book.title} · {quiz.title}").strip()
+    expires_at = as_utc(payload.expires_at) if payload.expires_at else None
+    if expires_at and expires_at <= utc_now():
+        raise HTTPException(status_code=422, detail="考试结束时间必须晚于当前时间")
     while True:
         share_code = secrets.token_urlsafe(24)
         if not db.scalar(select(ExamShare.id).where(ExamShare.share_code == share_code)):
@@ -376,6 +380,7 @@ def create_exam_share(
         difficulty=quiz.difficulty,
         duration_minutes=quiz.duration_minutes,
         max_score=quiz.max_score,
+        expires_at=expires_at,
     )
     db.add(share)
     db.flush()
@@ -385,7 +390,11 @@ def create_exam_share(
         action="exam_share.created",
         target_type="exam_share",
         target_id=share.id,
-        details={"quiz_id": quiz.id, "book_id": quiz.book_id},
+        details={
+            "quiz_id": quiz.id,
+            "book_id": quiz.book_id,
+            "expires_at": expires_at.isoformat() if expires_at else None,
+        },
         ip_address=client_ip(request),
     )
     db.commit()
@@ -445,6 +454,20 @@ def update_exam_share(
         if changes["name"] is None:
             raise HTTPException(status_code=422, detail="考试活动名称不能为空")
         share.name = changes["name"]
+    if "expires_at" in changes:
+        expires_at = as_utc(changes["expires_at"]) if changes["expires_at"] else None
+        if expires_at and expires_at <= utc_now():
+            raise HTTPException(status_code=422, detail="考试结束时间必须晚于当前时间")
+        share.expires_at = expires_at
+        add_audit_log(
+            db,
+            actor_user_id=identity.user.id,
+            action="exam_share.expiration_updated",
+            target_type="exam_share",
+            target_id=share.id,
+            details={"expires_at": expires_at.isoformat() if expires_at else None},
+            ip_address=client_ip(request),
+        )
     new_status = changes.get("status")
     if new_status and new_status != share.status:
         if share.quiz_id is None or share.book_id is None:
@@ -517,6 +540,7 @@ def retry_exam_attempt_grading(
 @public_router.get("/exams/{share_code}", response_model=PublicExamResponse)
 def get_public_exam(
     share_code: str,
+    x_exam_attempt_token: str | None = Header(default=None),
     db: Session = Depends(get_db),
     identity: AuthIdentity | None = Depends(get_optional_identity),
 ) -> PublicExamResponse:
@@ -532,6 +556,17 @@ def get_public_exam(
                 attempt
                 for attempt in share.attempts
                 if attempt.participant_user_id == identity.user.id
+            ),
+            None,
+        )
+    elif x_exam_attempt_token:
+        token_hash = hash_session_token(x_exam_attempt_token)
+        existing = next(
+            (
+                attempt
+                for attempt in share.attempts
+                if attempt.access_token_hash
+                and hmac.compare_digest(attempt.access_token_hash, token_hash)
             ),
             None,
         )
@@ -576,7 +611,12 @@ def start_public_exam_attempt(
     if share is None:
         raise HTTPException(status_code=404, detail="考试链接不存在或已经失效")
     if effective_share_status(share) != "active":
-        raise HTTPException(status_code=409, detail="这场考试当前不能开始新的答题")
+        detail = (
+            "你来晚了，考试已经结束"
+            if effective_share_status(share) == "expired"
+            else "这场考试当前不能开始新的答题"
+        )
+        raise HTTPException(status_code=409, detail=detail)
 
     access_token = None
     if identity:
@@ -631,6 +671,8 @@ def public_attempt_dependency(
 ) -> ExamAttempt:
     attempt = get_attempt_or_404(db, attempt_id)
     verify_public_attempt_access(attempt, identity, attempt_token)
+    if attempt.status == "in_progress" and effective_share_status(attempt.exam_share) == "expired":
+        raise HTTPException(status_code=409, detail="你来晚了，考试已经结束")
     return attempt
 
 

@@ -219,6 +219,7 @@ class QuizSubmitRequest(BaseModel):
 
 class ExamShareCreate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
+    expires_at: datetime | None = None
 
     @field_validator("name")
     @classmethod
@@ -234,6 +235,7 @@ class ExamShareCreate(BaseModel):
 class ExamShareUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     status: Literal["active", "stopped"] | None = None
+    expires_at: datetime | None = None
 
     @field_validator("name")
     @classmethod

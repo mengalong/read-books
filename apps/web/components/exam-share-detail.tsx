@@ -146,7 +146,7 @@ export function ExamShareDetailView({ shareId, admin = false }: { shareId: strin
         <div className="header-actions"><span className={`exam-status exam-status-${share.status}`}>{statusLabels[share.status]}</span><button className="button button-secondary" onClick={() => void copyLink()} type="button">{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? "已复制" : "复制链接"}</button></div>
       </header>
 
-      <div className="share-link-strip"><span>{`${typeof window === "undefined" ? "" : window.location.origin}/exams/${share.share_code}`}</span><small>创建于 {formatDateTime(share.created_at)}</small></div>
+      <div className="share-link-strip"><span>{`${typeof window === "undefined" ? "" : window.location.origin}/exams/${share.share_code}`}</span><small>创建于 {formatDateTime(share.created_at)} · {share.expires_at ? `截止 ${formatDateTime(share.expires_at)}` : "长期有效"}</small></div>
 
       <div className="metrics-grid exam-detail-metrics">
         <div className="metric"><div className="metric-label">开始答题</div><div className="metric-value">{share.started_count}<span className="metric-detail">人次</span></div></div>
