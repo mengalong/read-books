@@ -1,11 +1,12 @@
 "use client";
 
-import { Activity, BarChart3, BookMarked, BookOpenText, FileCode2, History, LibraryBig, LogOut, Plus, Settings2, Users } from "lucide-react";
+import { Activity, BarChart3, BookMarked, BookOpenText, Clock3, FileCode2, History, LibraryBig, LogOut, Plus, Settings2, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, getCurrentUser, logout, recordActivity } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
 import type { CurrentUser } from "@/lib/types";
 
 const navigation = [
@@ -22,6 +23,8 @@ const systemNavigation = [
   { href: "/settings/access-statistics", label: "访问统计", icon: Activity },
   { href: "/settings/users", label: "用户管理", icon: Users },
 ];
+
+const buildUpdatedAt = process.env.NEXT_PUBLIC_BUILD_UPDATED_AT || "";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -143,6 +146,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span className="account-avatar">{user.display_name.slice(0, 1)}</span>
           <span className="account-copy"><strong>{user.display_name}</strong><small>{user.role === "admin" ? "管理员" : user.username}</small></span>
           <button aria-label="退出登录" onClick={() => void handleLogout()} title="退出登录" type="button"><LogOut size={16} /></button>
+        </div>
+        <div className="sidebar-version" title={`当前版本构建于 ${formatDateTime(buildUpdatedAt)}`}>
+          <Clock3 size={13} />
+          <span><small>版本更新时间</small><time dateTime={buildUpdatedAt}>{formatDateTime(buildUpdatedAt)}</time></span>
         </div>
       </aside>
       <main className="app-main">{children}</main>

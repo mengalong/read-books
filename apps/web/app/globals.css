@@ -216,6 +216,39 @@ a {
   color: #fff;
 }
 
+.sidebar-version {
+  align-items: center;
+  color: #7f928a;
+  display: flex;
+  gap: 8px;
+  margin: 14px 12px 0;
+}
+
+.sidebar-version svg {
+  flex: 0 0 auto;
+}
+
+.sidebar-version span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sidebar-version small,
+.sidebar-version time {
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.sidebar-version small {
+  color: #a4b4ae;
+}
+
+.sidebar-version time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .usage-metrics {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-bottom: 25px;
@@ -3480,6 +3513,10 @@ p {
 
   .sidebar-account {
     margin: 13px 4px 0;
+  }
+
+  .sidebar-version {
+    margin-left: 4px;
   }
 
   .page-wrap {
