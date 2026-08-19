@@ -36,4 +36,5 @@ test("结果页区分实际得分与得分率", async ({ page }) => {
   await expect(page.locator(".score-number span")).toHaveText("/ 36");
   await expect(page.locator(".score-copy")).toContainText("得分率 12%");
   await expect(page.locator(".result-score")).toHaveClass(/low/);
+  await expect(page.getByRole("button", { name: "编辑题目" })).toHaveCount(0);
 });

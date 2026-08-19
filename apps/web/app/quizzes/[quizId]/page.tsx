@@ -5,8 +5,9 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { QuestionEditor } from "@/components/question-editor";
 import { ErrorState, SourceModeNotice } from "@/components/ui";
-import { ApiError, getQuiz, startReview } from "@/lib/api";
+import { ApiError, getEditableQuiz, startReview } from "@/lib/api";
 import type { Question, Quiz } from "@/lib/types";
 
 const questionTypeLabels: Record<Question["question_type"], string> = {
@@ -24,7 +25,7 @@ export default function QuizOverviewPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    getQuiz(params.quizId)
+    getEditableQuiz(params.quizId)
       .then(setQuiz)
       .catch((reason: unknown) => setError(reason instanceof ApiError ? reason.message : "试卷加载失败"))
       .finally(() => setLoading(false));
@@ -48,6 +49,18 @@ export default function QuizOverviewPage() {
       setError(reason instanceof ApiError ? reason.message : "复习任务创建失败");
       setStarting(false);
     }
+  }
+
+  function handleQuestionSaved(updatedQuestion: Question) {
+    setQuiz((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        questions: current.questions.map((question) =>
+          question.id === updatedQuestion.id ? updatedQuestion : question,
+        ),
+      };
+    });
   }
 
   if (loading) return <div className="page-wrap"><div className="loading-state">正在打开复习试卷……</div></div>;
@@ -78,6 +91,40 @@ export default function QuizOverviewPage() {
           <dl><div><dt>目标时长</dt><dd><Clock3 size={13} />{quiz.duration_minutes} 分钟</dd></div><div><dt>难度</dt><dd>{quiz.difficulty === "easy" ? "基础" : quiz.difficulty === "hard" ? "深入" : "适中"}</dd></div><div><dt>答题次数</dt><dd>每次单独记录</dd></div></dl>
         </aside>
       </div>
+
+      <section className="content-panel quiz-question-list-panel">
+        <div className="section-title"><h2>题目列表</h2><span>可逐题调整题干、选项和标准答案</span></div>
+        <div className="quiz-question-list">
+          {quiz.questions.map((question) => (
+            <article className="quiz-question-row" key={question.id}>
+              <div className="quiz-question-main">
+                <div className="question-card-header">
+                  <span className="question-number">第 {question.position} 题 · {question.knowledge_point}</span>
+                  <span className="question-type">{questionTypeLabels[question.question_type]}</span>
+                </div>
+                <h3 className="quiz-question-title">{question.prompt}</h3>
+                {question.question_type === "short" ? (
+                  <p className="quiz-question-answer">标准答案：{question.reference_answer || "未设置"}</p>
+                ) : (
+                  <div className="quiz-question-options">
+                    {question.options.map((option) => (
+                      <span className={question.correct_answers?.includes(option.id) ? "is-correct" : ""} key={option.id}>
+                        {option.id}. {option.text}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <QuestionEditor
+                className="button button-secondary question-edit-trigger"
+                onSaved={handleQuestionSaved}
+                question={question}
+                quizId={quiz.id}
+              />
+            </article>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

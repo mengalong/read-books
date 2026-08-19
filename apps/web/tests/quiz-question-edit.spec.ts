@@ -2,11 +2,11 @@ import { expect, test } from "@playwright/test";
 
 import { mockAdminIdentity } from "./test-helpers";
 
-test("结果页可人工修正题干、选项和标准答案", async ({ page }) => {
+test("试卷页可人工修正题干、选项和标准答案", async ({ page }) => {
   await mockAdminIdentity(page);
 
   let savedPayload: Record<string, unknown> | null = null;
-  await page.route("**/api/quizzes/quiz-edit/result", async (route) => {
+  await page.route("**/api/quizzes/quiz-edit/editable", async (route) => {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -16,12 +16,12 @@ test("结果页可人工修正题干、选项和标准答案", async ({ page }) 
         title: "第 1 套复习试卷",
         difficulty: "medium",
         duration_minutes: 15,
-        status: "submitted",
+        status: "ready",
         source_mode: "pdf",
-        total_score: 4,
+        total_score: null,
         max_score: 6,
-        elapsed_seconds: 120,
-        submitted_at: "2026-08-03T10:00:00Z",
+        elapsed_seconds: null,
+        submitted_at: null,
         next_review_date: "2026-08-04",
         created_at: "2026-08-03T09:00:00Z",
         questions: [
@@ -47,20 +47,6 @@ test("结果页可人工修正题干、选项和标准答案", async ({ page }) 
             correct_answers: ["A"],
           },
         ],
-        answers: [
-          {
-            question_id: "q1",
-            selected_answers: ["C"],
-            text_answer: null,
-            score: 0,
-            max_score: 6,
-            is_correct: false,
-            feedback: "原反馈",
-            matched_points: [],
-            missing_points: ["A"],
-          },
-        ],
-        weak_points: [],
       }),
     });
   });
@@ -95,7 +81,7 @@ test("结果页可人工修正题干、选项和标准答案", async ({ page }) 
     });
   });
 
-  await page.goto("/quizzes/quiz-edit/result");
+  await page.goto("/quizzes/quiz-edit");
   await page.getByRole("button", { name: "编辑题目" }).click();
 
   await page.getByLabel("题干").fill("修正后的题干");
@@ -115,4 +101,36 @@ test("结果页可人工修正题干、选项和标准答案", async ({ page }) 
     explanation: "修正后的解析",
     correct_answers: ["B"],
   });
+});
+
+test("结果页不显示题目编辑入口", async ({ page }) => {
+  await mockAdminIdentity(page);
+
+  await page.route("**/api/quizzes/quiz-edit/result", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "quiz-edit",
+        book_id: "book-1",
+        book_title: "测试书",
+        title: "第 1 套复习试卷",
+        difficulty: "medium",
+        duration_minutes: 15,
+        status: "submitted",
+        source_mode: "pdf",
+        total_score: 4,
+        max_score: 6,
+        elapsed_seconds: 120,
+        submitted_at: "2026-08-03T10:00:00Z",
+        next_review_date: "2026-08-04",
+        created_at: "2026-08-03T09:00:00Z",
+        questions: [],
+        answers: [],
+        weak_points: [],
+      }),
+    });
+  });
+
+  await page.goto("/quizzes/quiz-edit/result");
+  await expect(page.getByRole("button", { name: "编辑题目" })).toHaveCount(0);
 });

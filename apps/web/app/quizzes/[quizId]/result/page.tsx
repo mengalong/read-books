@@ -6,7 +6,6 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { ErrorState, EvidenceList, SourceModeNotice } from "@/components/ui";
-import { QuestionEditor } from "@/components/question-editor";
 import { ApiError, getQuizResult } from "@/lib/api";
 import { formatDate, formatDuration, formatScore, scorePercentage } from "@/lib/format";
 import type { QuizResult } from "@/lib/types";
@@ -21,18 +20,6 @@ export default function QuizResultPage() {
   }, [params.quizId]);
 
   const answerMap = useMemo(() => new Map(result?.answers.map((answer) => [answer.question_id, answer]) || []), [result]);
-
-  function handleQuestionSaved(updatedQuestion: QuizResult["questions"][number]) {
-    setResult((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        questions: current.questions.map((question) =>
-          question.id === updatedQuestion.id ? updatedQuestion : question,
-        ),
-      };
-    });
-  }
 
   if (!result && !error) return <div className="page-wrap"><div className="loading-state">正在整理复习结果……</div></div>;
   if (!result) return <div className="page-wrap"><ErrorState message={error} /></div>;
@@ -60,7 +47,7 @@ export default function QuizResultPage() {
         const selectedText = question.question_type === "short" ? answer.text_answer || "未作答" : question.options.filter((option) => answer.selected_answers.includes(option.id)).map((option) => `${option.id}. ${option.text}`).join("；") || "未作答";
         const correctText = question.question_type === "short" ? question.reference_answer : question.options.filter((option) => question.correct_answers?.includes(option.id)).map((option) => `${option.id}. ${option.text}`).join("；");
         return <article className={`result-question ${answer.is_correct ? "correct" : "incorrect"}`} key={question.id}>
-          <div className="question-card-header"><span className="question-number">第 {index + 1} 题 · {question.knowledge_point}</span><div className="question-card-actions"><span className={answer.score / answer.max_score >= 0.6 ? "score-good" : "score-low"}>{answer.score} / {answer.max_score} 分</span><QuestionEditor className="button button-secondary question-edit-trigger" onSaved={handleQuestionSaved} question={question} quizId={result.id} /></div></div>
+          <div className="question-card-header"><span className="question-number">第 {index + 1} 题 · {question.knowledge_point}</span><span className={answer.score / answer.max_score >= 0.6 ? "score-good" : "score-low"}>{answer.score} / {answer.max_score} 分</span></div>
           <h3 style={{ marginTop: 11 }}>{question.prompt}</h3>
           <div className="result-answer-row"><div><strong>你的答案：</strong>{selectedText}</div><div><strong>{question.question_type === "short" ? "AI 参考答案" : "正确答案"}：</strong>{correctText}</div></div>
           <div className="result-feedback">{answer.is_correct ? <Check size={14} style={{ verticalAlign: "-3px", marginRight: 5 }} /> : <CircleX size={14} style={{ verticalAlign: "-3px", marginRight: 5 }} />}{answer.feedback} {question.explanation}</div>
