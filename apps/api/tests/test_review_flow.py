@@ -339,8 +339,90 @@ def test_quiz_summary_counts_question_types_and_delete_cascades_reviews(client):
     assert task_after_delete.json()["quiz_id"] is None
 
 
+def test_update_quiz_question_and_reveal_latest_content(client):
+    book_id, _ = create_source_book(client, "题目修正测试书", "修正测试作者")
+    generated = client.post(
+        f"/api/books/{book_id}/quizzes",
+        json={
+            "duration_minutes": 15,
+            "difficulty": "medium",
+            "single_count": 1,
+            "multiple_count": 0,
+            "short_count": 0,
+        },
+    )
+    assert generated.status_code == 202
+    quiz_id = wait_for_generation(client, generated.json()["id"])["quiz_id"]
+    review = client.post(f"/api/quizzes/{quiz_id}/reviews")
+    assert review.status_code == 200
+
+    with SessionLocal() as db:
+        question = db.scalars(
+            select(Question).where(Question.quiz_id == quiz_id).order_by(Question.position)
+        ).first()
+        assert question is not None
+
+    updated = client.patch(
+        f"/api/quizzes/{quiz_id}/questions/{question.id}",
+        json={
+            "prompt": "修正后的题干",
+            "knowledge_point": "修正后的知识点",
+            "explanation": "修正后的解析",
+            "options": [
+                {"id": "A", "text": "错误选项"},
+                {"id": "B", "text": "正确选项"},
+                {"id": "C", "text": "干扰项一"},
+                {"id": "D", "text": "干扰项二"},
+            ],
+            "correct_answers": ["B"],
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["prompt"] == "修正后的题干"
+    assert updated.json()["correct_answers"] == ["B"]
+
+    submitted = client.post(
+        f"/api/reviews/{review.json()['id']}/submit",
+        json={"elapsed_seconds": 60, "answers": []},
+    )
+    assert submitted.status_code == 200
+    result = client.get(f"/api/reviews/{review.json()['id']}/result")
+    assert result.status_code == 200
+    assert result.json()["questions"][0]["prompt"] == "修正后的题干"
+    assert result.json()["questions"][0]["correct_answers"] == ["B"]
+
+
+def test_update_quiz_question_rejects_invalid_answers(client):
+    book_id, _ = create_source_book(client, "题目校验测试书", "校验测试作者")
+    generated = client.post(
+        f"/api/books/{book_id}/quizzes",
+        json={
+            "duration_minutes": 15,
+            "difficulty": "medium",
+            "single_count": 1,
+            "multiple_count": 0,
+            "short_count": 0,
+        },
+    )
+    assert generated.status_code == 202
+    quiz_id = wait_for_generation(client, generated.json()["id"])["quiz_id"]
+
+    with SessionLocal() as db:
+        question = db.scalars(
+            select(Question).where(Question.quiz_id == quiz_id).order_by(Question.position)
+        ).first()
+        assert question is not None
+
+    response = client.patch(
+        f"/api/quizzes/{quiz_id}/questions/{question.id}",
+        json={"correct_answers": ["Z"]},
+    )
+
+    assert response.status_code == 422
+
+
 def test_generate_submit_and_avoid_recent_sources(client):
-    book_id, _ = create_source_book(client, "复习流程测试书")
+    book_id, _ = create_source_book(client, "复习流程测试书", "复习流程作者")
     payload = {
         "duration_minutes": 15,
         "difficulty": "medium",
@@ -431,12 +513,14 @@ def test_generate_submit_and_avoid_recent_sources(client):
         another_review.json()["id"],
         review.json()["id"],
     }
-    author_results = client.get("/api/reviews", params={"search": "测试作者"})
+    author_results = client.get("/api/reviews", params={"search": "复习流程作者"})
     assert {item["id"] for item in author_results.json()} == {
         another_review.json()["id"],
         review.json()["id"],
     }
-    submitted_results = client.get("/api/reviews", params={"status": "submitted"})
+    submitted_results = client.get(
+        "/api/reviews", params={"status": "submitted", "book_id": book_id}
+    )
     assert [item["id"] for item in submitted_results.json()] == [review.json()["id"]]
 
     deleted = client.delete(f"/api/reviews/{another_review.json()['id']}")

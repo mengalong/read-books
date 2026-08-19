@@ -27,6 +27,7 @@ from app.schemas import (
     QuizSummary,
     ReviewTaskResponse,
     ReviewTaskSummary,
+    QuestionUpdateRequest,
     QuizSubmitRequest,
 )
 from app.services.model_config import get_effective_model_configuration
@@ -109,6 +110,10 @@ def question_focus_text(question: Question) -> str:
     )
 
 
+def clean_optional_text(value: str | None) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
 def to_question_response(question: Question, reveal_answers: bool) -> QuestionResponse:
     focus_text = question_focus_text(question)
     source_evidence = []
@@ -135,7 +140,7 @@ def to_question_response(question: Question, reveal_answers: bool) -> QuestionRe
     )
 
 
-def to_quiz_response(quiz: Quiz) -> QuizResponse:
+def to_quiz_response(quiz: Quiz, reveal_answers: bool = False) -> QuizResponse:
     return QuizResponse(
         id=quiz.id,
         book_id=quiz.book_id,
@@ -151,7 +156,7 @@ def to_quiz_response(quiz: Quiz) -> QuizResponse:
         submitted_at=None,
         next_review_date=None,
         created_at=quiz.created_at,
-        questions=[to_question_response(question, False) for question in quiz.questions],
+        questions=[to_question_response(question, reveal_answers) for question in quiz.questions],
     )
 
 
@@ -301,6 +306,97 @@ def get_quiz(
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> QuizResponse:
     return to_quiz_response(get_quiz_or_404(db, quiz_id, identity))
+
+
+@router.get("/quizzes/{quiz_id}/editable", response_model=QuizResponse)
+def get_editable_quiz(
+    quiz_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> QuizResponse:
+    return to_quiz_response(get_quiz_or_404(db, quiz_id, identity), reveal_answers=True)
+
+
+@router.patch("/quizzes/{quiz_id}/questions/{question_id}", response_model=QuestionResponse)
+def update_question(
+    quiz_id: str,
+    question_id: str,
+    payload: QuestionUpdateRequest,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> QuestionResponse:
+    quiz = get_quiz_or_404(db, quiz_id, identity, for_write=True)
+    question = next((item for item in quiz.questions if item.id == question_id), None)
+    if question is None:
+        raise HTTPException(status_code=404, detail="未找到这道题目")
+
+    changes = payload.model_dump(exclude_unset=True)
+    if "prompt" in changes:
+        prompt = clean_optional_text(changes["prompt"])
+        if not prompt:
+            raise HTTPException(status_code=422, detail="题干不能为空")
+        question.prompt = prompt
+    if "explanation" in changes:
+        explanation = clean_optional_text(changes["explanation"])
+        question.explanation = explanation or ""
+    if "knowledge_point" in changes:
+        knowledge_point = clean_optional_text(changes["knowledge_point"])
+        if not knowledge_point:
+            raise HTTPException(status_code=422, detail="知识点不能为空")
+        question.knowledge_point = knowledge_point
+    if "reference_answer" in changes:
+        reference_answer = clean_optional_text(changes["reference_answer"])
+        question.reference_answer = reference_answer or None
+    if "grading_rubric" in changes:
+        question.grading_rubric = changes["grading_rubric"] or []
+
+    if question.question_type == "short":
+        if "options" in changes and changes["options"]:
+            raise HTTPException(status_code=422, detail="问答题不支持选项")
+        if "correct_answers" in changes and changes["correct_answers"]:
+            raise HTTPException(status_code=422, detail="问答题不需要标准选项答案")
+        question.options = []
+        question.correct_answers = []
+    else:
+        option_ids = [option["id"] for option in question.options]
+        if "options" in changes:
+            options = changes["options"] or []
+            normalized_options: list[dict[str, str]] = []
+            for option in options:
+                if not isinstance(option, dict):
+                    raise HTTPException(status_code=422, detail="选项格式不正确")
+                option_id = str(option.get("id", "")).strip().upper()
+                option_text = str(option.get("text", "")).strip()
+                if not option_id or not option_text:
+                    raise HTTPException(status_code=422, detail="选项内容不能为空")
+                normalized_options.append({"id": option_id, "text": option_text})
+            if len(normalized_options) != 4:
+                raise HTTPException(status_code=422, detail="选择题需要保留四个选项")
+            option_ids = [option["id"] for option in normalized_options]
+            if set(option_ids) != {"A", "B", "C", "D"}:
+                raise HTTPException(status_code=422, detail="选择题选项编号必须是 A、B、C、D")
+            question.options = normalized_options
+
+        if "correct_answers" in changes:
+            correct_answers = [
+                str(answer).strip().upper()
+                for answer in changes["correct_answers"]
+                if str(answer).strip()
+            ]
+            deduped = list(dict.fromkeys(correct_answers))
+            if not deduped:
+                raise HTTPException(status_code=422, detail="请选择标准答案")
+            if not set(deduped).issubset(set(option_ids)):
+                raise HTTPException(status_code=422, detail="标准答案必须来自选项")
+            if question.question_type == "single" and len(deduped) != 1:
+                raise HTTPException(status_code=422, detail="单选题只能有一个标准答案")
+            if question.question_type == "multiple" and len(deduped) < 1:
+                raise HTTPException(status_code=422, detail="多选题至少要有一个标准答案")
+            question.correct_answers = deduped
+
+    db.commit()
+    db.refresh(question)
+    return to_question_response(question, True)
 
 
 @router.delete("/quizzes/{quiz_id}", status_code=status.HTTP_204_NO_CONTENT)

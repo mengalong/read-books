@@ -14,6 +14,7 @@ import type {
   QuizGenerationTask,
   QuizSummary,
   QuizResult,
+  QuestionUpdatePayload,
   ReadingStatus,
   ShelfStatus,
   ReviewTask,
@@ -232,6 +233,21 @@ export function getGenerationTask(taskId: string) {
 
 export function getQuiz(quizId: string) {
   return apiFetch<Quiz>(`/quizzes/${quizId}`);
+}
+
+export function getEditableQuiz(quizId: string) {
+  return apiFetch<Quiz>(`/quizzes/${quizId}/editable`);
+}
+
+export function updateQuizQuestion(
+  quizId: string,
+  questionId: string,
+  payload: QuestionUpdatePayload,
+) {
+  return apiFetch<Quiz["questions"][number]>(`/quizzes/${quizId}/questions/${questionId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function submitQuiz(

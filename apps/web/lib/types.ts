@@ -302,6 +302,16 @@ export type SourceEvidence = {
 
 export type QuestionOption = { id: string; text: string };
 
+export type QuestionUpdatePayload = {
+  prompt?: string;
+  options?: QuestionOption[];
+  correct_answers?: string[];
+  explanation?: string | null;
+  knowledge_point?: string;
+  reference_answer?: string | null;
+  grading_rubric?: { point: string; keywords?: string[]; score?: number }[];
+};
+
 export type Question = {
   id: string;
   position: number;

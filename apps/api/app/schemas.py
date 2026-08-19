@@ -140,6 +140,16 @@ class QuestionOption(BaseModel):
     text: str
 
 
+class QuestionUpdateRequest(BaseModel):
+    prompt: str | None = None
+    options: list[QuestionOption] | None = None
+    correct_answers: list[str] | None = None
+    explanation: str | None = None
+    knowledge_point: str | None = Field(default=None, max_length=120)
+    reference_answer: str | None = None
+    grading_rubric: list[dict[str, Any]] | None = None
+
+
 class QuizGenerateRequest(BaseModel):
     duration_minutes: int = Field(default=15, ge=5, le=45)
     difficulty: Literal["easy", "medium", "hard"] = "medium"
