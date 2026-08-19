@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { BookCover, EmptyState, ErrorState, NextReview, SourceModeNotice, StatusBadge, formatPdfMeta } from "@/components/ui";
-import { ApiError, createExamShare, deleteBook, deletePdf, deleteQuiz, getBook, getChunks, restoreBook, startReview, unlistBook, uploadPdf } from "@/lib/api";
+import { ApiError, createExamShare, deleteBook, deletePdf, deleteQuiz, getBook, getChunks, restoreBook, unlistBook, uploadPdf } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { formatDate, formatDateTime, scorePercentage } from "@/lib/format";
 import type { BookDetail, Chunk, ExamShare, PdfDocument, QuizSummary } from "@/lib/types";
@@ -26,7 +26,6 @@ export default function BookDetailPage() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [deletingQuizId, setDeletingQuizId] = useState<string | null>(null);
-  const [startingQuizId, setStartingQuizId] = useState<string | null>(null);
   const [managingBook, setManagingBook] = useState(false);
   const [sharingQuiz, setSharingQuiz] = useState<QuizSummary | null>(null);
   const [shareName, setShareName] = useState("");
@@ -103,18 +102,6 @@ export default function BookDetailPage() {
       setError(reason instanceof ApiError ? reason.message : "试卷删除失败");
     } finally {
       setDeletingQuizId(null);
-    }
-  }
-
-  async function handleStartQuiz(quiz: QuizSummary) {
-    setStartingQuizId(quiz.id);
-    setError("");
-    try {
-      const review = await startReview(quiz.id);
-      router.push(`/reviews/${review.id}`);
-    } catch (reason: unknown) {
-      setError(reason instanceof ApiError ? reason.message : "复习任务创建失败");
-      setStartingQuizId(null);
     }
   }
 
@@ -261,7 +248,7 @@ export default function BookDetailPage() {
             </div>
             <div className="quiz-library-stats"><span>已复习 {quiz.review_count} 次</span><strong>{latestPercent === null ? "暂无成绩" : `最近得分率 ${latestPercent}%`}</strong></div>
             <div className="quiz-library-actions">
-              {isActive && <button className="button button-secondary" disabled={startingQuizId === quiz.id} onClick={() => void handleStartQuiz(quiz)} type="button"><Play size={15} />{startingQuizId === quiz.id ? "正在进入……" : "选择这套"}</button>}
+              {isActive && <Link className="button button-secondary" href={`/quizzes/${quiz.id}`}><Play size={15} />选择这套</Link>}
               {isActive && <button className="button button-quiet" onClick={() => openShare(quiz)} title="分享考试" type="button"><Share2 size={16} /></button>}
               {isActive && <Link aria-label={`编辑${quiz.title}`} className="button button-quiet" href={`/quizzes/${quiz.id}/edit`} title="编辑试卷"><PencilLine size={16} /></Link>}
               <button

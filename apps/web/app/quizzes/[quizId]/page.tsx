@@ -3,11 +3,17 @@
 import { ArrowLeft, CheckCircle2, Clock3, FileQuestion, Play } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ErrorState, SourceModeNotice } from "@/components/ui";
 import { ApiError, getQuiz, startReview } from "@/lib/api";
 import type { Quiz } from "@/lib/types";
+
+const questionTypeLabels = {
+  single: "单项选择题",
+  multiple: "多项选择题",
+  short: "问答题",
+} as const;
 
 export default function QuizOverviewPage() {
   const params = useParams<{ quizId: string }>();
@@ -24,6 +30,21 @@ export default function QuizOverviewPage() {
       .finally(() => setLoading(false));
   }, [params.quizId]);
 
+  const overview = useMemo(() => {
+    if (!quiz) return [];
+    return (["single", "multiple", "short"] as const)
+      .map((type) => {
+        const items = quiz.questions.filter((question) => question.question_type === type);
+        return {
+          type,
+          label: questionTypeLabels[type],
+          count: items.length,
+          score: items.reduce((sum, question) => sum + question.max_score, 0),
+        };
+      })
+      .filter((item) => item.count > 0);
+  }, [quiz]);
+
   async function handleStart() {
     if (!quiz) return;
     setStarting(true);
@@ -37,8 +58,8 @@ export default function QuizOverviewPage() {
     }
   }
 
-  if (loading) return <div className="page-wrap"><div className="loading-state">正在打开复习试卷……</div></div>;
-  if (!quiz) return <div className="page-wrap"><ErrorState message={error || "未找到这套复习试卷"} /></div>;
+  if (loading) return <div className="page-wrap"><div className="loading-state">正在打开试卷概览……</div></div>;
+  if (!quiz) return <div className="page-wrap"><ErrorState message={error || "未找到这套试卷"} /></div>;
 
   return (
     <div className="page-wrap">
@@ -46,25 +67,23 @@ export default function QuizOverviewPage() {
       {error && <div className="toast-error">{error}</div>}
       <SourceModeNotice sourceMode={quiz.source_mode} />
       <header className="page-header">
-        <div><div className="eyebrow">Review paper</div><h1 className="page-title">{quiz.title}</h1><p className="page-description">从这套试卷开始一次新的复习任务。同一套试卷可以反复作答，每次结果都会单独记录。</p></div>
-        <button className="button button-primary" disabled={starting} onClick={() => void handleStart()} type="button"><Play size={15} />{starting ? "正在准备……" : "开始本次复习"}</button>
+        <div><div className="eyebrow">Review paper</div><h1 className="page-title">{quiz.title}</h1><p className="page-description">先查看这套试卷的概览，确认后再开始答题。只有点击开始按钮后才会创建复习记录。</p></div>
+        <button className="button button-primary" disabled={starting} onClick={() => void handleStart()} type="button"><Play size={15} />{starting ? "正在进入……" : "开始答题"}</button>
       </header>
 
       <div className="quiz-choice-layout">
         <section className="content-panel">
-          <div className="section-title"><h2>试卷内容</h2><span>原文依据默认折叠</span></div>
+          <div className="section-title"><h2>试卷概述</h2><span>题型分布与总分</span></div>
           <div className="quiz-choice-items">
-            <div className="quiz-choice-item"><div className="count-icon"><FileQuestion size={17} /></div><div><strong>单项选择题</strong><span>{quiz.questions.filter((question) => question.question_type === "single").length} 道</span></div></div>
-            <div className="quiz-choice-item"><div className="count-icon"><FileQuestion size={17} /></div><div><strong>多项选择题</strong><span>{quiz.questions.filter((question) => question.question_type === "multiple").length} 道</span></div></div>
-            <div className="quiz-choice-item"><div className="count-icon"><FileQuestion size={17} /></div><div><strong>问答题</strong><span>{quiz.questions.filter((question) => question.question_type === "short").length} 道</span></div></div>
+            {overview.map((item) => <div className="quiz-choice-item" key={item.type}><div className="count-icon"><FileQuestion size={17} /></div><div><strong>{item.label}</strong><span>{item.count} 道 · {item.score} 分</span></div></div>)}
           </div>
-          <div className="quiz-choice-note"><CheckCircle2 size={16} />{quiz.source_mode === "model_knowledge" ? "本套试卷基于模型知识生成，没有 PDF 页码和逐句原文依据；提交后仍可查看 AI 参考答案与评分反馈。" : "每道题都保留对应的 PDF 页码和原文依据，提交后还可以查看 AI 参考答案与评分反馈。"}</div>
+          <div className="quiz-choice-note"><CheckCircle2 size={16} />{quiz.source_mode === "model_knowledge" ? "本套试卷基于模型知识生成，没有 PDF 页码和逐句原文依据。" : "每道题都保留对应的 PDF 页码和原文依据。"}</div>
         </section>
         <aside className="quiz-settings-summary">
           <div className="eyebrow">本套试卷</div>
-          <strong>{quiz.questions.length} 道题</strong>
-          <p>选择开始后会创建一次独立的复习任务。你可以中途离开，之后从复习记录继续。</p>
-          <dl><div><dt>目标时长</dt><dd><Clock3 size={13} />{quiz.duration_minutes} 分钟</dd></div><div><dt>难度</dt><dd>{quiz.difficulty === "easy" ? "基础" : quiz.difficulty === "hard" ? "深入" : "适中"}</dd></div><div><dt>答题次数</dt><dd>每次单独记录</dd></div></dl>
+          <strong>{quiz.questions.length} 道题 · {quiz.max_score} 分</strong>
+          <p>点击开始答题后，系统才会创建本次复习记录并进入答题详情页。</p>
+          <dl><div><dt>目标时长</dt><dd><Clock3 size={13} />{quiz.duration_minutes} 分钟</dd></div><div><dt>难度</dt><dd>{quiz.difficulty === "easy" ? "基础" : quiz.difficulty === "hard" ? "深入" : "适中"}</dd></div><div><dt>复习记录</dt><dd>开始后生成</dd></div></dl>
         </aside>
       </div>
     </div>

@@ -103,9 +103,10 @@ test("试卷编辑页可直接修正题干、选项和标准答案", async ({ pa
   });
 });
 
-test("书籍页在分享旁边提供编辑入口，选择试卷直接进入复习", async ({ page }) => {
+test("书籍页选择试卷先看概览，再开始答题进入复习", async ({ page }) => {
   await mockAdminIdentity(page);
 
+  let reviewRequests = 0;
   await page.route("**/api/books/book-1", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -167,7 +168,53 @@ test("书籍页在分享旁边提供编辑入口，选择试卷直接进入复�
     });
   });
 
+  await page.route("**/api/quizzes/quiz-1", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "quiz-1",
+        book_id: "book-1",
+        book_title: "测试书",
+        title: "第一套试卷",
+        difficulty: "medium",
+        duration_minutes: 15,
+        status: "ready",
+        source_mode: "pdf",
+        total_score: null,
+        max_score: 6,
+        elapsed_seconds: null,
+        submitted_at: null,
+        next_review_date: null,
+        created_at: "2026-08-03T09:00:00Z",
+        questions: [
+          {
+            id: "q1",
+            position: 1,
+            question_type: "single",
+            prompt: "题干",
+            options: [
+              { id: "A", text: "选项 A" },
+              { id: "B", text: "选项 B" },
+              { id: "C", text: "选项 C" },
+              { id: "D", text: "选项 D" },
+            ],
+            explanation: "解析",
+            knowledge_point: "知识点",
+            difficulty: "medium",
+            estimated_seconds: 45,
+            reference_answer: null,
+            grading_rubric: [],
+            source_evidence: [],
+            max_score: 6,
+            correct_answers: ["A"],
+          },
+        ],
+      }),
+    });
+  });
+
   await page.route("**/api/quizzes/quiz-1/reviews", async (route) => {
+    reviewRequests += 1;
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
@@ -270,9 +317,15 @@ test("书籍页在分享旁边提供编辑入口，选择试卷直接进入复�
   await expect(page.getByRole("button", { name: "分享考试" })).toBeVisible();
   await expect(page.getByRole("link", { name: "编辑第一套试卷" })).toHaveAttribute("href", "/quizzes/quiz-1/edit");
 
-  await page.getByRole("button", { name: "选择这套" }).click();
-  await expect(page).toHaveURL(/\/reviews\/review-1$/);
+  await page.getByRole("link", { name: "选择这套" }).click();
+  await expect(page).toHaveURL(/\/quizzes\/quiz-1$/);
+  await expect(page.getByRole("button", { name: "开始答题" })).toBeVisible();
+  expect(reviewRequests).toBe(0);
   await expect(page.getByRole("button", { name: "编辑题目" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "开始答题" }).click();
+  await expect(page).toHaveURL(/\/reviews\/review-1$/);
+  expect(reviewRequests).toBe(1);
 });
 
 test("结果页不显示题目编辑入口", async ({ page }) => {
