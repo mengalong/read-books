@@ -34,7 +34,7 @@ from app.services.model_config import get_effective_model_configuration
 from app.services.model_usage import new_usage_context
 from app.services.book_stats import to_quiz_summary
 from app.services.prompt_config import get_effective_prompt_templates
-from app.services.quiz_generation import start_generation_task
+from app.services.quiz_generation import regenerate_quiz_question, start_generation_task
 from app.services.quiz_provider import GradeResult, get_quiz_provider, key_sentence
 
 router = APIRouter(tags=["quizzes"])
@@ -54,7 +54,7 @@ def get_quiz_or_404(
     conditions.append(Book.workspace_id == identity.workspace.id)
     quiz = db.scalar(
         select(Quiz)
-        .options(selectinload(Quiz.questions))
+        .options(selectinload(Quiz.questions), selectinload(Quiz.book))
         .join(Quiz.book)
         .where(*conditions)
     )
@@ -397,6 +397,27 @@ def update_question(
     db.commit()
     db.refresh(question)
     return to_question_response(question, True)
+
+
+@router.post("/quizzes/{quiz_id}/questions/{question_id}/regenerate", response_model=QuestionResponse)
+def regenerate_question(
+    quiz_id: str,
+    question_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> QuestionResponse:
+    quiz = get_quiz_or_404(db, quiz_id, identity, for_write=True)
+    question = next((item for item in quiz.questions if item.id == question_id), None)
+    if question is None:
+        raise HTTPException(status_code=404, detail="未找到这道题目")
+
+    try:
+        regenerated = regenerate_quiz_question(db, quiz, question, user_id=identity.user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return to_question_response(regenerated, True)
 
 
 @router.delete("/quizzes/{quiz_id}", status_code=status.HTTP_204_NO_CONTENT)

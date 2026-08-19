@@ -250,6 +250,15 @@ export function updateQuizQuestion(
   });
 }
 
+export function regenerateQuizQuestion(quizId: string, questionId: string) {
+  return apiFetch<Quiz["questions"][number]>(
+    `/quizzes/${quizId}/questions/${questionId}/regenerate`,
+    {
+      method: "POST",
+    },
+  );
+}
+
 export function submitQuiz(
   quizId: string,
   payload: {

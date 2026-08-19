@@ -24,6 +24,8 @@ PROMPT_VARIABLES = {
         "short_count",
         "duration_minutes",
         "source_material",
+        "question_exclusions",
+        "regeneration_guidance",
     ),
     "grading": (
         "source_mode",
@@ -79,6 +81,11 @@ DEFAULT_PROMPTS = {
 当来源模式为 model_knowledge 时，没有提供 PDF 原文片段；请根据书名、作者和你对该书的可靠知识生成题目。此模式不得声称题目对应具体页码、章节或逐句引文，不得编造 source_chunk_id，source_chunk_ids 必须返回空数组。需要对版本差异和记忆不确定性保持谨慎。
 
 测试要求：难度为 {{difficulty}}；单项选择题 {{single_count}} 道；多项选择题 {{multiple_count}} 道；问答题 {{short_count}} 道。目标用时为 {{duration_minutes}} 分钟。
+单题重出附加要求：
+{{regeneration_guidance}}
+
+同类题目参考（仅用于避免与本试卷中的其他同类题目重复）：
+{{question_exclusions}}
 
 请严格返回一个 JSON 对象，不要返回 Markdown 或额外解释，格式如下：
 {
@@ -169,6 +176,7 @@ def prompt_values_for_preview(prompt_type: str) -> dict[str, str]:
             "multiple_count": "3",
             "short_count": "2",
             "duration_minutes": "15",
+            "regeneration_guidance": "",
             "source_material": json.dumps(
                 [
                     {
@@ -180,6 +188,7 @@ def prompt_values_for_preview(prompt_type: str) -> dict[str, str]:
                 ensure_ascii=False,
                 indent=2,
             ),
+            "question_exclusions": json.dumps([], ensure_ascii=False, indent=2),
         }
     return {
         "source_mode": "pdf（基于已解析 PDF 原文）",

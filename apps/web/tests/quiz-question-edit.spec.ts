@@ -103,6 +103,92 @@ test("试卷编辑页可直接修正题干、选项和标准答案", async ({ pa
   });
 });
 
+test("试卷编辑页支持单题重出并刷新当前题目", async ({ page }) => {
+  await mockAdminIdentity(page);
+
+  let regenerateCalled = false;
+  await page.route("**/api/quizzes/quiz-edit/editable", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "quiz-edit",
+        book_id: "book-1",
+        book_title: "测试书",
+        title: "第 1 套复习试卷",
+        difficulty: "medium",
+        duration_minutes: 15,
+        status: "ready",
+        source_mode: "pdf",
+        total_score: null,
+        max_score: 6,
+        elapsed_seconds: null,
+        submitted_at: null,
+        next_review_date: "2026-08-04",
+        created_at: "2026-08-03T09:00:00Z",
+        questions: [
+          {
+            id: "q1",
+            position: 1,
+            question_type: "single",
+            prompt: "原题干",
+            options: [
+              { id: "A", text: "原选项 A" },
+              { id: "B", text: "原选项 B" },
+              { id: "C", text: "原选项 C" },
+              { id: "D", text: "原选项 D" },
+            ],
+            explanation: "原解析",
+            knowledge_point: "原知识点",
+            difficulty: "medium",
+            estimated_seconds: 45,
+            reference_answer: null,
+            grading_rubric: [],
+            source_evidence: [],
+            max_score: 6,
+            correct_answers: ["A"],
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route("**/api/quizzes/quiz-edit/questions/q1/regenerate", async (route) => {
+    regenerateCalled = true;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "q1",
+        position: 1,
+        question_type: "single",
+        prompt: "重出的题干",
+        options: [
+          { id: "A", text: "新选项 A" },
+          { id: "B", text: "新选项 B" },
+          { id: "C", text: "新选项 C" },
+          { id: "D", text: "新选项 D" },
+        ],
+        explanation: "重出后的解析",
+        knowledge_point: "重出后的知识点",
+        difficulty: "medium",
+        estimated_seconds: 45,
+        reference_answer: null,
+        grading_rubric: [],
+        source_evidence: [],
+        max_score: 6,
+        correct_answers: ["C"],
+      }),
+    });
+  });
+
+  await page.goto("/quizzes/quiz-edit/edit");
+  await page.getByRole("button", { name: "重出本题" }).click();
+
+  await expect(page.getByLabel("题干")).toHaveValue("重出的题干");
+  await expect(page.getByLabel("知识点")).toHaveValue("重出后的知识点");
+  await expect(page.getByText("重出的题干")).toBeVisible();
+  expect(regenerateCalled).toBe(true);
+});
+
 test("书籍页选择试卷先看概览，再开始答题进入复习", async ({ page }) => {
   await mockAdminIdentity(page);
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 from typing import Iterable
 
@@ -20,7 +21,7 @@ from app.schemas import QuizGenerateRequest
 from app.services.model_config import get_effective_model_configuration
 from app.services.model_usage import attach_quiz_to_usage, new_usage_context
 from app.services.prompt_config import get_effective_prompt_templates
-from app.services.quiz_provider import get_quiz_provider
+from app.services.quiz_provider import GeneratedQuestion, compact_text, get_quiz_provider
 from app.services.score_allocation import (
     QUIZ_TOTAL_SCORE,
     allocate_question_scores,
@@ -158,18 +159,32 @@ def recover_generation_tasks(db: Session, task_type: str | None = None) -> list[
     return [task.id for task in tasks]
 
 
-def _get_chunks(db: Session, task: QuizGenerationTask) -> list[ContentChunk]:
+def _get_chunks(
+    db: Session, book_id: str, page_start: int | None = None, page_end: int | None = None
+) -> list[ContentChunk]:
     statement = (
         select(ContentChunk)
         .join(PdfDocument, PdfDocument.id == ContentChunk.pdf_id)
-        .where(ContentChunk.book_id == task.book_id, PdfDocument.parse_status == "completed")
+        .where(ContentChunk.book_id == book_id, PdfDocument.parse_status == "completed")
         .order_by(ContentChunk.page_number, ContentChunk.sequence)
     )
-    if task.page_start:
-        statement = statement.where(ContentChunk.page_number >= task.page_start)
-    if task.page_end:
-        statement = statement.where(ContentChunk.page_number <= task.page_end)
+    if page_start:
+        statement = statement.where(ContentChunk.page_number >= page_start)
+    if page_end:
+        statement = statement.where(ContentChunk.page_number <= page_end)
     return list(db.scalars(statement).all())
+
+
+def _chunk_file_names(db: Session, chunks: list[ContentChunk]) -> dict[str, str]:
+    if not chunks:
+        return {}
+    return dict(
+        db.execute(
+            select(PdfDocument.id, PdfDocument.file_name).where(
+                PdfDocument.id.in_({chunk.pdf_id for chunk in chunks})
+            )
+        ).all()
+    )
 
 
 def _recent_chunk_ids(db: Session, book_id: str) -> set[str]:
@@ -181,6 +196,174 @@ def _recent_chunk_ids(db: Session, book_id: str) -> set[str]:
         .limit(40)
     ).all()
     return {chunk_id for row in recent_rows for chunk_id in (row or [])}
+
+
+def _normalize_question_text(value: str | None) -> str:
+    return re.sub(r"\s+", "", value or "").strip()
+
+
+def _question_exclusion_payload(question: Question, role: str = "same_type_reference") -> dict[str, object]:
+    payload: dict[str, object] = {
+        "role": role,
+        "position": question.position,
+        "question_type": question.question_type,
+        "prompt": compact_text(question.prompt, 140),
+        "knowledge_point": compact_text(question.knowledge_point, 60),
+        "source_chunk_ids": list(question.source_chunk_ids or []),
+    }
+    if question.question_type == "short" and question.reference_answer:
+        payload["reference_answer"] = compact_text(question.reference_answer, 120)
+    return payload
+
+
+def _generated_question_exclusion_payload(question: GeneratedQuestion) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "role": "rejected_candidate",
+        "question_type": question.question_type,
+        "prompt": compact_text(question.prompt, 140),
+        "knowledge_point": compact_text(question.knowledge_point, 60),
+        "source_chunk_ids": list(question.source_chunk_ids or []),
+    }
+    if question.question_type == "short" and question.reference_answer:
+        payload["reference_answer"] = compact_text(question.reference_answer, 120)
+    return payload
+
+
+def _build_regeneration_guidance(quiz: Quiz, question: Question, attempt: int) -> str:
+    guidance = (
+        f"本次是《{quiz.book.title}》第 {question.position} 题的"
+        f"{question_type_label(question.question_type)}重出，请确保新题与同类题目在题干、知识点和原文依据上都不同，"
+        "优先换用不同的原文片段和不同的提问角度。"
+    )
+    if attempt > 0:
+        guidance += f" 这是第 {attempt + 1} 次尝试，请进一步拉开差异。"
+    return guidance
+
+
+def _is_duplicate_question(
+    candidate: GeneratedQuestion, siblings: list[Question], recent_candidates: list[GeneratedQuestion]
+) -> bool:
+    candidate_prompt = _normalize_question_text(candidate.prompt)
+    candidate_knowledge = _normalize_question_text(candidate.knowledge_point)
+    candidate_sources = set(candidate.source_chunk_ids or [])
+    for question in siblings:
+        question_sources = set(question.source_chunk_ids or [])
+        if candidate_sources and question_sources and candidate_sources & question_sources:
+            return True
+        if candidate_prompt and candidate_prompt == _normalize_question_text(question.prompt):
+            return True
+        if candidate_knowledge and candidate_knowledge == _normalize_question_text(
+            question.knowledge_point
+        ):
+            return True
+    for previous in recent_candidates:
+        if candidate_prompt and candidate_prompt == _normalize_question_text(previous.prompt):
+            return True
+        if candidate_knowledge and candidate_knowledge == _normalize_question_text(
+            previous.knowledge_point
+        ):
+            return True
+    return False
+
+
+def regenerate_quiz_question(
+    db: Session, quiz: Quiz, question: Question, *, user_id: str | None = None
+) -> Question:
+    same_type_questions = [
+        item
+        for item in quiz.questions
+        if item.id != question.id and item.question_type == question.question_type
+    ]
+    comparison_questions = [question, *same_type_questions]
+    all_chunks = _get_chunks(db, quiz.book_id)
+    if quiz.source_mode == "pdf" and not all_chunks:
+        raise ValueError("没有可用于出题的 PDF 原文")
+
+    blocked_chunk_ids = {
+        chunk_id
+        for sibling in same_type_questions
+        for chunk_id in (sibling.source_chunk_ids or [])
+    }
+    preferred_chunks = [chunk for chunk in all_chunks if chunk.id not in blocked_chunk_ids]
+    chunks = preferred_chunks or all_chunks
+    recent_chunk_ids = set() if preferred_chunks else blocked_chunk_ids
+    file_names = _chunk_file_names(db, chunks)
+    base_generation_number = db.scalar(
+        select(func.count(Quiz.id)).where(Quiz.book_id == quiz.book_id)
+    ) or 0
+    provider = get_quiz_provider(
+        settings,
+        get_effective_model_configuration(db, settings),
+        get_effective_prompt_templates(db),
+        new_usage_context(
+            "question_regeneration",
+            f"《{quiz.book.title}》重出第 {question.position} 题",
+            book_id=quiz.book_id,
+            quiz_id=quiz.id,
+            user_id=user_id,
+            workspace_id=quiz.book.workspace_id,
+        ),
+    )
+    question_exclusions = [
+        _question_exclusion_payload(question, role="current_question"),
+        *(_question_exclusion_payload(item) for item in same_type_questions),
+    ]
+    rejected_candidates: list[GeneratedQuestion] = []
+    question_type_counts = {"single": 0, "multiple": 0, "short": 0}
+    question_type_counts[question.question_type] = 1
+
+    for attempt in range(3):
+        result = provider.generate_questions(
+            chunks=chunks,
+            file_names=file_names,
+            single_count=question_type_counts["single"],
+            multiple_count=question_type_counts["multiple"],
+            short_count=question_type_counts["short"],
+            difficulty=quiz.difficulty,
+            generation_number=base_generation_number + question.position + attempt,
+            recent_chunk_ids=recent_chunk_ids,
+            duration_minutes=quiz.duration_minutes,
+            book_title=quiz.book.title,
+            author=quiz.book.author,
+            source_mode=quiz.source_mode,
+            question_exclusions=[
+                *question_exclusions,
+                *(
+                    _generated_question_exclusion_payload(item)
+                    for item in rejected_candidates
+                ),
+            ],
+            regeneration_guidance=_build_regeneration_guidance(quiz, question, attempt),
+        )
+        if len(result) != 1:
+            raise RuntimeError("重出结果数量不正确")
+        item = result[0]
+        if item.question_type != question.question_type:
+            raise RuntimeError("重出结果题型不正确")
+        if _is_duplicate_question(item, comparison_questions, rejected_candidates):
+            rejected_candidates.append(item)
+            continue
+
+        question.prompt = item.prompt
+        question.options = item.options
+        question.correct_answers = item.correct_answers
+        question.explanation = item.explanation
+        question.knowledge_point = item.knowledge_point
+        question.difficulty = quiz.difficulty
+        question.estimated_seconds = item.estimated_seconds
+        question.reference_answer = item.reference_answer
+        question.grading_rubric = (
+            normalize_rubric_scores(item.grading_rubric, question.max_score)
+            if item.question_type == "short"
+            else item.grading_rubric
+        )
+        question.source_chunk_ids = item.source_chunk_ids
+        question.source_evidence = item.source_evidence
+        db.commit()
+        db.refresh(question)
+        return question
+
+    raise ValueError("重出失败，请先调整同类题目或原文来源后再试")
 
 
 def _question_types(task: QuizGenerationTask) -> Iterable[str]:
@@ -223,18 +406,12 @@ def run_generation_task(task_id: str) -> None:
 
         try:
             book = db.get(Book, task.book_id)
-            chunks = _get_chunks(db, task)
+            chunks = _get_chunks(db, task.book_id, task.page_start, task.page_end)
             if not book:
                 raise RuntimeError("未找到这本书")
             if task.source_mode == "pdf" and not chunks:
                 raise RuntimeError("没有可用于出题的 PDF 原文")
-            file_names = dict(
-                db.execute(
-                    select(PdfDocument.id, PdfDocument.file_name).where(
-                        PdfDocument.id.in_({chunk.pdf_id for chunk in chunks})
-                    )
-                ).all()
-            )
+            file_names = _chunk_file_names(db, chunks)
             generation_number = db.scalar(
                 select(func.count(Quiz.id)).where(Quiz.book_id == task.book_id)
             ) or 0

@@ -499,6 +499,40 @@ def test_http_provider_uses_custom_generation_prompt(monkeypatch):
     assert requests[0]["json"]["messages"][1]["content"].startswith("自定义用户 1/1/1/20")
 
 
+def test_http_provider_renders_regeneration_context(monkeypatch):
+    chunks = make_chunks()
+    payload = generated_payload([chunk.id for chunk in chunks])
+    payload["questions"] = [payload["questions"][0]]
+    requests = install_chat_responses(monkeypatch, [json.dumps(payload, ensure_ascii=False)])
+    provider = HttpQuizAiProvider(make_configuration())
+
+    provider.generate_questions(
+        chunks=chunks,
+        file_names={"pdf-1": "复习材料.pdf"},
+        single_count=1,
+        multiple_count=0,
+        short_count=0,
+        difficulty="medium",
+        generation_number=0,
+        recent_chunk_ids=set(),
+        question_exclusions=[
+            {
+                "role": "current_question",
+                "position": 1,
+                "question_type": "single",
+                "prompt": "原题干",
+                "knowledge_point": "原知识点",
+                "source_chunk_ids": ["chunk-1"],
+            }
+        ],
+        regeneration_guidance="请换一个角度重出题目。",
+    )
+
+    prompt = requests[0]["json"]["messages"][1]["content"]
+    assert "请换一个角度重出题目。" in prompt
+    assert "原题干" in prompt
+
+
 def test_http_provider_grades_short_answer(monkeypatch):
     grade_payload = {
         "score": 16.5,

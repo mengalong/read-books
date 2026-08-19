@@ -12,6 +12,7 @@ from app.models import (
     ModelConfiguration,
     PdfDocument,
     Question,
+    Quiz,
     User,
     WorkspaceMember,
 )
@@ -650,6 +651,163 @@ def test_quiz_generation_switches_between_configured_and_mock_provider(client, m
     assert mock_mode_quiz.status_code == 202
     wait_for_generation(client, mock_mode_quiz.json()["id"])
     assert calls == {"http": 1, "mock": 1}
+
+
+def test_question_regeneration_avoids_same_type_duplicates(client, monkeypatch):
+    book_id, _ = create_source_book(client, "单题重出测试书")
+    with SessionLocal() as db:
+        chunk_ids = list(
+            db.scalars(
+                select(ContentChunk.id)
+                .where(ContentChunk.book_id == book_id)
+                .order_by(ContentChunk.page_number)
+            ).all()
+        )
+        quiz = Quiz(
+            book_id=book_id,
+            title="第 1 套复习试卷",
+            difficulty="medium",
+            duration_minutes=15,
+            status="ready",
+            source_mode="pdf",
+            max_score=100,
+        )
+        db.add(quiz)
+        db.flush()
+
+        def make_single(
+            question_id: str,
+            position: int,
+            prompt: str,
+            chunk_id: str,
+            correct_answer: str,
+        ) -> Question:
+            return Question(
+                id=question_id,
+                quiz_id=quiz.id,
+                position=position,
+                question_type="single",
+                prompt=prompt,
+                options=[
+                    {"id": "A", "text": f"{prompt} A"},
+                    {"id": "B", "text": f"{prompt} B"},
+                    {"id": "C", "text": f"{prompt} C"},
+                    {"id": "D", "text": f"{prompt} D"},
+                ],
+                correct_answers=[correct_answer],
+                explanation=f"{prompt} 解析",
+                knowledge_point=f"{prompt} 知识点",
+                difficulty="medium",
+                estimated_seconds=45,
+                reference_answer=None,
+                grading_rubric=[],
+                source_chunk_ids=[chunk_id],
+                source_evidence=[],
+                max_score=30,
+            )
+
+        def make_multiple(question_id: str, position: int, chunk_id: str) -> Question:
+            return Question(
+                id=question_id,
+                quiz_id=quiz.id,
+                position=position,
+                question_type="multiple",
+                prompt=f"旧的多选题 {position}",
+                options=[
+                    {"id": "A", "text": "A"},
+                    {"id": "B", "text": "B"},
+                    {"id": "C", "text": "C"},
+                    {"id": "D", "text": "D"},
+                ],
+                correct_answers=["A", "B"],
+                explanation="多选题解析",
+                knowledge_point="多选知识点",
+                difficulty="medium",
+                estimated_seconds=90,
+                reference_answer=None,
+                grading_rubric=[],
+                source_chunk_ids=[chunk_id],
+                source_evidence=[],
+                max_score=40,
+            )
+
+        q1 = make_single("q1", 1, "旧的单选题 1", chunk_ids[0], "A")
+        q2 = make_single("q2", 2, "旧的单选题 2", chunk_ids[1], "B")
+        q3 = make_multiple("q3", 3, chunk_ids[2])
+        db.add_all([q1, q2, q3])
+        db.commit()
+        quiz_id = quiz.id
+
+    calls: list[dict] = []
+
+    def fake_generate(self, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return [
+                GeneratedQuestion(
+                    question_type="single",
+                    prompt="旧的单选题 2",
+                    options=[
+                        {"id": "A", "text": "重复 A"},
+                        {"id": "B", "text": "重复 B"},
+                        {"id": "C", "text": "重复 C"},
+                        {"id": "D", "text": "重复 D"},
+                    ],
+                    correct_answers=["B"],
+                    explanation="重复解析",
+                    knowledge_point="旧的单选题 2 知识点",
+                    estimated_seconds=45,
+                    reference_answer=None,
+                    grading_rubric=[],
+                    source_chunk_ids=[chunk_ids[1]],
+                    source_evidence=[],
+                    max_score=30,
+                )
+            ]
+        return [
+            GeneratedQuestion(
+                question_type="single",
+                prompt="重出的单选题",
+                options=[
+                    {"id": "A", "text": "新 A"},
+                    {"id": "B", "text": "新 B"},
+                    {"id": "C", "text": "新 C"},
+                    {"id": "D", "text": "新 D"},
+                ],
+                correct_answers=["C"],
+                explanation="重出后的解析",
+                knowledge_point="重出后的知识点",
+                estimated_seconds=45,
+                reference_answer=None,
+                grading_rubric=[],
+                source_chunk_ids=[chunk_ids[3]],
+                source_evidence=[],
+                max_score=30,
+            )
+        ]
+
+    monkeypatch.setattr(MockQuizAiProvider, "generate_questions", fake_generate)
+
+    response = client.post(f"/api/quizzes/{quiz_id}/questions/{q1.id}/regenerate")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["prompt"] == "重出的单选题"
+    assert body["knowledge_point"] == "重出后的知识点"
+    assert body["correct_answers"] == ["C"]
+    assert len(calls) == 2
+    assert calls[0]["recent_chunk_ids"] == set()
+    assert chunk_ids[1] not in {chunk.id for chunk in calls[0]["chunks"]}
+    assert calls[0]["question_exclusions"][0]["role"] == "current_question"
+    assert calls[0]["question_exclusions"][1]["role"] == "same_type_reference"
+    assert calls[0]["question_exclusions"][1]["position"] == 2
+
+    with SessionLocal() as db:
+        updated = db.get(Question, "q1")
+        untouched_single = db.get(Question, "q2")
+        untouched_multiple = db.get(Question, "q3")
+        assert updated.prompt == "重出的单选题"
+        assert untouched_single.prompt == "旧的单选题 2"
+        assert untouched_multiple.prompt == "旧的多选题 3"
 
 
 def test_book_without_pdf_uses_model_knowledge_mode_with_real_provider(client, monkeypatch):

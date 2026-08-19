@@ -1,9 +1,9 @@
 "use client";
 
-import { CheckCircle2, Save } from "lucide-react";
+import { CheckCircle2, LoaderCircle, RotateCcw, Save } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
-import { ApiError, updateQuizQuestion } from "@/lib/api";
+import { ApiError, regenerateQuizQuestion, updateQuizQuestion } from "@/lib/api";
 import type { Question, QuestionUpdatePayload } from "@/lib/types";
 
 const OPTION_IDS = ["A", "B", "C", "D"] as const;
@@ -40,6 +40,7 @@ function QuestionEditForm({
   onSaved: (question: Question) => void;
 }) {
   const [submitting, setSubmitting] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const [prompt, setPrompt] = useState(question.prompt);
@@ -110,11 +111,39 @@ function QuestionEditForm({
     }
   }
 
+  async function handleRegenerate() {
+    if (submitting || regenerating) return;
+    setRegenerating(true);
+    setError("");
+    setSaved(false);
+    try {
+      const nextQuestion = await regenerateQuizQuestion(quizId, question.id);
+      onSaved(nextQuestion);
+      setSaved(true);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "重出失败");
+    } finally {
+      setRegenerating(false);
+    }
+  }
+
   return (
     <form className="question-edit-form" onSubmit={(event) => void handleSubmit(event)}>
       <div className="question-card-header">
         <span className="question-number">第 {question.position} 题 · {question.knowledge_point}</span>
-        <span className="question-type">{questionTypeLabels[question.question_type]}</span>
+        <div className="question-card-actions">
+          <span className="question-type">{questionTypeLabels[question.question_type]}</span>
+          <button
+            aria-label="重出本题"
+            className="button button-secondary question-edit-trigger"
+            disabled={submitting || regenerating}
+            onClick={() => void handleRegenerate()}
+            title="重出本题"
+            type="button"
+          >
+            {regenerating ? <LoaderCircle className="spin" size={14} /> : <RotateCcw size={14} />}
+          </button>
+        </div>
       </div>
       {error && <div className="toast-error">{error}</div>}
       {saved && <div className="question-edit-saved"><CheckCircle2 size={14} />已保存</div>}

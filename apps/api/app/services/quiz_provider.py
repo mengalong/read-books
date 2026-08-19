@@ -65,6 +65,8 @@ class QuizAiProvider(Protocol):
         book_title: str = "",
         author: str = "",
         source_mode: str = "pdf",
+        question_exclusions: list[dict[str, Any]] | None = None,
+        regeneration_guidance: str = "",
     ) -> list[GeneratedQuestion]: ...
 
     def grade_short_answer(self, question: Question, answer: str) -> GradeResult: ...
@@ -159,6 +161,8 @@ class MockQuizAiProvider:
         book_title: str = "",
         author: str = "",
         source_mode: str = "pdf",
+        question_exclusions: list[dict[str, Any]] | None = None,
+        regeneration_guidance: str = "",
     ) -> list[GeneratedQuestion]:
         if not chunks:
             raise RuntimeError("没有 PDF 时需要启用已配置的大模型，当前模拟接口不支持书籍知识出题")
@@ -576,6 +580,8 @@ class HttpQuizAiProvider:
         book_title: str,
         author: str,
         source_mode: str,
+        question_exclusions: list[dict[str, Any]] | None = None,
+        regeneration_guidance: str = "",
     ) -> dict[str, str]:
         source_material = [
             {
@@ -599,6 +605,10 @@ class HttpQuizAiProvider:
             "short_count": str(short_count),
             "duration_minutes": str(duration_minutes),
             "source_material": json.dumps(source_material, ensure_ascii=False),
+            "question_exclusions": json.dumps(
+                question_exclusions or [], ensure_ascii=False, indent=2
+            ),
+            "regeneration_guidance": regeneration_guidance.strip(),
         }
 
     def _normalize_rubric(
@@ -816,6 +826,8 @@ class HttpQuizAiProvider:
         book_title: str = "",
         author: str = "",
         source_mode: str = "pdf",
+        question_exclusions: list[dict[str, Any]] | None = None,
+        regeneration_guidance: str = "",
     ) -> list[GeneratedQuestion]:
         total = single_count + multiple_count + short_count
         candidates = self._candidate_chunks(chunks, total, generation_number, recent_chunk_ids)
@@ -831,6 +843,8 @@ class HttpQuizAiProvider:
             book_title,
             author,
             source_mode,
+            question_exclusions,
+            regeneration_guidance,
         )
         messages = [
             {
