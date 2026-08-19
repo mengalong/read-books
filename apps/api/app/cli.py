@@ -8,7 +8,13 @@ from sqlalchemy import select
 from app.config import Settings
 from app.database import Base, SessionLocal, engine
 from app.models import User
-from app.services.auth import ensure_initial_admin
+from app.services.auth import (
+    ensure_initial_admin,
+    hash_password,
+    normalize_username,
+    revoke_user_sessions,
+    validate_password,
+)
 
 
 def init_admin(args: argparse.Namespace) -> None:
@@ -16,19 +22,28 @@ def init_admin(args: argparse.Namespace) -> None:
     confirmation = args.password or getpass.getpass("请再次输入临时密码：")
     if password != confirmation:
         raise SystemExit("两次输入的密码不一致")
+    username = normalize_username(args.username)
+    validate_password(password, username)
 
     Base.metadata.create_all(bind=engine)
     settings = Settings(
-        initial_admin_username=args.username,
+        initial_admin_username=username,
         initial_admin_password=password,
         initial_admin_display_name=args.display_name,
     )
     with SessionLocal() as db:
-        existing = db.scalar(select(User).where(User.username == args.username.lower()))
+        existing = db.scalar(select(User).where(User.username == username))
+        if existing is not None and existing.role == "admin":
+            existing.password_hash = hash_password(password)
+            existing.must_change_password = True
+            existing.status = "active"
+            existing.failed_login_count = 0
+            existing.locked_until = None
+            revoke_user_sessions(db, existing.id)
         user = ensure_initial_admin(db, settings)
         if user is None:
             raise SystemExit("管理员初始化失败")
-        action = "已确认" if existing else "已创建"
+        action = "已重置" if existing else "已创建"
         print(f"{action}初始管理员：{user.username}（首次登录需要修改密码）")
 
 

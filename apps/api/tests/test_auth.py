@@ -1,8 +1,11 @@
+from argparse import Namespace
+from datetime import timedelta
+
 from sqlalchemy import select
 
 from app.database import SessionLocal
 from app.models import AuditLog, Book, ContentChunk, PdfDocument, Quiz, User
-from app.services.auth import create_user_with_workspace, get_personal_workspace
+from app.services.auth import create_user_with_workspace, get_personal_workspace, utc_now
 
 
 ADMIN_USERNAME = "admin-auth"
@@ -86,6 +89,53 @@ def test_failed_login_does_not_create_session(client):
     )
     assert response.status_code == 401
     assert client.get("/api/auth/me").status_code == 401
+
+
+def test_init_admin_resets_existing_admin_password_and_unlocks_account(client):
+    from app.cli import init_admin
+
+    username = "bootstrap-admin"
+    old_password = "OldAdmin1!"
+    new_password = "NewAdmin2!"
+    with SessionLocal() as db:
+        existing = db.scalar(select(User).where(User.username == username))
+        if existing is None:
+            existing, _ = create_user_with_workspace(
+                db,
+                username=username,
+                display_name="初始化管理员",
+                password=old_password,
+                role="admin",
+                must_change_password=False,
+            )
+        existing.failed_login_count = 3
+        existing.locked_until = utc_now() + timedelta(minutes=10)
+        db.commit()
+
+    init_admin(
+        Namespace(
+            username=username,
+            display_name="初始化管理员",
+            password=new_password,
+        )
+    )
+
+    old_login = client.post(
+        "/api/auth/login",
+        json={"username": username, "password": old_password},
+    )
+    assert old_login.status_code == 401
+    login = client.post(
+        "/api/auth/login",
+        json={"username": username, "password": new_password},
+    )
+    assert login.status_code == 200
+    assert login.json()["must_change_password"] is True
+    with SessionLocal() as db:
+        admin = db.scalar(select(User).where(User.username == username))
+        assert admin is not None
+        assert admin.failed_login_count == 0
+        assert admin.locked_until is None
 
 
 def test_workspace_data_is_private_for_users_and_visible_to_admin(client):
