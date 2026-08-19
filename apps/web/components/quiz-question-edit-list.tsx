@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, LoaderCircle, RotateCcw, Save } from "lucide-react";
+import { AlertTriangle, CheckCircle2, LoaderCircle, RotateCcw, Save } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { ApiError, regenerateQuizQuestion, updateQuizQuestion } from "@/lib/api";
@@ -41,6 +41,7 @@ function QuestionEditForm({
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [confirmingRegeneration, setConfirmingRegeneration] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const [prompt, setPrompt] = useState(question.prompt);
@@ -111,8 +112,19 @@ function QuestionEditForm({
     }
   }
 
-  async function handleRegenerate() {
+  function openRegenerationConfirm() {
     if (submitting || regenerating) return;
+    setConfirmingRegeneration(true);
+  }
+
+  function closeRegenerationConfirm() {
+    if (regenerating) return;
+    setConfirmingRegeneration(false);
+  }
+
+  async function confirmRegenerate() {
+    if (submitting || regenerating) return;
+    setConfirmingRegeneration(false);
     setRegenerating(true);
     setError("");
     setSaved(false);
@@ -134,14 +146,14 @@ function QuestionEditForm({
         <div className="question-card-actions">
           <span className="question-type">{questionTypeLabels[question.question_type]}</span>
           <button
-            aria-label="重出本题"
             className="button button-secondary question-edit-trigger"
             disabled={submitting || regenerating}
-            onClick={() => void handleRegenerate()}
+            onClick={openRegenerationConfirm}
             title="重出本题"
             type="button"
           >
             {regenerating ? <LoaderCircle className="spin" size={14} /> : <RotateCcw size={14} />}
+            <span>重出本题</span>
           </button>
         </div>
       </div>
@@ -249,6 +261,28 @@ function QuestionEditForm({
           {submitting ? "正在保存……" : "保存本题"}
         </button>
       </div>
+      {confirmingRegeneration && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target) closeRegenerationConfirm();
+          }}
+          role="presentation"
+        >
+          <section aria-labelledby={`regenerate-${question.id}-title`} aria-modal="true" className="modal-panel confirm-modal" role="dialog">
+            <div className="confirm-icon"><AlertTriangle size={22} /></div>
+            <h2 id={`regenerate-${question.id}-title`}>确认重新出题</h2>
+            <p>系统会重新生成这道题的题干、选项、标准答案和解析，当前手工修改会被覆盖。确认继续吗？</p>
+            <div className="modal-actions">
+              <button className="button button-secondary" disabled={regenerating} onClick={closeRegenerationConfirm} type="button">取消</button>
+              <button className="button button-danger" disabled={regenerating} onClick={() => void confirmRegenerate()} type="button">
+                {regenerating ? <LoaderCircle className="spin" size={15} /> : <RotateCcw size={15} />}
+                {regenerating ? "正在重出……" : "确认重新出题"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </form>
   );
 }

@@ -6,7 +6,7 @@
 - SSH：`root@47.115.200.179`
 - 项目目录：`/home/mengalong/website/read-books`
 - Nginx 目录：`/home/mengalong/website/nginx`
-- 域名：`http://books.mengalong.cn`
+- 域名：`https://books.mengalong.cn`
 - Next.js：宿主机 `3000`
 - FastAPI：宿主机 `8001`
 
@@ -27,7 +27,7 @@ scripts/deploy.sh
 3. 首次部署创建生产 `.env`，自动生成管理员临时密码。
 4. 创建或更新 Conda 环境（Python 3.12、Node.js 20），通过 Conda 安装兼容 CentOS 7 的 `greenlet 3.1.1`，使用 PyMuPDF 1.25 轮子，并通过 `npm ci` 安装前端锁定依赖。
 5. 构建 Next.js、执行 Alembic 迁移并启动两个 systemd 服务。
-6. 安装独立 Nginx 虚拟主机，校验配置后热重载 Nginx。
+6. 安装独立 Nginx 虚拟主机，若缺少证书会自动通过 Let's Encrypt 申请，随后启用 80 -> 443 跳转并热重载 Nginx。
 7. 输出服务状态；首次部署额外输出一次管理员临时密码。
 
 首次管理员账号为 `admin`，登录后必须立即修改临时密码。初始化完成后，脚本会从 `.env` 清除初始化用户名和密码，数据库中的 Argon2 哈希不受影响。
@@ -71,12 +71,12 @@ scripts/server.sh deploy
 APP_ENV=production
 API_PORT=8001
 WEB_PORT=3000
-WEB_ORIGIN=http://books.mengalong.cn
+WEB_ORIGIN=https://books.mengalong.cn
 SEED_DEMO_DATA=false
-SESSION_COOKIE_SECURE=false
+SESSION_COOKIE_SECURE=true
 WECHAT_LOGIN_ENABLED=false
 WECHAT_LOGIN_REQUIRED=false
-WECHAT_CALLBACK_BASE_URL=
+WECHAT_CALLBACK_BASE_URL=https://books.mengalong.cn
 OCR_ENABLED=false
 NEXT_PUBLIC_API_BASE_URL=/api
 ```
@@ -91,18 +91,12 @@ NEXT_PUBLIC_API_BASE_URL=/api
 /home/mengalong/website/nginx/conf/nginx/conf.d/books.mengalong.cn.conf
 ```
 
-`/api/` 转发到 FastAPI，其余请求转发到 Next.js。`client_max_body_size 0` 表示 Nginx 不限制 PDF 上传大小，同时关闭请求缓冲并将上传流式传给后端。
+`/api/` 转发到 FastAPI，其余请求转发到 Next.js。HTTP 会自动跳转到 HTTPS，`client_max_body_size 0` 表示 Nginx 不限制 PDF 上传大小，同时关闭请求缓冲并将上传流式传给后端。证书文件默认放在：
 
-## HTTPS 待办
+```text
+/home/mengalong/website/nginx/letsencrypt/live/books.mengalong.cn/
+```
 
-当前服务器的 Nginx 容器只映射 `80` 端口，尚未挂载证书目录，因此本次先使用 HTTP。正式提供公网账号前必须完成：
+## HTTPS
 
-1. 为 `books.mengalong.cn` 申请 TLS 证书。
-2. 给 Nginx 容器增加 `443:443` 映射并挂载证书目录。
-3. 增加 HTTP 到 HTTPS 跳转。
-4. 将 `.env` 中 `WEB_ORIGIN` 改为 `https://books.mengalong.cn`。
-5. 将 `SESSION_COOKIE_SECURE` 改为 `true`，然后重启服务。
-
-6. 在“系统管理 / 微信登录”保存微信开放平台 AppID、AppSecret 和 `https://books.mengalong.cn`，确认微信开放平台授权回调域已经配置为 `books.mengalong.cn` 后再开启微信登录。
-
-在 HTTPS 完成前，不应通过公网传输正式账号密码或模型 API Key，也不能启用微信登录。后端会拒绝在生产环境保存 HTTP 微信回调地址。
+部署脚本会在首次发现缺少证书时自动通过 Let's Encrypt 申请证书，并重建 Nginx 容器为 `80:80` 和 `443:443`。后续如果需要手动续期，可以在远端复用同一套 `certbot` 流程。微信正式联调时，系统管理里的回调地址应填写 `https://books.mengalong.cn`，并确保微信开放平台授权回调域已经配置为 `books.mengalong.cn`。

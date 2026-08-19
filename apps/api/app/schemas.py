@@ -12,6 +12,7 @@ class BookCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     author: str = Field(default="", max_length=120)
     description: str = Field(default="", max_length=2000)
+    resource_type: Literal["book", "movie", "tv_series"] = "book"
     cover_color: str = "#2F6B5F"
     language: str = "中文"
     reading_status: Literal["reading", "finished", "reviewing"] = "finished"
@@ -22,6 +23,7 @@ class BookUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     author: str | None = Field(default=None, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
+    resource_type: Literal["book", "movie", "tv_series"] | None = None
     cover_color: str | None = None
     language: str | None = None
     reading_status: Literal["reading", "finished", "reviewing"] | None = None
@@ -43,6 +45,7 @@ class BookSummary(ApiModel):
     workspace_id: str | None = None
     owner_user_id: str | None = None
     owner_display_name: str | None = None
+    resource_type: Literal["book", "movie", "tv_series"] = "book"
     title: str
     author: str
     description: str
@@ -63,6 +66,9 @@ class BookSummary(ApiModel):
     active_generation_completed_questions: int = 0
     active_generation_total_questions: int = 0
     active_generation_phase: str | None = None
+    model_knowledge_supported: bool | None = None
+    model_knowledge_message: str | None = None
+    model_knowledge_checked_at: datetime | None = None
 
 
 class PdfResponse(ApiModel):

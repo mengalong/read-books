@@ -22,6 +22,7 @@ from app.services.model_config import get_effective_model_configuration
 from app.services.model_usage import attach_quiz_to_usage, new_usage_context
 from app.services.prompt_config import get_effective_prompt_templates
 from app.services.quiz_provider import GeneratedQuestion, compact_text, get_quiz_provider
+from app.services.resource_types import resource_type_label
 from app.services.score_allocation import (
     QUIZ_TOTAL_SCORE,
     allocate_question_scores,
@@ -32,6 +33,10 @@ settings = get_settings()
 
 
 def resolve_source_mode(db: Session, book_id: str) -> str:
+    book = db.get(Book, book_id)
+    if not book:
+        raise ValueError("未找到这本书")
+
     completed_chunk = db.scalar(
         select(ContentChunk.id)
         .join(PdfDocument, PdfDocument.id == ContentChunk.pdf_id)
@@ -47,7 +52,14 @@ def resolve_source_mode(db: Session, book_id: str) -> str:
 
     configuration = get_effective_model_configuration(db, settings)
     if configuration.provider_mode == "mock":
-        raise ValueError("没有 PDF 时需要启用已配置的大模型，当前模拟接口不支持书籍知识出题")
+        label = resource_type_label(book.resource_type)
+        raise ValueError(f"没有 PDF 时需要启用已配置的大模型，当前模拟接口不支持{label}知识出题")
+    if book.resource_type != "book" and book.model_knowledge_supported is not True:
+        label = resource_type_label(book.resource_type)
+        raise ValueError(f"该{label}尚未通过模型真实内容测试，不能依赖模型知识出题")
+    if book.resource_type == "book" and book.model_knowledge_supported is False:
+        label = resource_type_label(book.resource_type)
+        raise ValueError(f"该{label}尚未通过模型真实内容测试，不能依赖模型知识出题")
     return "model_knowledge"
 
 
@@ -325,6 +337,7 @@ def regenerate_quiz_question(
             duration_minutes=quiz.duration_minutes,
             book_title=quiz.book.title,
             author=quiz.book.author,
+            resource_type=quiz.book.resource_type,
             source_mode=quiz.source_mode,
             question_exclusions=[
                 *question_exclusions,
@@ -400,7 +413,7 @@ def run_generation_task(task_id: str) -> None:
             return
         task.status = "processing"
         task.current_phase = (
-            "正在准备原文片段" if task.source_mode == "pdf" else "正在准备书籍信息"
+            "正在准备原文片段" if task.source_mode == "pdf" else "正在准备资源信息"
         )
         db.commit()
 
@@ -448,6 +461,7 @@ def run_generation_task(task_id: str) -> None:
                     duration_minutes=task.duration_minutes,
                     book_title=book.title,
                     author=book.author,
+                    resource_type=book.resource_type,
                     source_mode=task.source_mode,
                 )
                 if len(result) != 1:

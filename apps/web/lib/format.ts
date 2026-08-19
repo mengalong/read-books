@@ -1,3 +1,5 @@
+import type { ResourceType } from "@/lib/types";
+
 const BEIJING_TIME_ZONE = "Asia/Shanghai";
 
 function parseServerDate(value: string) {
@@ -87,4 +89,31 @@ export function statusLabel(status: string) {
     user: "登录用户",
   };
   return labels[status] || status;
+}
+
+export function resourceTypeLabel(value: ResourceType | string | null | undefined) {
+  const labels: Record<ResourceType, string> = {
+    book: "书籍",
+    movie: "电影",
+    tv_series: "电视剧",
+  };
+  return labels[(value as ResourceType) || "book"] || "书籍";
+}
+
+export function resourceTypeShortLabel(value: ResourceType | string | null | undefined) {
+  const labels: Record<ResourceType, string> = {
+    book: "BOOK",
+    movie: "MOVIE",
+    tv_series: "TV",
+  };
+  return labels[(value as ResourceType) || "book"] || "BOOK";
+}
+
+export function resourceAuthorLabel(value: ResourceType | string | null | undefined) {
+  const labels: Record<ResourceType, string> = {
+    book: "作者",
+    movie: "导演",
+    tv_series: "主创",
+  };
+  return labels[(value as ResourceType) || "book"] || "作者";
 }

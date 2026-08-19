@@ -10,14 +10,14 @@ import { formatDateTime } from "@/lib/format";
 import type { CurrentUser } from "@/lib/types";
 
 const navigation = [
-  { href: "/", label: "我的书架", icon: LibraryBig },
-  { href: "/books/new", label: "添加书籍", icon: Plus },
+  { href: "/", label: "我的内容库", icon: LibraryBig },
+  { href: "/books/new", label: "添加资源", icon: Plus },
   { href: "/reviews", label: "复习记录", icon: History },
   { href: "/exam-management", label: "考试管理", icon: ClipboardCheck },
 ];
 
 const systemNavigation = [
-  { href: "/settings/books", label: "书籍管理", icon: BookMarked },
+  { href: "/settings/books", label: "资源管理", icon: BookMarked },
   { href: "/settings/model", label: "模型设置", icon: Settings2 },
   { href: "/settings/wechat", label: "微信登录", icon: ScanLine },
   { href: "/settings/prompts", label: "提示词管理", icon: FileCode2 },
@@ -117,7 +117,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span className="brand-mark">卷</span>
           <span>
             <span className="brand-name">回卷</span>
-            <span className="brand-subtitle">把读过的书再想起来</span>
+            <span className="brand-subtitle">把读过看过的内容再想起来</span>
           </span>
         </Link>
         <nav className="side-nav" aria-label="主导航">

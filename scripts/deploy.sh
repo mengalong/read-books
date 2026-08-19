@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REMOTE_HOST="${REMOTE_HOST:-root@47.115.200.179}"
 REMOTE_DIR="${REMOTE_DIR:-/home/mengalong/website/read-books}"
 REMOTE_NGINX_DIR="${REMOTE_NGINX_DIR:-/home/mengalong/website/nginx}"
+TLS_DOMAIN="${TLS_DOMAIN:-books.mengalong.cn}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 
 if ! git -C "$ROOT_DIR" diff --quiet || ! git -C "$ROOT_DIR" diff --cached --quiet; then
@@ -34,15 +35,22 @@ rsync -az \
   "$SYNC_DIR/" "$REMOTE_HOST:$REMOTE_DIR/"
 
 ssh "$REMOTE_HOST" bash -s -- \
-  "$REMOTE_DIR" "$REMOTE_NGINX_DIR" <<'REMOTE_SCRIPT'
+  "$REMOTE_DIR" "$REMOTE_NGINX_DIR" "$TLS_DOMAIN" <<'REMOTE_SCRIPT'
 set -Eeuo pipefail
 
 remote_dir="$1"
 nginx_dir="$2"
+tls_domain="$3"
 created_environment=false
 initial_admin_password=""
+tls_live_dir="$nginx_dir/letsencrypt/live/$tls_domain"
+tls_fullchain="$tls_live_dir/fullchain.pem"
+tls_privkey="$tls_live_dir/privkey.pem"
+certbot_name="certbot-${tls_domain//./-}"
 
 cd "$remote_dir"
+
+mkdir -p "$nginx_dir/letsencrypt" "$nginx_dir/html" "$nginx_dir/log"
 
 if [[ ! -f .env ]]; then
   initial_admin_password="ReadBooks-$(openssl rand -hex 12)A1"
@@ -57,6 +65,21 @@ else
     created_environment=true
     initial_admin_password="$saved_admin_password"
   fi
+fi
+
+if [[ ! -f "$tls_fullchain" || ! -f "$tls_privkey" ]]; then
+  printf "检测到缺少 %s 的 TLS 证书，先通过 Let's Encrypt 申请。\n" "$tls_domain"
+  docker rm -f nginx >/dev/null 2>&1 || true
+  docker run --rm \
+    --name "$certbot_name" \
+    -p 80:80 \
+    -v "$nginx_dir/letsencrypt:/etc/letsencrypt" \
+    certbot/certbot certonly \
+    --standalone \
+    --agree-tos \
+    --non-interactive \
+    --register-unsafely-without-email \
+    -d "$tls_domain"
 fi
 
 install -m 0644 deploy/systemd/read-books-api.service /etc/systemd/system/read-books-api.service
@@ -80,6 +103,18 @@ if [[ "$created_environment" == true ]]; then
   done
 fi
 
+docker rm -f nginx >/dev/null 2>&1 || true
+docker run -d \
+  --name nginx \
+  --restart unless-stopped \
+  -p 80:80 \
+  -p 443:443 \
+  -v "$nginx_dir/conf/nginx:/etc/nginx" \
+  -v "$nginx_dir/html:/usr/share/nginx/html" \
+  -v "$nginx_dir/log:/var/log/nginx" \
+  -v "$nginx_dir/letsencrypt:/etc/letsencrypt:ro" \
+  --add-host=host.docker.internal:host-gateway \
+  nginx
 docker exec nginx nginx -t
 docker exec nginx nginx -s reload
 
@@ -90,4 +125,4 @@ if [[ "$created_environment" == true ]]; then
 fi
 REMOTE_SCRIPT
 
-printf '部署完成：http://books.mengalong.cn\n'
+printf '部署完成：https://books.mengalong.cn\n'

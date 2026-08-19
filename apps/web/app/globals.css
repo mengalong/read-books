@@ -2979,6 +2979,7 @@ p {
 .question-edit-trigger {
   min-height: 30px;
   padding: 0 10px;
+  white-space: nowrap;
 }
 
 .quiz-question-edit-panel {

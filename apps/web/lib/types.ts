@@ -1,3 +1,4 @@
+export type ResourceType = "book" | "movie" | "tv_series";
 export type ReadingStatus = "reading" | "finished" | "reviewing";
 export type ShelfStatus = "active" | "unlisted";
 
@@ -225,6 +226,7 @@ export type BookSummary = {
   workspace_id: string | null;
   owner_user_id: string | null;
   owner_display_name: string | null;
+  resource_type: ResourceType;
   title: string;
   author: string;
   description: string;
@@ -245,6 +247,9 @@ export type BookSummary = {
   active_generation_total_questions: number;
   active_generation_phase: string | null;
   stats: BookStats;
+  model_knowledge_supported: boolean | null;
+  model_knowledge_message: string | null;
+  model_knowledge_checked_at: string | null;
 };
 
 export type PdfDocument = {

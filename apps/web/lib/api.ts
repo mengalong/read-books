@@ -16,6 +16,7 @@ import type {
   QuizResult,
   QuestionUpdatePayload,
   ReadingStatus,
+  ResourceType,
   ShelfStatus,
   ReviewTask,
   ReviewTaskSummary,
@@ -160,6 +161,7 @@ export function deleteBook(bookId: string) {
 }
 
 export function createBook(payload: {
+  resource_type: ResourceType;
   title: string;
   author: string;
   description: string;
@@ -174,6 +176,7 @@ export function createBook(payload: {
 export function updateBook(
   bookId: string,
   payload: {
+    resource_type: ResourceType;
     title: string;
     author: string;
     description: string;

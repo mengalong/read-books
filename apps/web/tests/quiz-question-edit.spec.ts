@@ -182,6 +182,8 @@ test("试卷编辑页支持单题重出并刷新当前题目", async ({ page }) 
 
   await page.goto("/quizzes/quiz-edit/edit");
   await page.getByRole("button", { name: "重出本题" }).click();
+  await expect(page.getByRole("heading", { name: "确认重新出题" })).toBeVisible();
+  await page.getByRole("button", { name: "确认重新出题" }).click();
 
   await expect(page.getByLabel("题干")).toHaveValue("重出的题干");
   await expect(page.getByLabel("知识点")).toHaveValue("重出后的知识点");

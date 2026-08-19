@@ -2,14 +2,21 @@ import { AlertCircle, ChevronRight, FileText, FileX2, UserRound } from "lucide-r
 import Link from "next/link";
 
 import type { BookSummary, SourceEvidence, SourceMode } from "@/lib/types";
-import { formatDate, formatFileSize, statusLabel } from "@/lib/format";
+import {
+  formatDate,
+  formatFileSize,
+  resourceAuthorLabel,
+  resourceTypeLabel,
+  resourceTypeShortLabel,
+  statusLabel,
+} from "@/lib/format";
 
-export function BookCover({ book, large = false }: { book: Pick<BookSummary, "title" | "author" | "cover_color">; large?: boolean }) {
+export function BookCover({ book, large = false }: { book: Pick<BookSummary, "title" | "author" | "cover_color"> & { resource_type?: BookSummary["resource_type"] }; large?: boolean }) {
   return (
     <div className={`book-cover${large ? " detail-cover" : ""}`} style={{ background: book.cover_color }}>
-      <span className="book-cover-kicker">READ / REVIEW</span>
+      <span className="book-cover-kicker">{resourceTypeShortLabel(book.resource_type)} / REVIEW</span>
       <span className="book-cover-title">{book.title.slice(0, 8)}</span>
-      <span className="book-cover-author">{book.author || "未署名"}</span>
+      <span className="book-cover-author">{book.author || `${resourceAuthorLabel(book.resource_type)}未署名`}</span>
     </div>
   );
 }
@@ -27,13 +34,14 @@ export function BookCard({ book, href }: { book: BookSummary; href?: string }) {
         <BookCover book={book} />
         <div className="book-card-heading">
           <h3>{book.title}</h3>
-          <p className="book-author">{book.author || "作者未填写"}</p>
+          <p className="book-author">{book.author || `${resourceAuthorLabel(book.resource_type)}未填写`}</p>
         </div>
         <StatusBadge status={book.reading_status} />
       </div>
       <p className="book-description">{book.description || "还没有写下这本书的简介。"}</p>
       <div className="tag-row">
         {book.shelf_status === "unlisted" && <StatusBadge status="unlisted" />}
+        <span className="tag">{resourceTypeLabel(book.resource_type)}</span>
         <span className={`tag pdf-status-tag ${hasPdf ? "has-pdf" : "no-pdf"}`}>
           {hasPdf ? <FileText size={12} /> : <FileX2 size={12} />}
           {hasPdf ? "已上传 PDF" : "未上传 PDF"}
@@ -59,7 +67,7 @@ export function SourceModeNotice({ sourceMode, compact = false }: { sourceMode: 
     <AlertCircle size={17} />
     <div>
       <strong>本次使用模型知识兜底出题</strong>
-      <span>未上传 PDF，题目基于书名、作者和模型内化知识生成，不提供可靠的 PDF 页码或逐句原文依据；不同版本和模型记忆可能造成偏差，请将结果作为复习线索。</span>
+      <span>未上传 PDF，题目基于资源名称、类型和模型内化知识生成，不提供可靠的 PDF 页码、章节、集数或逐句原文依据；不同版本和模型记忆可能造成偏差，请将结果作为复习线索。</span>
     </div>
   </div>;
 }

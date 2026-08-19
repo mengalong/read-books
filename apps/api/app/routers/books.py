@@ -21,6 +21,7 @@ from app.models import (
     User,
 )
 from app.services.auth import AuthIdentity, add_audit_log, get_personal_workspace
+from app.services.resource_verification import refresh_book_model_knowledge
 from app.schemas import (
     AdminBookCopyRequest,
     AdminBookCopyResponse,
@@ -133,6 +134,9 @@ def create_book(
     db.add(book)
     db.commit()
     db.refresh(book)
+    refresh_book_model_knowledge(db, book, user_id=identity.user.id, settings=settings)
+    db.commit()
+    db.refresh(book)
     return to_book_detail(db, book)
 
 
@@ -153,8 +157,11 @@ def update_book(
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> BookDetail:
     book = get_book_or_404(db, book_id, identity, for_write=True)
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+    for key, value in changes.items():
         setattr(book, key, value)
+    if any(field in changes for field in ("title", "author", "description", "resource_type")):
+        refresh_book_model_knowledge(db, book, user_id=identity.user.id, settings=settings)
     db.commit()
     db.refresh(book)
     return to_book_detail(db, book)
@@ -524,6 +531,7 @@ def copy_admin_book(
     copied_chunk_count = 0
     try:
         copied_book = Book(
+            resource_type=source.resource_type,
             title=source.title,
             author=source.author,
             description=source.description,
@@ -532,6 +540,9 @@ def copy_admin_book(
             reading_status=source.reading_status,
             shelf_status="active",
             tags=list(source.tags or []),
+            model_knowledge_supported=source.model_knowledge_supported,
+            model_knowledge_message=source.model_knowledge_message,
+            model_knowledge_checked_at=source.model_knowledge_checked_at,
             workspace_id=target_workspace.id,
             created_by_user_id=target_user.id,
             pre_generation_enabled=False,

@@ -184,6 +184,7 @@ class Book(TimestampMixin, Base):
     __tablename__ = "books"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    resource_type: Mapped[str] = mapped_column(String(20), default="book", index=True)
     title: Mapped[str] = mapped_column(String(200), index=True)
     author: Mapped[str] = mapped_column(String(120), default="")
     description: Mapped[str] = mapped_column(Text, default="")
@@ -192,6 +193,11 @@ class Book(TimestampMixin, Base):
     reading_status: Mapped[str] = mapped_column(String(30), default="finished", index=True)
     shelf_status: Mapped[str] = mapped_column(String(20), default="active", index=True)
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    model_knowledge_supported: Mapped[bool | None] = mapped_column(Boolean, nullable=True, index=True)
+    model_knowledge_message: Mapped[str | None] = mapped_column(Text)
+    model_knowledge_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     workspace_id: Mapped[str | None] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
     )

@@ -23,6 +23,7 @@ from app.services.prompt_config import (
     PromptTemplateDefinition,
     render_prompt,
 )
+from app.services.resource_types import resource_type_label, resource_type_scope_hint
 
 
 @dataclass
@@ -42,6 +43,13 @@ class GeneratedQuestion:
 
 
 @dataclass
+class ResourceKnowledgeCheckResult:
+    supported: bool | None
+    message: str
+    raw_response: str | None = None
+
+
+@dataclass
 class GradeResult:
     score: float
     is_correct: bool
@@ -51,6 +59,14 @@ class GradeResult:
 
 
 class QuizAiProvider(Protocol):
+    def verify_resource_content(
+        self,
+        resource_type: str,
+        title: str,
+        author: str,
+        description: str,
+    ) -> ResourceKnowledgeCheckResult: ...
+
     def generate_questions(
         self,
         chunks: list[ContentChunk],
@@ -64,6 +80,7 @@ class QuizAiProvider(Protocol):
         duration_minutes: int = 15,
         book_title: str = "",
         author: str = "",
+        resource_type: str = "book",
         source_mode: str = "pdf",
         question_exclusions: list[dict[str, Any]] | None = None,
         regeneration_guidance: str = "",
@@ -147,6 +164,19 @@ def rubric_from_text(text: str, max_score: float) -> list[dict[str, Any]]:
 
 
 class MockQuizAiProvider:
+    def verify_resource_content(
+        self,
+        resource_type: str,
+        title: str,
+        author: str,
+        description: str,
+    ) -> ResourceKnowledgeCheckResult:
+        return ResourceKnowledgeCheckResult(
+            supported=None,
+            message="模拟模式无法验证资源真实性，请在真实模型环境中重新检查。",
+            raw_response=None,
+        )
+
     def generate_questions(
         self,
         chunks: list[ContentChunk],
@@ -160,12 +190,13 @@ class MockQuizAiProvider:
         duration_minutes: int = 15,
         book_title: str = "",
         author: str = "",
+        resource_type: str = "book",
         source_mode: str = "pdf",
         question_exclusions: list[dict[str, Any]] | None = None,
         regeneration_guidance: str = "",
     ) -> list[GeneratedQuestion]:
         if not chunks:
-            raise RuntimeError("没有 PDF 时需要启用已配置的大模型，当前模拟接口不支持书籍知识出题")
+            raise RuntimeError("没有 PDF 时需要启用已配置的大模型，当前模拟接口不支持资源知识出题")
 
         fresh = [chunk for chunk in chunks if chunk.id not in recent_chunk_ids]
         repeated = [chunk for chunk in chunks if chunk.id in recent_chunk_ids]
@@ -395,6 +426,52 @@ class HttpQuizAiProvider:
     }
     DEFAULT_EXPLANATION = "答案与评分依据均来自所提供的 PDF 原文片段。"
 
+    def verify_resource_content(
+        self,
+        resource_type: str,
+        title: str,
+        author: str,
+        description: str,
+    ) -> ResourceKnowledgeCheckResult:
+        label = resource_type_label(resource_type)
+        content = self._chat_completion(
+            [
+                {
+                    "role": "system",
+                    "content": "你是资源真实性审查器。只返回 JSON，不要输出 Markdown、列表或额外解释。",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"请判断你是否能在不编造的前提下，围绕下面这个{label}准确出题。\n"
+                        f"资源类型：{label}\n"
+                        f"资源名称：{title or '未提供'}\n"
+                        f"主创/作者：{author or '未提供'}\n"
+                        f"简介：{description or '未提供'}\n\n"
+                        "如果你对该资源没有稳定、可靠的真实内容记忆，或可能混淆版本、改编、同名作品，请返回 supported=false。\n"
+                        "不要假装查阅了外部资料，也不要给出题目。\n"
+                        "只返回 JSON：{\"supported\": true/false, \"confidence\": \"high|medium|low\", \"reason\": \"简短说明\"}"
+                    ),
+                },
+            ],
+            phase="resource_verification",
+        )
+        payload = parse_json_object(content)
+        supported = payload.get("supported")
+        confidence = payload.get("confidence")
+        reason = payload.get("reason")
+        if not isinstance(supported, bool):
+            raise RuntimeError("资源真实性检查结果格式不正确")
+        if not isinstance(confidence, str) or not confidence.strip():
+            raise RuntimeError("资源真实性检查结果缺少置信度")
+        if not isinstance(reason, str) or not reason.strip():
+            raise RuntimeError("资源真实性检查结果缺少原因说明")
+        return ResourceKnowledgeCheckResult(
+            supported=supported,
+            message=f"{confidence.strip()}: {reason.strip()}",
+            raw_response=content.strip(),
+        )
+
     def __init__(
         self,
         configuration: EffectiveModelConfiguration,
@@ -579,6 +656,7 @@ class HttpQuizAiProvider:
         duration_minutes: int,
         book_title: str,
         author: str,
+        resource_type: str,
         source_mode: str,
         question_exclusions: list[dict[str, Any]] | None = None,
         regeneration_guidance: str = "",
@@ -594,10 +672,12 @@ class HttpQuizAiProvider:
         return {
             "book_title": book_title or "未提供",
             "author": author or "未提供",
+            "resource_type_label": resource_type_label(resource_type),
+            "resource_type_scope": resource_type_scope_hint(resource_type),
             "source_mode": (
                 "pdf（必须基于已解析 PDF 原文）"
                 if source_mode == "pdf"
-                else "model_knowledge（仅使用模型对该书的内化知识，不提供 PDF 原文依据）"
+                else "model_knowledge（仅使用模型对该资源的内化知识，不提供 PDF 原文依据）"
             ),
             "difficulty": difficulty,
             "single_count": str(single_count),
@@ -669,6 +749,7 @@ class HttpQuizAiProvider:
         short_count: int,
         source_mode: str,
         book_title: str,
+        resource_type: str,
     ) -> list[GeneratedQuestion]:
         raw_questions = payload.get("questions")
         total = single_count + multiple_count + short_count
@@ -703,12 +784,12 @@ class HttpQuizAiProvider:
             explanation = self._question_text(raw, "explanation") or (
                 self.DEFAULT_EXPLANATION
                 if source_mode == "pdf"
-                else "本题依据模型对该书内容的知识生成，不对应具体 PDF 原文。"
+                else "本题依据模型对该资源内容的知识生成，不对应具体 PDF 原文。"
             )
             knowledge = self._question_text(raw, "knowledge_point") or (
                 knowledge_point(chunks_by_id[unique_source_ids[0]].content)
                 if unique_source_ids
-                else f"《{book_title or '本书'}》内容理解"
+                else f"{resource_type_label(resource_type)}内容理解"
             )
             options: list[dict[str, str]] = []
             correct_answers = raw.get("correct_answers")
@@ -825,6 +906,7 @@ class HttpQuizAiProvider:
         duration_minutes: int = 15,
         book_title: str = "",
         author: str = "",
+        resource_type: str = "book",
         source_mode: str = "pdf",
         question_exclusions: list[dict[str, Any]] | None = None,
         regeneration_guidance: str = "",
@@ -842,23 +924,25 @@ class HttpQuizAiProvider:
             duration_minutes,
             book_title,
             author,
+            resource_type,
             source_mode,
             question_exclusions,
             regeneration_guidance,
+        )
+        rendered_system_prompt = render_prompt(
+            self.prompt_templates["generation"].system_prompt, generation_values
         )
         messages = [
             {
                 "role": "system",
                 "content": (
-                    render_prompt(
-                        self.prompt_templates["generation"].system_prompt, generation_values
+                    (
+                        rendered_system_prompt
+                        + "\n\n系统来源边界：本次没有 PDF 原文，只能根据资源名称、类型、主创信息和模型知识生成；"
+                        "source_chunk_ids 必须为空，不得编造页码、章节、集数、镜头或引文。"
                     )
-                    + "\n\n系统来源边界：本次没有 PDF 原文，只能根据书名、作者和模型知识生成；"
-                    "source_chunk_ids 必须为空，不得编造页码、章节或引文。"
                     if source_mode == "model_knowledge"
-                    else render_prompt(
-                        self.prompt_templates["generation"].system_prompt, generation_values
-                    )
+                    else rendered_system_prompt
                 ),
             },
             {
@@ -879,6 +963,7 @@ class HttpQuizAiProvider:
                 short_count,
                 source_mode,
                 book_title,
+                resource_type,
             )
         except RuntimeError as first_error:
             repaired_content = self._chat_completion(
@@ -895,6 +980,7 @@ class HttpQuizAiProvider:
                     short_count,
                     source_mode,
                     book_title,
+                    resource_type,
                 )
             except RuntimeError as repair_error:
                 raise RuntimeError(f"真实模型出题结果修正失败：{repair_error}") from repair_error

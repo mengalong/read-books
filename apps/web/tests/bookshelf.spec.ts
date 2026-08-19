@@ -50,16 +50,16 @@ test("书架输入完成后按回车搜索", async ({ page }) => {
   });
 
   await page.goto("/");
-  await expect(page.getByText("2 本", { exact: true })).toBeVisible();
+  await expect(page.getByText("2 条", { exact: true })).toBeVisible();
 
-  const searchInput = page.getByLabel("搜索书名或作者");
+  const searchInput = page.getByLabel("搜索资源名称或主创");
   const requestCountBeforeTyping = requestUrls.length;
   await searchInput.fill("红楼梦");
   await page.waitForTimeout(350);
   expect(requestUrls).toHaveLength(requestCountBeforeTyping);
-  await expect(page.getByText("2 本", { exact: true })).toBeVisible();
+  await expect(page.getByText("2 条", { exact: true })).toBeVisible();
 
   await searchInput.press("Enter");
-  await expect(page.getByText("1 本", { exact: true })).toBeVisible();
+  await expect(page.getByText("1 条", { exact: true })).toBeVisible();
   expect(new URL(requestUrls.at(-1)!).searchParams.get("search")).toBe("红楼梦");
 });

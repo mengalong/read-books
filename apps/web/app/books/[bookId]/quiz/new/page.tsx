@@ -1,12 +1,13 @@
 "use client";
 
-import { ArrowLeft, Check, CheckCircle2, Clock3, FileQuestion, LoaderCircle, Minus, Plus, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, CheckCircle2, Clock3, FileQuestion, LoaderCircle, Minus, Plus, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { ErrorState, SourceModeNotice } from "@/components/ui";
 import { ApiError, generateQuiz, getBook, getGenerationTask } from "@/lib/api";
+import { resourceTypeLabel } from "@/lib/format";
 import type { BookDetail, QuizGenerationTask } from "@/lib/types";
 
 type CountKey = "single_count" | "multiple_count" | "short_count";
@@ -39,7 +40,7 @@ export default function NewQuizPage() {
           setGenerationTask(await getGenerationTask(data.active_generation_task_id));
         }
       })
-      .catch((reason: unknown) => setError(reason instanceof ApiError ? reason.message : "书籍加载失败"))
+      .catch((reason: unknown) => setError(reason instanceof ApiError ? reason.message : "资源加载失败"))
       .finally(() => setLoading(false));
   }, [bookId]);
 
@@ -82,19 +83,26 @@ export default function NewQuizPage() {
   }
 
   if (loading) return <div className="page-wrap"><div className="loading-state">正在准备测试设置……</div></div>;
-  if (!book) return <div className="page-wrap"><ErrorState message={error || "未找到这本书"} /></div>;
+  if (!book) return <div className="page-wrap"><ErrorState message={error || "未找到这个资源"} /></div>;
 
-  const sourceMode = book.pdfs.length === 0 ? "model_knowledge" : "pdf" as const;
   const hasPdfSource = book.stats.completed_pdf_count > 0;
+  const canUseModelKnowledge = Boolean(
+    book.model_knowledge_supported === true
+    || (book.resource_type === "book" && book.model_knowledge_supported !== false),
+  );
+  const canGenerate = hasPdfSource || canUseModelKnowledge;
+  const sourceMode = hasPdfSource ? "pdf" : canUseModelKnowledge ? "model_knowledge" : "pdf";
 
   return (
     <div className="page-wrap">
       <Link className="back-link" href={`/books/${book.id}`}><ArrowLeft size={14} />返回《{book.title}》</Link>
       <header className="page-header" style={{ marginBottom: 25 }}>
-        <div><div className="eyebrow">Create review</div><h1 className="page-title">生成一套复习测试</h1><p className="page-description">{book.title} · {hasPdfSource ? `已有 ${book.stats.chunk_count} 个原文片段可用于出题` : "未上传 PDF，将使用模型知识兜底"}</p></div>
+        <div><div className="eyebrow">Create review</div><h1 className="page-title">生成一套复习测试</h1><p className="page-description">{resourceTypeLabel(book.resource_type)} · {book.title} · {hasPdfSource ? `已有 ${book.stats.chunk_count} 个原文片段可用于出题` : canUseModelKnowledge ? "未上传 PDF，将使用模型知识兜底" : "当前资源尚未通过真实内容检查，不能依赖模型知识出题"}</p></div>
       </header>
       {error && <div className="toast-error">{error}</div>}
-      <SourceModeNotice sourceMode={sourceMode} />
+      {book.model_knowledge_message && <div className={`shelf-status-banner${book.model_knowledge_supported === false ? " warning" : ""}`}><AlertCircle size={18} /><div><strong>{book.model_knowledge_supported === true ? "模型真实内容检查通过" : book.model_knowledge_supported === false ? "模型真实内容检查未通过" : "模型真实内容检查未执行"}</strong><span>{book.model_knowledge_message}</span></div></div>}
+      {canGenerate && <SourceModeNotice sourceMode={sourceMode} />}
+      {!canGenerate && <div className="shelf-status-banner"><AlertCircle size={18} /><div><strong>当前资源暂时不能依赖模型知识出题</strong><span>请先补充 PDF，或在真实模型环境里重新检查资源内容后再试。</span></div></div>}
       {generationTask && <section className={`generation-progress ${generationTask.status}`}>
         <div className="generation-progress-heading">
           <div>
@@ -124,12 +132,12 @@ export default function NewQuizPage() {
 
           {hasPdfSource && <div className="settings-block"><label>页码范围（可选）</label><div className="page-range"><input min={1} onChange={(event) => setPageStart(event.target.value)} placeholder="起始页" type="number" value={pageStart} /><span>至</span><input min={1} onChange={(event) => setPageEnd(event.target.value)} placeholder="结束页" type="number" value={pageEnd} /></div></div>}
 
-          <div className="form-actions"><Link className="button button-secondary" href={`/books/${book.id}`}>返回书籍</Link><button className="button button-primary" disabled={generating || ["pending", "processing"].includes(generationTask?.status || "") || Object.values(counts).every((count) => count === 0)} onClick={() => void handleGenerate()} type="button"><Sparkles size={15} />{generating ? "正在创建任务……" : ["pending", "processing"].includes(generationTask?.status || "") ? "正在后台出题" : "生成复习试卷"}</button></div>
+          <div className="form-actions"><Link className="button button-secondary" href={`/books/${book.id}`}>返回资源</Link><button className="button button-primary" disabled={generating || ["pending", "processing"].includes(generationTask?.status || "") || Object.values(counts).every((count) => count === 0) || !canGenerate} onClick={() => void handleGenerate()} type="button"><Sparkles size={15} />{generating ? "正在创建任务……" : !canGenerate ? "当前资源不可出题" : ["pending", "processing"].includes(generationTask?.status || "") ? "正在后台出题" : "生成复习试卷"}</button></div>
         </section>
         <aside className="quiz-settings-summary">
           <div className="eyebrow">本次测试</div>
           <strong>{Object.values(counts).reduce((sum, count) => sum + count, 0)} 道题</strong>
-          <p>{hasPdfSource ? "系统会优先选择近期没有考过的原文片段。每道题都附带页码依据，答题时默认折叠。" : "系统会根据书名、作者和模型知识生成题目，不会伪造 PDF 页码或原文引文。"}</p>
+          <p>{hasPdfSource ? "系统会优先选择近期没有考过的原文片段。每道题都附带页码依据，答题时默认折叠。" : canUseModelKnowledge ? "系统会根据资源名称、类型和模型知识生成题目，不会伪造 PDF 页码、章节或引文。" : "当前资源还没有可用的出题来源。请先补充 PDF，或重新验证模型是否掌握真实内容。"}</p>
           <dl><div><dt>目标时长</dt><dd>{duration} 分钟</dd></div><div><dt>预计用时</dt><dd>{estimatedMinutes} 分钟</dd></div><div><dt>评分方式</dt><dd>自动评分</dd></div></dl>
         </aside>
       </div>
