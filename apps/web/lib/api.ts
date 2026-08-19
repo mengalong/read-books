@@ -44,6 +44,27 @@ export class ApiError extends Error {
   }
 }
 
+function extractErrorMessage(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const detail = (payload as { detail?: unknown }).detail;
+  if (typeof detail === "string") return detail;
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === "string") return message;
+  }
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const message = (item as { msg?: unknown }).msg;
+        return typeof message === "string" ? message : null;
+      })
+      .filter((message): message is string => Boolean(message));
+    if (messages.length) return messages.join("；");
+  }
+  return null;
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   let response: Response;
   try {
@@ -63,8 +84,7 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
     let message = `请求失败（${response.status}）`;
     try {
       const detail = await response.json();
-      if (typeof detail.detail === "string") message = detail.detail;
-      else if (detail.detail && typeof detail.detail.message === "string") message = detail.detail.message;
+      message = extractErrorMessage(detail) || message;
     } catch {
       // Keep the HTTP status message when the server did not return JSON.
     }
