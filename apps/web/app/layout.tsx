@@ -6,6 +6,9 @@ import { AppShell } from "@/components/app-shell";
 export const metadata: Metadata = {
   title: "回卷 | 读书复习",
   description: "基于读过的书进行主动回忆和复习测试。",
+  icons: {
+    icon: "/icon.svg",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
