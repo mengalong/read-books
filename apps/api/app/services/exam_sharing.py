@@ -203,13 +203,15 @@ def grade_objective(question: dict[str, Any], selected: list[str]) -> GradeResul
 
     correct_hits = len(correct_set & selected_set)
     wrong_hits = len(selected_set - correct_set)
-    accuracy = max(0.0, correct_hits / max(len(correct_set), 1) - wrong_hits / 4)
-    score = round(max_score * accuracy, 1)
+    if wrong_hits > 0:
+        score = 0.0
+    else:
+        score = round(max_score * correct_hits / max(len(correct_set), 1), 1)
     is_correct = selected_set == correct_set
     return GradeResult(
         score=score,
         is_correct=is_correct,
-        feedback="全部选对。" if is_correct else "本题按选对项计分，错选会扣除部分得分。",
+        feedback="全部选对。" if is_correct else "本题错选记 0 分，少选按命中比例计分。",
         matched_points=list(correct_set & selected_set),
         missing_points=list(correct_set - selected_set),
     )

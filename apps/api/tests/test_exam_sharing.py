@@ -1,7 +1,9 @@
 import time
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.database import SessionLocal
 from app.main import app
@@ -97,6 +99,71 @@ def create_shareable_quiz(client, title: str = "考试分享测试书") -> tuple
                     max_score=60,
                 ),
             ]
+        )
+        db.commit()
+        quiz_id = quiz.id
+    return book_id, quiz_id
+
+
+def create_shareable_multiple_quiz(client, title: str = "考试多选评分测试书") -> tuple[str, str]:
+    book_response = client.post(
+        "/api/books",
+        json={
+            "title": title,
+            "author": "测试作者",
+            "description": "用于验证多选评分流程。",
+            "cover_color": "#2F6B5F",
+            "language": "中文",
+            "reading_status": "finished",
+            "tags": [],
+        },
+    )
+    assert book_response.status_code == 201
+    book_id = book_response.json()["id"]
+    with SessionLocal() as db:
+        quiz = Quiz(
+            book_id=book_id,
+            title="第 1 套复习试卷",
+            difficulty="medium",
+            duration_minutes=15,
+            status="ready",
+            source_mode="pdf",
+            max_score=100,
+        )
+        db.add(quiz)
+        db.flush()
+        db.add(
+            Question(
+                quiz_id=quiz.id,
+                position=1,
+                question_type="multiple",
+                prompt="以下哪些做法更能帮助记忆？",
+                options=[
+                    {"id": "A", "text": "主动回忆"},
+                    {"id": "B", "text": "间隔重复"},
+                    {"id": "C", "text": "只看目录"},
+                    {"id": "D", "text": "泛读不回想"},
+                ],
+                correct_answers=["A", "B"],
+                explanation="主动回忆和间隔重复都能帮助记忆。",
+                knowledge_point="记忆策略",
+                difficulty="medium",
+                estimated_seconds=90,
+                reference_answer=None,
+                grading_rubric=[],
+                source_chunk_ids=["chunk-1"],
+                source_evidence=[
+                    {
+                        "chunk_id": "chunk-1",
+                        "file_name": "测试书.pdf",
+                        "page_number": 8,
+                        "excerpt": "主动回忆和间隔重复都能帮助记忆。",
+                        "highlight": "主动回忆和间隔重复都能帮助记忆。",
+                        "support": "用于验证多选评分。",
+                    }
+                ],
+                max_score=40,
+            )
         )
         db.commit()
         quiz_id = quiz.id
@@ -306,6 +373,74 @@ def test_anonymous_exam_flow_hides_sources_and_answers(client):
     assert manager_attempt.json()["submitted_ip_address"] == "203.0.113.11"
     assert manager_attempt.json()["ip_changed"] is True
     assert "iPhone" in manager_attempt.json()["user_agent"]
+
+
+def test_public_exam_multiple_choice_scores_zero_on_wrong_selection_and_partial_on_missing_selection(client):
+    _, quiz_id = create_shareable_multiple_quiz(client, "公开多选评分测试书")
+    share = create_exam_share(client, quiz_id)
+
+    with TestClient(app) as public_client:
+        started = public_client.post(
+            f"/api/public/exams/{share['share_code']}/attempts",
+            json={"participant_name": "多选读者"},
+        )
+        assert started.status_code == 201
+        attempt = started.json()
+
+        with SessionLocal() as db:
+            question = db.scalars(
+                select(Question).where(Question.quiz_id == quiz_id).order_by(Question.position)
+            ).one()
+            correct_answers = list(question.correct_answers)
+            assert len(correct_answers) >= 2
+            wrong_answer = next(
+                option["id"]
+                for option in question.options
+                if option["id"] not in correct_answers
+            )
+            max_score = question.max_score
+
+        partial = public_client.post(
+            f"/api/public/exam-attempts/{attempt['id']}/submit",
+            json={
+                "answers": [
+                    {
+                        "question_id": question.id,
+                        "selected_answers": correct_answers[:-1],
+                    }
+                ],
+                "elapsed_seconds": 12,
+            },
+            headers={"X-Exam-Attempt-Token": attempt["access_token"]},
+        )
+        assert partial.status_code == 202
+        partial_body = partial.json()
+        expected_partial_score = round(max_score * (len(correct_answers) - 1) / len(correct_answers), 1)
+        assert partial_body["status"] == "completed"
+        assert partial_body["total_score"] == pytest.approx(expected_partial_score)
+
+        second = public_client.post(
+            f"/api/public/exams/{share['share_code']}/attempts",
+            json={"participant_name": "错选读者"},
+        )
+        assert second.status_code == 201
+        second_attempt = second.json()
+        wrong = public_client.post(
+            f"/api/public/exam-attempts/{second_attempt['id']}/submit",
+            json={
+                "answers": [
+                    {
+                        "question_id": question.id,
+                        "selected_answers": [correct_answers[0], wrong_answer],
+                    }
+                ],
+                "elapsed_seconds": 12,
+            },
+            headers={"X-Exam-Attempt-Token": second_attempt["access_token"]},
+        )
+        assert wrong.status_code == 202
+        assert wrong.json()["status"] == "completed"
+        assert wrong.json()["total_score"] == 0
 
 
 def test_logged_user_reuses_attempt_and_short_answer_is_graded(client):

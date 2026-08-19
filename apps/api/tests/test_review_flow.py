@@ -421,6 +421,75 @@ def test_update_quiz_question_rejects_invalid_answers(client):
     assert response.status_code == 422
 
 
+def test_multiple_choice_scores_zero_on_wrong_selection_and_partial_on_missing_selection(client):
+    book_id, _ = create_source_book(client, "多选评分测试书", "多选评分作者")
+    generated = client.post(
+        f"/api/books/{book_id}/quizzes",
+        json={
+            "duration_minutes": 15,
+            "difficulty": "medium",
+            "single_count": 0,
+            "multiple_count": 1,
+            "short_count": 0,
+        },
+    )
+    assert generated.status_code == 202
+    quiz_id = wait_for_generation(client, generated.json()["id"])["quiz_id"]
+
+    with SessionLocal() as db:
+        question = db.scalars(
+            select(Question).where(Question.quiz_id == quiz_id).order_by(Question.position)
+        ).one()
+        assert question.question_type == "multiple"
+        correct_answers = list(question.correct_answers)
+        assert len(correct_answers) >= 2
+        wrong_answer = next(
+            option["id"]
+            for option in question.options
+            if option["id"] not in correct_answers
+        )
+        max_score = question.max_score
+
+    partial_review = client.post(f"/api/quizzes/{quiz_id}/reviews")
+    assert partial_review.status_code == 200
+    partial = client.post(
+        f"/api/reviews/{partial_review.json()['id']}/submit",
+        json={
+            "elapsed_seconds": 60,
+            "answers": [
+                {
+                    "question_id": question.id,
+                    "selected_answers": correct_answers[:-1],
+                }
+            ],
+        },
+    )
+    assert partial.status_code == 200
+    partial_body = partial.json()
+    expected_partial_score = round(max_score * (len(correct_answers) - 1) / len(correct_answers), 1)
+    assert partial_body["answers"][0]["score"] == pytest.approx(expected_partial_score)
+    assert partial_body["answers"][0]["is_correct"] is False
+
+    wrong_review = client.post(f"/api/quizzes/{quiz_id}/reviews")
+    assert wrong_review.status_code == 200
+    wrong = client.post(
+        f"/api/reviews/{wrong_review.json()['id']}/submit",
+        json={
+            "elapsed_seconds": 60,
+            "answers": [
+                {
+                    "question_id": question.id,
+                    "selected_answers": [correct_answers[0], wrong_answer],
+                }
+            ],
+        },
+    )
+    assert wrong.status_code == 200
+    wrong_body = wrong.json()
+    assert wrong_body["answers"][0]["score"] == 0
+    assert wrong_body["answers"][0]["is_correct"] is False
+
+
 def test_generate_submit_and_avoid_recent_sources(client):
     book_id, _ = create_source_book(client, "复习流程测试书", "复习流程作者")
     payload = {
