@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, BookMarked, BookOpenText, ClipboardCheck, Clock3, FileCode2, History, LibraryBig, LogOut, Plus, ScanLine, Settings2, Users } from "lucide-react";
+import { Activity, BarChart3, BookMarked, BookOpenText, ClipboardCheck, Clock3, FileCode2, History, LibraryBig, Link2, LogOut, Plus, ScanLine, Settings2, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError, getCurrentUser, logout, recordActivity } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import type { CurrentUser } from "@/lib/types";
+import { SiteFooter } from "@/components/site-footer";
 
 const navigation = [
   { href: "/", label: "我的内容库", icon: LibraryBig },
@@ -19,6 +20,7 @@ const navigation = [
 const systemNavigation = [
   { href: "/settings/books", label: "资源管理", icon: BookMarked },
   { href: "/settings/model", label: "模型设置", icon: Settings2 },
+  { href: "/settings/site", label: "备案设置", icon: Link2 },
   { href: "/settings/wechat", label: "微信登录", icon: ScanLine },
   { href: "/settings/prompts", label: "提示词管理", icon: FileCode2 },
   { href: "/settings/token-usage", label: "Token 用量", icon: BarChart3 },
@@ -104,7 +106,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (loading) return <div className="auth-loading">正在确认账户状态……</div>;
   if (authPage) return <div className="auth-layout">{children}</div>;
-  if (publicExamPage) return <div className="public-exam-layout">{children}</div>;
+  if (publicExamPage) {
+    return (
+      <div className="public-exam-layout">
+        <div className="public-exam-shell">
+          {children}
+          <SiteFooter />
+        </div>
+      </div>
+    );
+  }
   if (!user) {
     return error ? (
       <div className="auth-loading auth-error"><span>{error}</span><button className="button button-secondary" onClick={() => void loadUser()} type="button">重新连接</button></div>
@@ -157,7 +168,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span><small>版本更新时间</small><time dateTime={buildUpdatedAt}>{formatDateTime(buildUpdatedAt)}</time></span>
         </div>
       </aside>
-      <main className="app-main">{children}</main>
+      <div className="app-content-shell">
+        <main className="app-main">{children}</main>
+        <SiteFooter />
+      </div>
     </div>
   );
 }

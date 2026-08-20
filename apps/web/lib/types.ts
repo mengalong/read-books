@@ -42,6 +42,15 @@ export type WechatLoginConfiguration = {
   updated_at: string | null;
 };
 
+export type SiteFooterConfiguration = {
+  id: string;
+  record_number: string;
+  record_url: string;
+  configuration_complete: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
 export type PromptType = "generation" | "grading";
 
 export type PromptTemplate = {

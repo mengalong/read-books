@@ -601,6 +601,17 @@ class WechatLoginConfiguration(TimestampMixin, Base):
     )
 
 
+class SiteFooterConfiguration(TimestampMixin, Base):
+    __tablename__ = "site_footer_configurations"
+
+    id: Mapped[str] = mapped_column(String(20), primary_key=True, default="default")
+    record_number: Mapped[str] = mapped_column(String(255), default="")
+    record_url: Mapped[str] = mapped_column(Text, default="")
+    updated_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+
+
 class ModelConfiguration(TimestampMixin, Base):
     __tablename__ = "model_configurations"
 

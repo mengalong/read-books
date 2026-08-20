@@ -32,6 +32,7 @@ import type {
   ExamShare,
   ExamShareStatus,
   PublicExam,
+  SiteFooterConfiguration,
   WechatLoginConfiguration,
 } from "@/lib/types";
 
@@ -457,6 +458,10 @@ export function getWechatLoginConfiguration() {
   return apiFetch<WechatLoginConfiguration>("/settings/wechat-login");
 }
 
+export function getSiteFooterConfiguration() {
+  return apiFetch<SiteFooterConfiguration>("/site-footer");
+}
+
 export function updateWechatLoginConfiguration(payload: {
   enabled: boolean;
   required_for_public_exams: boolean;
@@ -466,6 +471,16 @@ export function updateWechatLoginConfiguration(payload: {
 }) {
   return apiFetch<WechatLoginConfiguration>("/settings/wechat-login", {
     method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateSiteFooterConfiguration(payload: {
+  record_number: string;
+  record_url: string;
+}) {
+  return apiFetch<SiteFooterConfiguration>("/site-footer", {
+    method: "PUT",
     body: JSON.stringify(payload),
   });
 }

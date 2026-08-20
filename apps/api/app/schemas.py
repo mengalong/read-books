@@ -557,6 +557,20 @@ class WechatLoginConfigurationResponse(ApiModel):
     updated_at: datetime | None = None
 
 
+class SiteFooterConfigurationUpdate(BaseModel):
+    record_number: str = Field(default="", max_length=255)
+    record_url: str = Field(default="", max_length=2_000)
+
+
+class SiteFooterConfigurationResponse(ApiModel):
+    id: str
+    record_number: str
+    record_url: str
+    configuration_complete: bool
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class ModelConnectionTestRequest(BaseModel):
     base_url: str = Field(max_length=2_000)
     model_name: str = Field(max_length=200)
