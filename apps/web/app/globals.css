@@ -682,6 +682,12 @@ a {
   min-height: 100vh;
 }
 
+.auth-page-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
 .auth-loading {
   align-items: center;
   color: var(--muted);
@@ -856,6 +862,10 @@ a {
   margin-top: 26px;
   padding-top: 17px;
   text-align: center;
+}
+
+.auth-page-shell .site-footer {
+  margin-top: auto;
 }
 
 .page-wrap {
