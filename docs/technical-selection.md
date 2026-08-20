@@ -18,7 +18,7 @@
 - 测试：pytest + Playwright
 - 包管理：前端用 npm/pnpm；后端在 conda 环境内使用 uv 或 pip 安装依赖
 
-这个方案的核心取舍是：前端保持开发效率，后端单独承担大 PDF 上传、解析任务和未来模型调用，避免把大文件能力绑死在前端框架的请求处理模型上。
+这个方案的核心取舍是：前端保持开发效率，后端单独承担大 PDF 上传、解析任务、资源真实内容检查和未来模型调用，避免把大文件能力绑死在前端框架的请求处理模型上。
 
 ## 2. 架构形态
 
@@ -66,7 +66,7 @@ conda activate read-books
 
 选择 Next.js App Router 的原因：
 
-- 适合构建多页面应用：书架、书籍详情、测试页、结果页、历史页。
+- 适合构建多页面应用：书架、资源详情、测试页、结果页、历史页。
 - 路由和页面结构清晰，便于后续扩展。
 - 可以使用 React Server Components 和客户端组件组合，但第一版保持简单。
 - 自托管能力成熟，适合本地单用户部署。
@@ -75,7 +75,7 @@ conda activate read-books
 
 - `/`：书架
 - `/books/new`：新增书籍
-- `/books/[bookId]`：书籍详情、PDF 上传与解析状态
+- `/books/[bookId]`：资源详情、PDF 上传与解析状态
 - `/books/[bookId]/quiz/new`：创建并查看异步出题任务
 - `/quizzes/[quizId]`：试卷概览与开始复习
 - `/reviews/[reviewId]`：一次复习任务的答题页
@@ -177,6 +177,7 @@ data/app.db
 - PDF 原文片段需要独立表存储，不能只存在题目 JSON 中，否则后续检索和去重会困难。
 - 大文本字段只保存必要原文片段；PDF 原文件保存在文件系统。
 - `Quiz` 和 `QuizGenerationTask` 保存 `source_mode`，明确区分 `pdf`（可追溯原文）与 `model_knowledge`（无 PDF 原文依据）。
+- `Book` 保存 `resource_type`、`model_knowledge_supported` 和 `model_knowledge_checked_at`，用于区分书籍、电影和电视剧，并记录模型真实内容检查结果。
 
 ## 7. PDF 处理选型
 
@@ -221,6 +222,7 @@ PDF 处理流程：
 
 ```ts
 interface QuizAiProvider {
+  verifyResourceContent(input: VerifyResourceContentInput): Promise<ResourceContentCheckResult>;
   generateQuiz(input: GenerateQuizInput): Promise<GeneratedQuiz>;
   gradeAnswer(input: GradeAnswerInput): Promise<GradedAnswer>;
 }
@@ -230,10 +232,11 @@ interface QuizAiProvider {
 
 - `MockQuizAiProvider`：默认启用，用固定规则和样例数据生成题目/评分。
 - `HttpQuizAiProvider`：调用 OpenAI 兼容的 `/chat/completions`，负责真实模型出题和问答题语义评分。
+- 资源真实内容检查也走同一层 Provider，返回是否支持模型知识出题、检查时间和提示信息。
 
 业务代码只依赖 `QuizAiProvider`，不直接依赖具体模型。
 
-真实出题分为两种来源模式。PDF 模式下，后端先选择候选 `ContentChunk`，向模型提供片段 ID、页码和原文内容；模型返回后必须通过题量、题型、选项、正确答案、参考答案、评分要点和来源片段 ID 校验，PDF 文件名、页码与原文摘录由后端根据数据库记录重建。模型知识模式下不发送 PDF 片段，只发送书名、作者和来源模式约束，模型必须返回空的来源片段数组，后端保存空的来源证据，前端显示风险提醒。两种模式都不采信模型生成的页码、文件名和摘录。客观题继续由后端确定性评分，只有问答题提交时调用模型。
+真实出题分为两种来源模式。PDF 模式下，后端先选择候选 `ContentChunk`，向模型提供片段 ID、页码和原文内容；模型返回后必须通过题量、题型、选项、正确答案、参考答案、评分要点和来源片段 ID 校验，PDF 文件名、页码与原文摘录由后端根据数据库记录重建。模型知识模式下不发送 PDF 片段，只发送资源名称、主创信息、资源类型和来源模式约束，模型必须返回空的来源片段数组，后端保存空的来源证据，前端显示风险提醒。资源真实内容检查未通过时，电影和电视剧不能进入模型知识模式。两种模式都不采信模型生成的页码、文件名和摘录。客观题继续由后端确定性评分，只有问答题提交时调用模型。
 
 真实模型长响应的默认请求超时为 180 秒。整套试卷不再使用一次长请求，而是按题型逐题调用模型；每次调用只要求一道题，候选片段数量控制为 `max(本次题目数 + 2, 4)`，实际出题和问答评分请求不主动设置 `max_tokens`。Provider 同时兼容字符串和文本片段数组形式的 `message.content`；每题完成后提交任务进度，全部成功后再保存完整试卷；请求读取超时、模型服务自身输出达到上限或只返回推理内容时会记录失败阶段和具体错误，不会保存半成品试卷。
 
@@ -284,7 +287,7 @@ export type AppConfig = {
 
 ### 8.3 提示词模板原则
 
-提示词模板保存在 SQLite 的 `prompt_templates` 表中，出题和问答评分分别维护版本。模板只能使用后端提供的白名单变量，例如 `{{book_title}}`、`{{author}}`、`{{source_mode}}`、`{{source_material}}`、`{{difficulty}}`、`{{user_answer}}` 和 `{{grading_rubric}}`。版本切换只影响模型表达和任务约束，后端仍强制校验题目结构、分数范围和来源模式；旧版模板继续兼容，新增来源变量由默认模板提供。
+提示词模板保存在 SQLite 的 `prompt_templates` 表中，出题和问答评分分别维护版本。模板只能使用后端提供的白名单变量，例如 `{{book_title}}`、`{{author}}`、`{{resource_type_label}}`、`{{resource_type_scope}}`、`{{source_mode}}`、`{{source_material}}`、`{{difficulty}}`、`{{user_answer}}` 和 `{{grading_rubric}}`。版本切换只影响模型表达和任务约束，后端仍强制校验题目结构、分数范围和来源模式；旧版模板继续兼容，新增资源类型和来源变量由默认模板提供。
 
 ### 8.4 模型 Token 用量记录
 
@@ -382,7 +385,7 @@ Mock 不是随便造页面假数据，而是要模拟真实链路的数据结构
 - 创建书籍。
 - 上传 PDF 并看到解析状态。
 - 生成测试。
-- 在生成期间离开页面，并从书籍详情查看任务进度。
+- 在生成期间离开页面，并从资源详情查看任务进度。
 - 从试卷列表选择同一套试卷创建多次复习任务。
 - 查看试卷难度和题型构成，并删除历史试卷。
 - 完成单选、多选、问答。

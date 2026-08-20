@@ -100,3 +100,5 @@ NEXT_PUBLIC_API_BASE_URL=/api
 ## HTTPS
 
 部署脚本会在首次发现缺少证书时自动通过 Let's Encrypt 申请证书，并重建 Nginx 容器为 `80:80` 和 `443:443`。后续如果需要手动续期，可以在远端复用同一套 `certbot` 流程。微信正式联调时，系统管理里的回调地址应填写 `https://books.mengalong.cn`，并确保微信开放平台授权回调域已经配置为 `books.mengalong.cn`。
+
+如果远端本机 `curl -k https://127.0.0.1/api/health` 正常，但公网 `https://books.mengalong.cn` 仍超时，优先检查云服务器安全组是否放行 `443/TCP`，再确认 Nginx 容器确实映射了 `443:443`。域名的 `http://books.mengalong.cn` 会自动跳转到 HTTPS，适合快速判断反向代理是否已经接管。
