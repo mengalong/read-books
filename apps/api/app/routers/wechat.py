@@ -24,6 +24,7 @@ from app.services.wechat_auth import (
     exchange_wechat_code,
     get_or_create_configuration,
     normalize_callback_base_url,
+    resolve_callback_base_url,
     upsert_wechat_user,
     utc_now,
 )
@@ -42,14 +43,14 @@ def client_ip(request: Request) -> str | None:
 def to_configuration_response(
     configuration: WechatLoginConfiguration,
 ) -> WechatLoginConfigurationResponse:
-    effective = effective_configuration_from_record(configuration)
+    effective = effective_configuration_from_record(configuration, app_env=settings.app_env)
     return WechatLoginConfigurationResponse(
         id=configuration.id,
         enabled=configuration.enabled,
         required_for_public_exams=configuration.required_for_public_exams,
         app_id=configuration.app_id,
         app_secret_configured=bool(configuration.app_secret),
-        callback_base_url=configuration.callback_base_url,
+        callback_base_url=effective.callback_base_url,
         callback_url=effective.callback_url,
         configuration_complete=effective.configuration_complete,
         created_at=configuration.created_at,
@@ -59,13 +60,18 @@ def to_configuration_response(
 
 def effective_configuration_from_record(
     configuration: WechatLoginConfiguration,
+    *,
+    app_env: str,
 ) -> EffectiveWechatConfig:
     return EffectiveWechatConfig(
         enabled=configuration.enabled,
         required_for_public_exams=configuration.required_for_public_exams,
         app_id=configuration.app_id.strip(),
         app_secret=(configuration.app_secret or "").strip(),
-        callback_base_url=configuration.callback_base_url.strip().rstrip("/"),
+        callback_base_url=resolve_callback_base_url(
+            configuration.callback_base_url,
+            app_env=app_env,
+        ),
     )
 
 

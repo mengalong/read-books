@@ -6,6 +6,7 @@ from app.config import get_settings
 from app.database import SessionLocal
 from app.main import app
 from app.models import WechatLoginConfiguration, WechatOAuthState, WechatSession, WechatUser
+from app.routers import wechat as wechat_router
 
 from test_exam_sharing import create_exam_share, create_shareable_quiz
 
@@ -70,6 +71,45 @@ def test_admin_configures_wechat_without_exposing_secret(client):
     )
     assert retained.status_code == 200
     assert retained.json()["app_secret_configured"] is True
+
+
+def test_production_wechat_callback_url_upgrades_http_to_https(client, monkeypatch):
+    reset_wechat_configuration()
+    with SessionLocal() as db:
+        db.add(
+            WechatLoginConfiguration(
+                id="default",
+                enabled=True,
+                required_for_public_exams=False,
+                app_id="wx-prod-app-id",
+                app_secret="wx-prod-secret",
+                callback_base_url="http://books.mengalong.cn",
+            )
+        )
+        db.commit()
+
+    monkeypatch.setattr(wechat_router.settings, "app_env", "production")
+
+    configured = client.get("/api/settings/wechat-login")
+    assert configured.status_code == 200
+    assert configured.json()["callback_base_url"] == "https://books.mengalong.cn"
+    assert configured.json()["callback_url"] == "https://books.mengalong.cn/api/public/wechat/callback"
+
+    _, quiz_id = create_shareable_quiz(client, "生产微信回调测试书")
+    share = create_exam_share(client, quiz_id, "生产微信回调测试")
+
+    with TestClient(app) as public_client:
+        login = public_client.get(
+            "/api/public/wechat/login",
+            params={"share_code": share["share_code"]},
+            follow_redirects=False,
+        )
+        assert login.status_code == 307
+        authorize_url = urlparse(login.headers["location"])
+        authorize_query = parse_qs(authorize_url.query)
+        assert authorize_query["redirect_uri"] == [
+            "https://books.mengalong.cn/api/public/wechat/callback",
+        ]
 
 
 def test_wechat_oauth_binds_browser_and_creates_identity(client, monkeypatch):

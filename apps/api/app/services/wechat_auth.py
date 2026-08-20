@@ -75,6 +75,16 @@ def normalize_callback_base_url(value: str, *, app_env: str) -> str:
     return normalized
 
 
+def resolve_callback_base_url(value: str, *, app_env: str) -> str:
+    normalized = value.strip().rstrip("/")
+    if not normalized:
+        return ""
+    parsed = urlparse(normalized)
+    if app_env == "production" and parsed.scheme == "http" and parsed.netloc:
+        return parsed._replace(scheme="https").geturl().rstrip("/")
+    return normalized
+
+
 def get_or_create_configuration(db: Session, settings: Settings) -> WechatLoginConfiguration:
     configuration = db.get(WechatLoginConfiguration, WECHAT_CONFIG_ID)
     if configuration is not None:
@@ -85,7 +95,10 @@ def get_or_create_configuration(db: Session, settings: Settings) -> WechatLoginC
         required_for_public_exams=settings.wechat_login_required,
         app_id=settings.wechat_app_id.strip(),
         app_secret=settings.wechat_app_secret,
-        callback_base_url=(settings.wechat_callback_base_url or settings.web_origin).rstrip("/"),
+        callback_base_url=resolve_callback_base_url(
+            settings.wechat_callback_base_url or settings.web_origin,
+            app_env=settings.app_env,
+        ),
     )
     db.add(configuration)
     db.flush()
@@ -100,14 +113,20 @@ def effective_configuration(db: Session, settings: Settings) -> EffectiveWechatC
             required_for_public_exams=settings.wechat_login_required,
             app_id=settings.wechat_app_id.strip(),
             app_secret=(settings.wechat_app_secret or "").strip(),
-            callback_base_url=(settings.wechat_callback_base_url or settings.web_origin).rstrip("/"),
+            callback_base_url=resolve_callback_base_url(
+                settings.wechat_callback_base_url or settings.web_origin,
+                app_env=settings.app_env,
+            ),
         )
     return EffectiveWechatConfig(
         enabled=configuration.enabled,
         required_for_public_exams=configuration.required_for_public_exams,
         app_id=configuration.app_id.strip(),
         app_secret=(configuration.app_secret or "").strip(),
-        callback_base_url=configuration.callback_base_url.strip().rstrip("/"),
+        callback_base_url=resolve_callback_base_url(
+            configuration.callback_base_url,
+            app_env=settings.app_env,
+        ),
     )
 
 
