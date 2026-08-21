@@ -575,6 +575,41 @@ export type ExamShare = {
   attempts?: ExamAttemptSummary[];
 };
 
+export type ExamShareVersion = {
+  version: number;
+  is_current: boolean;
+  question_count: number;
+  single_count: number;
+  multiple_count: number;
+  short_count: number;
+  max_score: number;
+  created_at: string;
+};
+
+export type ExamShareEdit = {
+  id: string;
+  share_code: string;
+  name: string;
+  status: ExamShareStatus;
+  quiz_id: string | null;
+  book_id: string | null;
+  owner_user_id: string;
+  owner_username: string;
+  owner_display_name: string;
+  book_title: string;
+  book_author: string;
+  quiz_title: string;
+  source_mode: SourceMode;
+  difficulty: string;
+  duration_minutes: number;
+  max_score: number;
+  snapshot_version: number;
+  created_at: string;
+  updated_at: string;
+  questions: Question[];
+  versions: ExamShareVersion[];
+};
+
 export type PublicExam = {
   share_code: string;
   name: string;

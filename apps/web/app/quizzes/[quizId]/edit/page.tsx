@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { ErrorState, SourceModeNotice } from "@/components/ui";
 import { QuizQuestionEditList } from "@/components/quiz-question-edit-list";
-import { ApiError, getEditableQuiz } from "@/lib/api";
+import { ApiError, getEditableQuiz, regenerateQuizQuestion, updateQuizQuestion } from "@/lib/api";
 import type { Question, Quiz } from "@/lib/types";
 
 const questionTypeLabels: Record<Question["question_type"], string> = {
@@ -85,7 +85,12 @@ export default function QuizEditPage() {
 
       <section className="content-panel quiz-question-edit-panel">
         <div className="section-title"><h2>题目编辑</h2><span>直接修改每道题的题干、选项和标准答案</span></div>
-        <QuizQuestionEditList onSaved={handleQuestionSaved} quizId={quiz.id} questions={quiz.questions} />
+        <QuizQuestionEditList
+          onRegenerateQuestion={(questionId) => regenerateQuizQuestion(quiz.id, questionId)}
+          onSaved={handleQuestionSaved}
+          onUpdateQuestion={(questionId, payload) => updateQuizQuestion(quiz.id, questionId, payload)}
+          questions={quiz.questions}
+        />
       </section>
     </div>
   );

@@ -461,9 +461,26 @@ class ExamShare(TimestampMixin, Base):
         back_populates="created_exam_shares", foreign_keys=[owner_user_id]
     )
     workspace: Mapped[Workspace] = relationship(back_populates="exam_shares")
+    versions: Mapped[list[ExamShareVersion]] = relationship(
+        back_populates="exam_share", cascade="all, delete-orphan", order_by="ExamShareVersion.version"
+    )
     attempts: Mapped[list[ExamAttempt]] = relationship(
         back_populates="exam_share", cascade="all, delete-orphan"
     )
+
+
+class ExamShareVersion(TimestampMixin, Base):
+    __tablename__ = "exam_share_versions"
+    __table_args__ = (UniqueConstraint("exam_share_id", "version"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    exam_share_id: Mapped[str] = mapped_column(
+        ForeignKey("exam_shares.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, index=True)
+    quiz_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+    exam_share: Mapped[ExamShare] = relationship(back_populates="versions")
 
 
 class ExamAttempt(TimestampMixin, Base):
@@ -491,6 +508,8 @@ class ExamAttempt(TimestampMixin, Base):
     participant_name: Mapped[str] = mapped_column(String(120))
     participant_avatar_url: Mapped[str | None] = mapped_column(Text)
     access_token_hash: Mapped[str | None] = mapped_column(String(128), unique=True, index=True)
+    snapshot_version: Mapped[int | None] = mapped_column(Integer, index=True)
+    quiz_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(30), default="in_progress", index=True)
     total_score: Mapped[float | None] = mapped_column(Float)
     max_score: Mapped[float] = mapped_column(Float, default=100)

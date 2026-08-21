@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { stat } from "node:fs/promises";
 
-import { mockInsecureClipboard, readCopiedText } from "./test-helpers";
+import { mockAdminIdentity, mockInsecureClipboard, readCopiedText } from "./test-helpers";
 
 const currentUser = {
   id: "admin-1",
@@ -220,12 +220,14 @@ test("考试管理展示分享链接和答题统计", async ({ page }) => {
   await page.goto("/exam-management");
   await expect(page.getByRole("heading", { name: "考试管理" })).toBeVisible();
   await expect(page.getByRole("cell", { name: /红楼梦读书考试/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: "编辑考试题目" })).toHaveAttribute("href", "/exam-management/share-1/edit");
   await expect(page.getByText("3 / 4")).toBeVisible();
   await expect(page.getByText("78.5%")).toBeVisible();
   await expect(page.getByRole("button", { name: "复制考试链接" })).toBeVisible();
   await page.getByRole("button", { name: "复制考试链接" }).click();
   await expect(page.getByRole("button", { name: "考试链接已复制" })).toBeVisible();
-  expect(await readCopiedText(page)).toBe("http://localhost:3000/exams/public-code");
+  const origin = new URL(page.url()).origin;
+  expect(await readCopiedText(page)).toBe(`${origin}/exams/public-code`);
   await page.getByRole("button", { name: "设置考试有效期" }).click();
   await expect(page.getByRole("heading", { name: "设置考试有效期" })).toBeVisible();
   await expect(page.getByText("关闭后考试长期有效。")).toBeVisible();
@@ -234,6 +236,165 @@ test("考试管理展示分享链接和答题统计", async ({ page }) => {
   await expect(activityRow.locator("td").nth(3)).toContainText("78.5%");
   expect(await activityRow.locator("td").nth(2).evaluate((element) => getComputedStyle(element).display)).toBe("table-cell");
   expect(await activityRow.locator("td").nth(3).evaluate((element) => getComputedStyle(element).display)).toBe("table-cell");
+});
+
+test("考试编辑页可以修改题目、重出单题并删除历史版本", async ({ page }) => {
+  await mockAdminIdentity(page);
+
+  const createdAt = "2026-08-06T08:00:00Z";
+  const initialQuestion = {
+    id: "question-1",
+    position: 1,
+    question_type: "single",
+    prompt: "原题干",
+    options: [
+      { id: "A", text: "原选项 A" },
+      { id: "B", text: "原选项 B" },
+      { id: "C", text: "原选项 C" },
+      { id: "D", text: "原选项 D" },
+    ],
+    knowledge_point: "原知识点",
+    difficulty: "medium",
+    estimated_seconds: 45,
+    max_score: 6,
+    correct_answers: ["A"],
+    explanation: "原解析",
+    reference_answer: null,
+    grading_rubric: [],
+    source_evidence: [],
+  };
+  let question = initialQuestion;
+  let snapshotVersion = 1;
+  let versionNumbers = [1];
+  let savedPayload: Record<string, unknown> | null = null;
+  let deletedVersion: number | null = null;
+
+  function versionSummary(version: number) {
+    return {
+      version,
+      is_current: version === snapshotVersion,
+      question_count: 1,
+      single_count: 1,
+      multiple_count: 0,
+      short_count: 0,
+      max_score: 6,
+      created_at: createdAt,
+    };
+  }
+
+  function editableResponse() {
+    return {
+      id: "share-edit",
+      share_code: "edit-code",
+      name: "考试编辑测试",
+      status: "active",
+      quiz_id: "quiz-edit",
+      book_id: "book-edit",
+      owner_user_id: "admin-1",
+      owner_username: "admin",
+      owner_display_name: "系统管理员",
+      book_title: "测试书",
+      book_author: "测试作者",
+      quiz_title: "第 1 套复习试卷",
+      source_mode: "pdf",
+      difficulty: "medium",
+      duration_minutes: 15,
+      max_score: 6,
+      snapshot_version: snapshotVersion,
+      created_at: createdAt,
+      updated_at: createdAt,
+      questions: [question],
+      versions: [...versionNumbers].reverse().map((version) => versionSummary(version)),
+    };
+  }
+
+  await page.route("**/api/exam-shares/share-edit/editable", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(editableResponse()) });
+  });
+  await page.route("**/api/exam-shares/share-edit/questions/question-1", async (route) => {
+    if (route.request().method() === "PATCH") {
+      savedPayload = route.request().postDataJSON();
+      const body = savedPayload as {
+        prompt?: string;
+        knowledge_point?: string;
+        explanation?: string | null;
+        options?: { id: string; text: string }[];
+        correct_answers?: string[];
+      };
+      question = {
+        ...question,
+        prompt: body.prompt || question.prompt,
+        knowledge_point: body.knowledge_point || question.knowledge_point,
+        explanation: body.explanation ?? question.explanation,
+        options: body.options || question.options,
+        correct_answers: body.correct_answers || question.correct_answers,
+      };
+      snapshotVersion = 2;
+      versionNumbers = [1, 2];
+    }
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(question) });
+  });
+  await page.route("**/api/exam-shares/share-edit/questions/question-1/regenerate", async (route) => {
+    question = {
+      ...question,
+      prompt: "重出的题干",
+      knowledge_point: "重出后的知识点",
+      explanation: "重出后的解析",
+      options: [
+        { id: "A", text: "新选项 A" },
+        { id: "B", text: "新选项 B" },
+        { id: "C", text: "新选项 C" },
+        { id: "D", text: "新选项 D" },
+      ],
+      correct_answers: ["C"],
+    };
+    snapshotVersion = 3;
+    versionNumbers = [1, 2, 3];
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(question) });
+  });
+  await page.route("**/api/exam-shares/share-edit/versions/1", async (route) => {
+    deletedVersion = 1;
+    versionNumbers = versionNumbers.filter((version) => version !== 1);
+    await route.fulfill({ status: 204, body: "" });
+  });
+
+  await page.goto("/exam-management/share-edit/edit");
+  await expect(page.getByRole("heading", { name: "考试编辑测试" })).toBeVisible();
+  await expect(page.getByText("当前编辑的是考试快照版本，新版本会只影响后续开始的答题。")).toBeVisible();
+  await expect(page.getByLabel("题干")).toHaveValue("原题干");
+
+  await page.getByLabel("题干").fill("修正后的题干");
+  await page.getByLabel("知识点").fill("修正后的知识点");
+  await page.getByLabel("解析说明").fill("修正后的解析");
+  await page.getByPlaceholder("选项 A").fill("错误选项");
+  await page.getByPlaceholder("选项 B").fill("正确选项");
+  await page.getByPlaceholder("选项 C").fill("干扰项一");
+  await page.getByPlaceholder("选项 D").fill("干扰项二");
+  await page.locator(".question-answer-choice").nth(1).click();
+  await page.getByRole("button", { name: "保存本题" }).click();
+
+  await expect(page.getByText("已保存")).toBeVisible();
+  expect(savedPayload).toMatchObject({
+    prompt: "修正后的题干",
+    knowledge_point: "修正后的知识点",
+    explanation: "修正后的解析",
+    correct_answers: ["B"],
+  });
+  await expect(page.getByLabel("题干")).toHaveValue("修正后的题干");
+  await expect(page.getByText("v2 · 当前")).toBeVisible();
+
+  await page.getByRole("button", { name: "重出本题" }).click();
+  await expect(page.getByRole("heading", { name: "确认重新出题" })).toBeVisible();
+  await page.getByRole("button", { name: "确认重新出题" }).click();
+  await expect(page.getByLabel("题干")).toHaveValue("重出的题干");
+  await expect(page.getByText("v3 · 当前")).toBeVisible();
+
+  page.once("dialog", async (dialog) => {
+    await dialog.accept();
+  });
+  await page.getByRole("button", { name: "删除历史版本 v1" }).click();
+  await expect(page.getByText("2 个版本")).toBeVisible();
+  expect(deletedVersion).toBe(1);
 });
 
 test("考试详情展示成绩柱状图、风控信息和个人学习方向", async ({ page }) => {
@@ -336,7 +497,7 @@ test("考试详情展示成绩柱状图、风控信息和个人学习方向", as
   await page.goto("/exam-management/share-1");
   await page.getByRole("button", { name: "复制链接" }).click();
   await expect(page.getByRole("button", { name: "已复制" })).toBeVisible();
-  expect(await readCopiedText(page)).toBe("http://localhost:3000/exams/public-code");
+  expect(await readCopiedText(page)).toBe(`${new URL(page.url()).origin}/exams/public-code`);
   await expect(page.getByRole("img", { name: "已完成参与者实际得分柱状图" })).toBeVisible();
   await expect(page.locator(".score-bar")).toContainText("42.5");
   const attemptRow = page.locator(".attempt-table tbody tr").first();
@@ -440,7 +601,7 @@ test("创建考试后可以在 HTTP 页面复制分享链接", async ({ page }) 
   await expect(page.getByText("考试链接已创建")).toBeVisible();
   await page.getByRole("button", { name: "复制考试链接" }).click();
   await expect(page.getByRole("button", { name: "复制考试链接" })).toContainText("已复制");
-  expect(await readCopiedText(page)).toBe("http://localhost:3000/exams/created-code");
+  expect(await readCopiedText(page)).toBe(`${new URL(page.url()).origin}/exams/created-code`);
 });
 
 test("公开结果展示答案但不展示 PDF 原文", async ({ page }) => {

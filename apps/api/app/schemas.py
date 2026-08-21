@@ -428,6 +428,41 @@ class ExamShareDetail(ExamShareSummary):
     attempts: list[ExamAttemptSummary] = Field(default_factory=list)
 
 
+class ExamShareVersionSummary(BaseModel):
+    version: int
+    is_current: bool
+    question_count: int
+    single_count: int
+    multiple_count: int
+    short_count: int
+    max_score: float
+    created_at: datetime
+
+
+class ExamShareEditResponse(BaseModel):
+    id: str
+    share_code: str
+    name: str
+    status: Literal["active", "stopped", "source_deleted", "expired"]
+    quiz_id: str | None
+    book_id: str | None
+    owner_user_id: str
+    owner_username: str
+    owner_display_name: str
+    book_title: str
+    book_author: str
+    quiz_title: str
+    source_mode: Literal["pdf", "model_knowledge"]
+    difficulty: str
+    duration_minutes: int
+    max_score: float
+    snapshot_version: int
+    created_at: datetime
+    updated_at: datetime
+    questions: list[QuestionResponse] = Field(default_factory=list)
+    versions: list[ExamShareVersionSummary] = Field(default_factory=list)
+
+
 class AnswerResult(ApiModel):
     question_id: str
     selected_answers: list[str]

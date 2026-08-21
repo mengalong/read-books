@@ -29,6 +29,7 @@ import type {
   AccessGranularity,
   AccessStatisticsReport,
   ExamAttempt,
+  ExamShareEdit,
   ExamShare,
   ExamShareStatus,
   PublicExam,
@@ -305,11 +306,42 @@ export function getExamShare(shareId: string) {
   return apiFetch<ExamShare>(`/exam-shares/${shareId}`);
 }
 
+export function getEditableExamShare(shareId: string) {
+  return apiFetch<ExamShareEdit>(`/exam-shares/${shareId}/editable`);
+}
+
 export function updateExamShare(shareId: string, payload: { name?: string; status?: "active" | "stopped"; expires_at?: string | null }) {
   return apiFetch<ExamShare>(`/exam-shares/${shareId}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+}
+
+export function updateExamShareQuestion(
+  shareId: string,
+  questionId: string,
+  payload: QuestionUpdatePayload,
+) {
+  return apiFetch<ExamShareEdit["questions"][number]>(
+    `/exam-shares/${shareId}/questions/${questionId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function regenerateExamShareQuestion(shareId: string, questionId: string) {
+  return apiFetch<ExamShareEdit["questions"][number]>(
+    `/exam-shares/${shareId}/questions/${questionId}/regenerate`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export function deleteExamShareVersion(shareId: string, version: number) {
+  return apiFetch<void>(`/exam-shares/${shareId}/versions/${version}`, { method: "DELETE" });
 }
 
 export function getExamAttemptForOwner(shareId: string, attemptId: string) {

@@ -44,6 +44,20 @@ def effective_share_status(share: ExamShare) -> str:
     return share.status
 
 
+def snapshot_payload(source: ExamShare | ExamAttempt | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(source, dict):
+        return source if isinstance(source, dict) else {}
+    if isinstance(source, ExamAttempt):
+        if isinstance(source.quiz_snapshot, dict) and source.quiz_snapshot:
+            return source.quiz_snapshot
+        if isinstance(source.exam_share.quiz_snapshot, dict):
+            return source.exam_share.quiz_snapshot
+        return {}
+    if isinstance(source.quiz_snapshot, dict):
+        return source.quiz_snapshot
+    return {}
+
+
 def serialize_question(question: Question) -> dict[str, Any]:
     return {
         "id": question.id,
@@ -58,6 +72,7 @@ def serialize_question(question: Question) -> dict[str, Any]:
         "estimated_seconds": question.estimated_seconds,
         "reference_answer": question.reference_answer,
         "grading_rubric": list(question.grading_rubric or []),
+        "source_chunk_ids": list(question.source_chunk_ids or []),
         "source_evidence": list(question.source_evidence or []),
         "max_score": question.max_score,
     }
@@ -76,8 +91,8 @@ def serialize_quiz(quiz: Quiz) -> dict[str, Any]:
     }
 
 
-def snapshot_questions(share: ExamShare) -> list[dict[str, Any]]:
-    questions = share.quiz_snapshot.get("questions", []) if isinstance(share.quiz_snapshot, dict) else []
+def snapshot_questions(source: ExamShare | ExamAttempt | dict[str, Any]) -> list[dict[str, Any]]:
+    questions = snapshot_payload(source).get("questions", [])
     return sorted(
         [item for item in questions if isinstance(item, dict)],
         key=lambda item: int(item.get("position", 0)),
@@ -106,7 +121,7 @@ def analyze_attempt_learning(
 
     questions = {
         str(question.get("id")): question
-        for question in snapshot_questions(attempt.exam_share)
+        for question in snapshot_questions(attempt)
     }
     grouped: dict[str, dict[str, Any]] = {}
     for answer in attempt.answers:
@@ -256,7 +271,7 @@ def run_exam_grading(attempt_id: str) -> None:
         if attempt is None or attempt.status != "grading":
             return
 
-        questions = {str(item.get("id")): item for item in snapshot_questions(attempt.exam_share)}
+        questions = {str(item.get("id")): item for item in snapshot_questions(attempt)}
         pending_answers = [answer for answer in attempt.answers if answer.grading_status == "pending"]
         if not pending_answers:
             _finish_attempt(db, attempt)

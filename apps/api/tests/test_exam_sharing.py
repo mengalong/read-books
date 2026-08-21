@@ -7,8 +7,18 @@ from sqlalchemy import select
 
 from app.database import SessionLocal
 from app.main import app
-from app.models import Book, ExamAnswer, ExamAttempt, ExamShare, Question, Quiz
+from app.models import (
+    Book,
+    ContentChunk,
+    ExamAnswer,
+    ExamAttempt,
+    ExamShare,
+    PdfDocument,
+    Question,
+    Quiz,
+)
 from app.services.auth import create_user_with_workspace
+from app.services.quiz_provider import GeneratedQuestion, MockQuizAiProvider
 
 
 def create_shareable_quiz(client, title: str = "考试分享测试书") -> tuple[str, str]:
@@ -178,6 +188,196 @@ def create_exam_share(client, quiz_id: str, name: str = "读书复习公开考�
     assert response.status_code == 201
     return response.json()
 
+
+def test_exam_share_edit_keeps_started_attempts_on_old_snapshot_and_deletes_history(client):
+    _, quiz_id = create_shareable_quiz(client, "考试版本隔离测试书")
+    share = create_exam_share(client, quiz_id, "版本隔离考试")
+
+    with TestClient(app) as public_client:
+        started = public_client.post(
+            f"/api/public/exams/{share['share_code']}/attempts",
+            json={"participant_name": "旧版读者"},
+        )
+        assert started.status_code == 201
+        started_body = started.json()
+        attempt_id = started_body["id"]
+        access_token = started_body["access_token"]
+        question_id = started_body["questions"][0]["id"]
+        assert started_body["questions"][0]["prompt"] == "书中提出的核心做法是什么？"
+
+        updated = client.patch(
+            f"/api/exam-shares/{share['id']}/questions/{question_id}",
+            json={
+                "prompt": "新的核心做法是什么？",
+                "correct_answers": ["B"],
+            },
+        )
+        assert updated.status_code == 200
+        assert updated.json()["prompt"] == "新的核心做法是什么？"
+
+        editable = client.get(f"/api/exam-shares/{share['id']}/editable")
+        assert editable.status_code == 200
+        editable_body = editable.json()
+        assert editable_body["snapshot_version"] == 2
+        assert [item["version"] for item in editable_body["versions"]] == [2, 1]
+        assert editable_body["versions"][0]["is_current"] is True
+
+        existing_attempt = public_client.get(
+            f"/api/public/exam-attempts/{attempt_id}",
+            headers={"X-Exam-Attempt-Token": access_token},
+        )
+        assert existing_attempt.status_code == 200
+        assert existing_attempt.json()["questions"][0]["prompt"] == "书中提出的核心做法是什么？"
+
+        old_submission = public_client.post(
+            f"/api/public/exam-attempts/{attempt_id}/submit",
+            json={
+                "answers": [
+                    {
+                        "question_id": question_id,
+                        "selected_answers": ["A"],
+                    }
+                ],
+                "elapsed_seconds": 12,
+            },
+            headers={"X-Exam-Attempt-Token": access_token},
+        )
+        assert old_submission.status_code == 202
+        assert old_submission.json()["total_score"] == 40
+
+        fresh = public_client.post(
+            f"/api/public/exams/{share['share_code']}/attempts",
+            json={"participant_name": "新版本读者"},
+        )
+        assert fresh.status_code == 201
+        fresh_body = fresh.json()
+        assert fresh_body["questions"][0]["prompt"] == "新的核心做法是什么？"
+        fresh_submission = public_client.post(
+            f"/api/public/exam-attempts/{fresh_body['id']}/submit",
+            json={
+                "answers": [
+                    {
+                        "question_id": question_id,
+                        "selected_answers": ["B"],
+                    }
+                ],
+                "elapsed_seconds": 12,
+            },
+            headers={"X-Exam-Attempt-Token": fresh_body["access_token"]},
+        )
+        assert fresh_submission.status_code == 202
+        assert fresh_submission.json()["total_score"] == 40
+
+    deleted_history = client.delete(f"/api/exam-shares/{share['id']}/versions/1")
+    assert deleted_history.status_code == 204
+    after_delete = client.get(f"/api/exam-shares/{share['id']}/editable")
+    assert after_delete.status_code == 200
+    assert [item["version"] for item in after_delete.json()["versions"]] == [2]
+    blocked_delete = client.delete(f"/api/exam-shares/{share['id']}/versions/2")
+    assert blocked_delete.status_code == 409
+
+
+def test_exam_share_question_regeneration_creates_new_version(client, monkeypatch):
+    book_id, quiz_id = create_shareable_quiz(client, "考试重出测试书")
+    with SessionLocal() as db:
+        pdf = PdfDocument(
+            book_id=book_id,
+            file_name="考试原文.pdf",
+            file_path="demo://exam-regeneration",
+            file_size=2048,
+            page_count=3,
+            chunk_count=3,
+            parse_status="completed",
+        )
+        db.add(pdf)
+        db.flush()
+        db.add_all(
+            [
+                ContentChunk(
+                    id="exam-chunk-1",
+                    book_id=book_id,
+                    pdf_id=pdf.id,
+                    page_number=1,
+                    sequence=1,
+                    content="第 1 页原文，主动回忆可以帮助检验掌握程度。",
+                    char_count=26,
+                ),
+                ContentChunk(
+                    id="exam-chunk-2",
+                    book_id=book_id,
+                    pdf_id=pdf.id,
+                    page_number=2,
+                    sequence=1,
+                    content="第 2 页原文，间隔重复有助于巩固记忆。",
+                    char_count=24,
+                ),
+                ContentChunk(
+                    id="exam-chunk-3",
+                    book_id=book_id,
+                    pdf_id=pdf.id,
+                    page_number=3,
+                    sequence=1,
+                    content="第 3 页原文，理解核心概念比死记硬背更重要。",
+                    char_count=24,
+                ),
+            ]
+        )
+        db.commit()
+
+    share = create_exam_share(client, quiz_id, "考试重出考试")
+    editable_before = client.get(f"/api/exam-shares/{share['id']}/editable")
+    assert editable_before.status_code == 200
+    question_id = editable_before.json()["questions"][0]["id"]
+
+    def fake_generate(self, **kwargs):
+        assert kwargs["resource_type"] == "book"
+        assert kwargs["source_mode"] == "pdf"
+        assert kwargs["question_exclusions"][0]["role"] == "current_question"
+        return [
+            GeneratedQuestion(
+                question_type="single",
+                prompt="重出的考试题",
+                options=[
+                    {"id": "A", "text": "新选项 A"},
+                    {"id": "B", "text": "新选项 B"},
+                    {"id": "C", "text": "新选项 C"},
+                    {"id": "D", "text": "新选项 D"},
+                ],
+                correct_answers=["C"],
+                explanation="重出后的解析",
+                knowledge_point="重出后的知识点",
+                estimated_seconds=45,
+                reference_answer=None,
+                grading_rubric=[],
+                source_chunk_ids=["exam-chunk-2"],
+                source_evidence=[],
+                max_score=40,
+            )
+        ]
+
+    monkeypatch.setattr(MockQuizAiProvider, "generate_questions", fake_generate)
+
+    regenerated = client.post(
+        f"/api/exam-shares/{share['id']}/questions/{question_id}/regenerate",
+    )
+    assert regenerated.status_code == 200
+    assert regenerated.json()["prompt"] == "重出的考试题"
+    assert regenerated.json()["correct_answers"] == ["C"]
+
+    editable_after = client.get(f"/api/exam-shares/{share['id']}/editable")
+    assert editable_after.status_code == 200
+    body = editable_after.json()
+    assert body["snapshot_version"] == 2
+    assert [item["version"] for item in body["versions"]] == [2, 1]
+    assert body["versions"][0]["is_current"] is True
+
+    with TestClient(app) as public_client:
+        started = public_client.post(
+            f"/api/public/exams/{share['share_code']}/attempts",
+            json={"participant_name": "重出后读者"},
+        )
+        assert started.status_code == 201
+        assert started.json()["questions"][0]["prompt"] == "重出的考试题"
 
 def test_exam_share_name_rejects_blank_values(client):
     _, quiz_id = create_shareable_quiz(client, "活动名称校验测试书")

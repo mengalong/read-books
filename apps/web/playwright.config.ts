@@ -9,13 +9,16 @@ export default defineConfig({
   fullyParallel: true,
   reporter: "list",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: "http://localhost:3001",
     trace: "retain-on-failure",
   },
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        channel: process.env.PLAYWRIGHT_CHANNEL,
+      },
     },
   ],
   webServer: [
@@ -27,9 +30,9 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
-      command: "NEXT_PUBLIC_API_BASE_URL=http://localhost:8002/api npm run dev",
+      command: "NEXT_PUBLIC_API_BASE_URL=http://localhost:8002/api npm run build && PORT=3001 NEXT_PUBLIC_API_BASE_URL=http://localhost:8002/api npm run start",
       cwd: path.resolve(__dirname),
-      url: "http://localhost:3000",
+      url: "http://localhost:3001",
       reuseExistingServer: true,
       timeout: 120_000,
     },

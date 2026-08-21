@@ -4,7 +4,7 @@ const buildUpdatedAt = process.env.NEXT_PUBLIC_BUILD_UPDATED_AT || new Date().to
 
 const nextConfig: NextConfig = {
   // Keep development output separate so a production build cannot invalidate a running dev server.
-  distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
+  distDir: process.env.NEXT_DIST_DIR || (process.env.NODE_ENV === "development" ? ".next-dev" : ".next"),
   env: {
     NEXT_PUBLIC_BUILD_UPDATED_AT: buildUpdatedAt,
   },

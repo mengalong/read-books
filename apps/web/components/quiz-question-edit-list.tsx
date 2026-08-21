@@ -3,7 +3,7 @@
 import { AlertTriangle, CheckCircle2, LoaderCircle, RotateCcw, Save } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
-import { ApiError, regenerateQuizQuestion, updateQuizQuestion } from "@/lib/api";
+import { ApiError } from "@/lib/api";
 import type { Question, QuestionUpdatePayload } from "@/lib/types";
 
 const OPTION_IDS = ["A", "B", "C", "D"] as const;
@@ -15,29 +15,43 @@ const questionTypeLabels: Record<Question["question_type"], string> = {
 };
 
 type QuizQuestionEditListProps = {
-  quizId: string;
   questions: Question[];
   onSaved: (question: Question) => void;
+  onUpdateQuestion: (questionId: string, payload: QuestionUpdatePayload) => Promise<Question>;
+  onRegenerateQuestion: (questionId: string) => Promise<Question>;
 };
 
-export function QuizQuestionEditList({ quizId, questions, onSaved }: QuizQuestionEditListProps) {
+export function QuizQuestionEditList({
+  questions,
+  onSaved,
+  onUpdateQuestion,
+  onRegenerateQuestion,
+}: QuizQuestionEditListProps) {
   return (
     <div className="quiz-question-edit-list">
       {questions.map((question) => (
-        <QuestionEditForm key={question.id} onSaved={onSaved} question={question} quizId={quizId} />
+        <QuestionEditForm
+          key={question.id}
+          onRegenerateQuestion={onRegenerateQuestion}
+          onSaved={onSaved}
+          onUpdateQuestion={onUpdateQuestion}
+          question={question}
+        />
       ))}
     </div>
   );
 }
 
 function QuestionEditForm({
-  quizId,
   question,
   onSaved,
+  onUpdateQuestion,
+  onRegenerateQuestion,
 }: {
-  quizId: string;
   question: Question;
   onSaved: (question: Question) => void;
+  onUpdateQuestion: (questionId: string, payload: QuestionUpdatePayload) => Promise<Question>;
+  onRegenerateQuestion: (questionId: string) => Promise<Question>;
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -102,7 +116,7 @@ function QuestionEditForm({
       payload.correct_answers = OPTION_IDS.filter((id) => correctAnswers.includes(id));
     }
     try {
-      const nextQuestion = await updateQuizQuestion(quizId, question.id, payload);
+      const nextQuestion = await onUpdateQuestion(question.id, payload);
       onSaved(nextQuestion);
       setSaved(true);
     } catch (reason: unknown) {
@@ -129,7 +143,7 @@ function QuestionEditForm({
     setError("");
     setSaved(false);
     try {
-      const nextQuestion = await regenerateQuizQuestion(quizId, question.id);
+      const nextQuestion = await onRegenerateQuestion(question.id);
       onSaved(nextQuestion);
       setSaved(true);
     } catch (reason: unknown) {

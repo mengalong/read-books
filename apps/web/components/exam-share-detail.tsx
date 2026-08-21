@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, BarChart3, Check, CircleX, Copy, Download, Eye, LoaderCircle, Monitor, RefreshCw, RotateCcw, ShieldAlert, Smartphone, Tablet, UserRound, X } from "lucide-react";
+import { ArrowLeft, BarChart3, Check, CircleX, Copy, Download, Eye, LoaderCircle, Monitor, PencilLine, RefreshCw, RotateCcw, ShieldAlert, Smartphone, Tablet, UserRound, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -149,7 +149,7 @@ export function ExamShareDetailView({ shareId, admin = false }: { shareId: strin
       {error && <div className="toast-error">{error}</div>}
       <header className="exam-detail-header">
         <div><div className="eyebrow">Exam detail</div><h1 className="page-title">{share.name}</h1><p className="page-description">{share.book_title} · {share.quiz_title}{admin ? ` · 分享者：${share.owner_display_name}（${share.owner_username}）` : ""}</p></div>
-        <div className="header-actions"><span className={`exam-status exam-status-${share.status}`}>{statusLabels[share.status]}</span><button className="button button-secondary" onClick={() => void copyLink()} type="button">{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? "已复制" : "复制链接"}</button></div>
+        <div className="header-actions"><span className={`exam-status exam-status-${share.status}`}>{statusLabels[share.status]}</span><Link className="button button-secondary" href={`/exam-management/${share.id}/edit`}><PencilLine size={15} />编辑题目</Link><button className="button button-secondary" onClick={() => void copyLink()} type="button">{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? "已复制" : "复制链接"}</button></div>
       </header>
 
       <div className="share-link-strip"><span>{`${typeof window === "undefined" ? "" : window.location.origin}/exams/${share.share_code}`}</span><small>创建于 {formatDateTime(share.created_at)} · {share.expires_at ? `截止 ${formatDateTime(share.expires_at)}` : "长期有效"}</small></div>

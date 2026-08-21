@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import copy
 import re
 import threading
-from typing import Iterable
+from types import SimpleNamespace
+from typing import Any, Iterable
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -221,7 +223,7 @@ def _question_exclusion_payload(question: Question, role: str = "same_type_refer
         "question_type": question.question_type,
         "prompt": compact_text(question.prompt, 140),
         "knowledge_point": compact_text(question.knowledge_point, 60),
-        "source_chunk_ids": list(question.source_chunk_ids or []),
+        "source_chunk_ids": list(getattr(question, "source_chunk_ids", None) or []),
     }
     if question.question_type == "short" and question.reference_answer:
         payload["reference_answer"] = compact_text(question.reference_answer, 120)
@@ -252,6 +254,17 @@ def _build_regeneration_guidance(quiz: Quiz, question: Question, attempt: int) -
     return guidance
 
 
+def _build_snapshot_regeneration_guidance(book_title: str, question: Any, attempt: int) -> str:
+    guidance = (
+        f"本次是《{book_title}》第 {question.position} 题的"
+        f"{question_type_label(str(getattr(question, 'question_type', 'single')))}重出，请确保新题与同类题目在题干、知识点和原文依据上都不同，"
+        "优先换用不同的原文片段和不同的提问角度。"
+    )
+    if attempt > 0:
+        guidance += f" 这是第 {attempt + 1} 次尝试，请进一步拉开差异。"
+    return guidance
+
+
 def _is_duplicate_question(
     candidate: GeneratedQuestion, siblings: list[Question], recent_candidates: list[GeneratedQuestion]
 ) -> bool:
@@ -259,7 +272,7 @@ def _is_duplicate_question(
     candidate_knowledge = _normalize_question_text(candidate.knowledge_point)
     candidate_sources = set(candidate.source_chunk_ids or [])
     for question in siblings:
-        question_sources = set(question.source_chunk_ids or [])
+        question_sources = set(getattr(question, "source_chunk_ids", None) or [])
         if candidate_sources and question_sources and candidate_sources & question_sources:
             return True
         if candidate_prompt and candidate_prompt == _normalize_question_text(question.prompt):
@@ -375,6 +388,123 @@ def regenerate_quiz_question(
         db.commit()
         db.refresh(question)
         return question
+
+    raise ValueError("重出失败，请先调整同类题目或原文来源后再试")
+
+
+def regenerate_snapshot_question(
+    db: Session,
+    *,
+    book_id: str,
+    book_title: str,
+    author: str,
+    resource_type: str,
+    source_mode: str,
+    difficulty: str,
+    duration_minutes: int,
+    workspace_id: str | None = None,
+    quiz_id: str | None = None,
+    exam_share_id: str | None = None,
+    current_question: dict[str, object],
+    sibling_questions: list[dict[str, object]],
+    user_id: str | None = None,
+    generation_number: int = 0,
+) -> dict[str, object]:
+    current = SimpleNamespace(**current_question)
+    same_type_questions = [
+        SimpleNamespace(**item)
+        for item in sibling_questions
+        if str(item.get("id")) != str(current_question.get("id"))
+        and item.get("question_type") == current_question.get("question_type")
+    ]
+    comparison_questions = [current, *same_type_questions]
+    all_chunks = _get_chunks(db, book_id)
+    if source_mode == "pdf" and not all_chunks:
+        raise ValueError("没有可用于出题的 PDF 原文")
+
+    blocked_chunk_ids = {
+        chunk_id
+        for sibling in same_type_questions
+        for chunk_id in (getattr(sibling, "source_chunk_ids", None) or [])
+    }
+    preferred_chunks = [chunk for chunk in all_chunks if chunk.id not in blocked_chunk_ids]
+    chunks = preferred_chunks or all_chunks
+    recent_chunk_ids = set() if preferred_chunks else blocked_chunk_ids
+    file_names = _chunk_file_names(db, chunks)
+    provider = get_quiz_provider(
+        settings,
+        get_effective_model_configuration(db, settings),
+        get_effective_prompt_templates(db),
+        new_usage_context(
+            "question_regeneration",
+            f"《{book_title}》重出第 {current.position} 题",
+            book_id=book_id,
+            quiz_id=quiz_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            exam_share_id=exam_share_id,
+        ),
+    )
+    question_exclusions = [
+        _question_exclusion_payload(current, role="current_question"),
+        *(_question_exclusion_payload(item) for item in same_type_questions),
+    ]
+    rejected_candidates: list[GeneratedQuestion] = []
+    question_type_counts = {"single": 0, "multiple": 0, "short": 0}
+    question_type_counts[str(current.question_type)] = 1
+
+    for attempt in range(3):
+        result = provider.generate_questions(
+            chunks=chunks,
+            file_names=file_names,
+            single_count=question_type_counts["single"],
+            multiple_count=question_type_counts["multiple"],
+            short_count=question_type_counts["short"],
+            difficulty=difficulty,
+            generation_number=generation_number + current.position + attempt,
+            recent_chunk_ids=recent_chunk_ids,
+            duration_minutes=duration_minutes,
+            book_title=book_title,
+            author=author,
+            resource_type=resource_type,
+            source_mode=source_mode,
+            question_exclusions=[
+                *question_exclusions,
+                *(
+                    _generated_question_exclusion_payload(item)
+                    for item in rejected_candidates
+                ),
+            ],
+            regeneration_guidance=_build_snapshot_regeneration_guidance(
+                book_title, current, attempt
+            ),
+        )
+        if len(result) != 1:
+            raise RuntimeError("重出结果数量不正确")
+        item = result[0]
+        if item.question_type != current.question_type:
+            raise RuntimeError("重出结果题型不正确")
+        if _is_duplicate_question(item, comparison_questions, rejected_candidates):
+            rejected_candidates.append(item)
+            continue
+
+        next_question = copy.deepcopy(current_question)
+        next_question["prompt"] = item.prompt
+        next_question["options"] = item.options
+        next_question["correct_answers"] = item.correct_answers
+        next_question["explanation"] = item.explanation
+        next_question["knowledge_point"] = item.knowledge_point
+        next_question["difficulty"] = difficulty
+        next_question["estimated_seconds"] = item.estimated_seconds
+        next_question["reference_answer"] = item.reference_answer
+        next_question["grading_rubric"] = (
+            normalize_rubric_scores(item.grading_rubric, float(current_question.get("max_score") or 0))
+            if item.question_type == "short"
+            else item.grading_rubric
+        )
+        next_question["source_chunk_ids"] = item.source_chunk_ids
+        next_question["source_evidence"] = item.source_evidence
+        return next_question
 
     raise ValueError("重出失败，请先调整同类题目或原文来源后再试")
 

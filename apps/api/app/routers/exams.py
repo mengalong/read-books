@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hmac
 import secrets
 from datetime import date, datetime, time, timedelta, timezone
@@ -18,9 +19,11 @@ from app.dependencies import (
     require_ready_identity,
 )
 from app.models import Book, ExamAnswer, ExamAttempt, ExamShare, Quiz
+from app.models import ExamShareVersion
 from app.schemas import (
     AnswerSubmission,
     ExamAnswerResponse,
+    ExamShareEditResponse,
     ExamAttemptCreate,
     ExamAttemptResponse,
     ExamAttemptSummary,
@@ -29,6 +32,9 @@ from app.schemas import (
     ExamShareDetail,
     ExamShareSummary,
     ExamShareUpdate,
+    ExamShareVersionSummary,
+    QuestionResponse,
+    QuestionUpdateRequest,
     PublicExamResponse,
     QuizSubmitRequest,
 )
@@ -45,6 +51,7 @@ from app.services.exam_sharing import (
     snapshot_questions,
     unanswered_grade,
 )
+from app.services.quiz_generation import regenerate_snapshot_question
 from app.services.wechat_auth import (
     WechatIdentity,
     effective_configuration as effective_wechat_configuration,
@@ -99,6 +106,14 @@ def share_statement():
     )
 
 
+def edit_share_statement():
+    return select(ExamShare).options(
+        selectinload(ExamShare.owner_user),
+        selectinload(ExamShare.book),
+        selectinload(ExamShare.versions),
+    )
+
+
 def get_owned_share_or_404(db: Session, share_id: str, identity: AuthIdentity) -> ExamShare:
     share = db.scalar(
         share_statement().where(
@@ -114,6 +129,28 @@ def get_owned_share_or_404(db: Session, share_id: str, identity: AuthIdentity) -
 
 def get_admin_share_or_404(db: Session, share_id: str) -> ExamShare:
     share = db.scalar(share_statement().where(ExamShare.id == share_id))
+    if share is None:
+        raise HTTPException(status_code=404, detail="未找到这个考试活动")
+    return share
+
+
+def get_editable_share_or_404(
+    db: Session, share_id: str, identity: AuthIdentity
+) -> ExamShare:
+    statement = edit_share_statement().where(ExamShare.id == share_id)
+    if identity.user.role != "admin":
+        statement = statement.where(
+            ExamShare.workspace_id == identity.workspace.id,
+            ExamShare.owner_user_id == identity.user.id,
+        )
+    share = db.scalar(statement)
+    if share is None:
+        raise HTTPException(status_code=404, detail="未找到这个考试活动")
+    return share
+
+
+def get_admin_editable_share_or_404(db: Session, share_id: str) -> ExamShare:
+    share = db.scalar(edit_share_statement().where(ExamShare.id == share_id))
     if share is None:
         raise HTTPException(status_code=404, detail="未找到这个考试活动")
     return share
@@ -229,6 +266,59 @@ def to_share_detail(share: ExamShare) -> ExamShareDetail:
     )
 
 
+def to_share_version_summary(
+    version: ExamShareVersion, *, current_version: int
+) -> ExamShareVersionSummary:
+    questions = snapshot_questions(version.quiz_snapshot)
+    return ExamShareVersionSummary(
+        version=version.version,
+        is_current=version.version == current_version,
+        question_count=len(questions),
+        single_count=sum(item.get("question_type") == "single" for item in questions),
+        multiple_count=sum(item.get("question_type") == "multiple" for item in questions),
+        short_count=sum(item.get("question_type") == "short" for item in questions),
+        max_score=round(sum(float(item.get("max_score") or 0) for item in questions), 1),
+        created_at=version.created_at,
+    )
+
+
+def to_edit_response(share: ExamShare) -> ExamShareEditResponse:
+    current_version = int(share.snapshot_version or 1)
+    return ExamShareEditResponse(
+        id=share.id,
+        share_code=share.share_code,
+        name=share.name,
+        status=effective_share_status(share),
+        quiz_id=share.quiz_id,
+        book_id=share.book_id,
+        owner_user_id=share.owner_user_id,
+        owner_username=share.owner_user.username,
+        owner_display_name=share.owner_user.display_name,
+        book_title=share.book_title,
+        book_author=share.book_author,
+        quiz_title=share.quiz_title,
+        source_mode=share.source_mode,
+        difficulty=share.difficulty,
+        duration_minutes=share.duration_minutes,
+        max_score=share.max_score,
+        snapshot_version=current_version,
+        created_at=share.created_at,
+        updated_at=share.updated_at,
+        questions=[
+            to_question_response(question, reveal_answers=True, include_sources=True)
+            for question in snapshot_questions(share)
+        ],
+        versions=[
+            to_share_version_summary(version, current_version=current_version)
+            for version in sorted(
+                share.versions,
+                key=lambda item: item.version,
+                reverse=True,
+            )
+        ],
+    )
+
+
 def to_question_response(
     question: dict,
     *,
@@ -261,7 +351,7 @@ def to_attempt_response(
 ) -> ExamAttemptResponse:
     reveal_answers = manager_view or attempt.status == "completed"
     weak_knowledge_points, recommended_direction = analyze_attempt_learning(attempt)
-    questions = snapshot_questions(attempt.exam_share)
+    questions = snapshot_questions(attempt)
     answers = sorted(
         attempt.answers,
         key=lambda answer: next(
@@ -404,6 +494,13 @@ def create_exam_share(
     )
     db.add(share)
     db.flush()
+    db.add(
+        ExamShareVersion(
+            exam_share_id=share.id,
+            version=1,
+            quiz_snapshot=copy.deepcopy(share.quiz_snapshot),
+        )
+    )
     add_audit_log(
         db,
         actor_user_id=identity.user.id,
@@ -504,6 +601,265 @@ def update_exam_share(
         )
     db.commit()
     return to_share_detail(get_owned_share_or_404(db, share_id, identity))
+
+
+def _get_snapshot_question_or_404(share: ExamShare, question_id: str) -> dict[str, object]:
+    question = next(
+        (
+            item
+            for item in snapshot_questions(share)
+            if str(item.get("id")) == question_id
+        ),
+        None,
+    )
+    if question is None:
+        raise HTTPException(status_code=404, detail="未找到这道题目")
+    return question
+
+
+def _persist_share_snapshot(
+    db: Session,
+    share: ExamShare,
+    snapshot: dict[str, object],
+    *,
+    request: Request,
+    identity: AuthIdentity,
+    action: str,
+    details: dict[str, object] | None = None,
+) -> None:
+    share.snapshot_version = int(share.snapshot_version or 0) + 1
+    share.quiz_snapshot = snapshot
+    db.add(
+        ExamShareVersion(
+            exam_share_id=share.id,
+            version=share.snapshot_version,
+            quiz_snapshot=copy.deepcopy(snapshot),
+        )
+    )
+    add_audit_log(
+        db,
+        actor_user_id=identity.user.id,
+        action=action,
+        target_type="exam_share",
+        target_id=share.id,
+        details=details or {},
+        ip_address=client_ip(request),
+    )
+
+
+def _apply_snapshot_question_updates(
+    question: dict[str, object], payload: QuestionUpdateRequest
+) -> None:
+    changes = payload.model_dump(exclude_unset=True)
+    if "prompt" in changes:
+        prompt = str(changes["prompt"] or "").strip()
+        if not prompt:
+            raise HTTPException(status_code=422, detail="题干不能为空")
+        question["prompt"] = prompt
+    if "explanation" in changes:
+        explanation = str(changes["explanation"] or "").strip()
+        question["explanation"] = explanation or ""
+    if "knowledge_point" in changes:
+        knowledge_point = str(changes["knowledge_point"] or "").strip()
+        if not knowledge_point:
+            raise HTTPException(status_code=422, detail="知识点不能为空")
+        question["knowledge_point"] = knowledge_point
+    if "reference_answer" in changes:
+        reference_answer = str(changes["reference_answer"] or "").strip()
+        question["reference_answer"] = reference_answer or None
+    if "grading_rubric" in changes:
+        question["grading_rubric"] = changes["grading_rubric"] or []
+
+    question_type = str(question.get("question_type") or "")
+    if question_type == "short":
+        if "options" in changes and changes["options"]:
+            raise HTTPException(status_code=422, detail="问答题不支持选项")
+        if "correct_answers" in changes and changes["correct_answers"]:
+            raise HTTPException(status_code=422, detail="问答题不需要标准选项答案")
+        question["options"] = []
+        question["correct_answers"] = []
+        return
+
+    option_ids = [
+        str(option["id"])
+        for option in (question.get("options") or [])
+        if isinstance(option, dict) and option.get("id") is not None
+    ]
+    if "options" in changes:
+        options = changes["options"] or []
+        normalized_options: list[dict[str, str]] = []
+        for option in options:
+            if not isinstance(option, dict):
+                raise HTTPException(status_code=422, detail="选项格式不正确")
+            option_id = str(option.get("id", "")).strip().upper()
+            option_text = str(option.get("text", "")).strip()
+            if not option_id or not option_text:
+                raise HTTPException(status_code=422, detail="选项内容不能为空")
+            normalized_options.append({"id": option_id, "text": option_text})
+        if len(normalized_options) != 4:
+            raise HTTPException(status_code=422, detail="选择题需要保留四个选项")
+        option_ids = [option["id"] for option in normalized_options]
+        if set(option_ids) != {"A", "B", "C", "D"}:
+            raise HTTPException(status_code=422, detail="选择题选项编号必须是 A、B、C、D")
+        question["options"] = normalized_options
+
+    if "correct_answers" in changes:
+        correct_answers = [
+            str(answer).strip().upper()
+            for answer in changes["correct_answers"]
+            if str(answer).strip()
+        ]
+        deduped = list(dict.fromkeys(correct_answers))
+        if not deduped:
+            raise HTTPException(status_code=422, detail="请选择标准答案")
+        if not set(deduped).issubset(set(option_ids)):
+            raise HTTPException(status_code=422, detail="标准答案必须来自选项")
+        if question_type == "single" and len(deduped) != 1:
+            raise HTTPException(status_code=422, detail="单选题只能有一个标准答案")
+        if question_type == "multiple" and len(deduped) < 1:
+            raise HTTPException(status_code=422, detail="多选题至少要有一个标准答案")
+        question["correct_answers"] = deduped
+
+
+@router.get("/exam-shares/{share_id}/editable", response_model=ExamShareEditResponse)
+def get_exam_share_editable(
+    share_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> ExamShareEditResponse:
+    return to_edit_response(get_editable_share_or_404(db, share_id, identity))
+
+
+@router.patch("/exam-shares/{share_id}/questions/{question_id}", response_model=QuestionResponse)
+def update_exam_share_question(
+    share_id: str,
+    question_id: str,
+    payload: QuestionUpdateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> QuestionResponse:
+    share = get_editable_share_or_404(db, share_id, identity)
+    snapshot = copy.deepcopy(share.quiz_snapshot or {})
+    question = _get_snapshot_question_or_404(share, question_id)
+    snapshot_question = next(
+        (item for item in snapshot.get("questions", []) if str(item.get("id")) == question_id),
+        None,
+    )
+    if snapshot_question is None:
+        raise HTTPException(status_code=404, detail="未找到这道题目")
+
+    _apply_snapshot_question_updates(snapshot_question, payload)
+    _persist_share_snapshot(
+        db,
+        share,
+        snapshot,
+        request=request,
+        identity=identity,
+        action="exam_share.question_updated",
+        details={"question_id": question_id, "snapshot_version": int(share.snapshot_version or 0) + 1},
+    )
+    db.commit()
+    return next(
+        (
+            to_question_response(item, reveal_answers=True, include_sources=True)
+            for item in snapshot_questions(share)
+            if str(item.get("id")) == question_id
+        ),
+        to_question_response(question, reveal_answers=True, include_sources=True),
+    )
+
+
+@router.post("/exam-shares/{share_id}/questions/{question_id}/regenerate", response_model=QuestionResponse)
+def regenerate_exam_share_question(
+    share_id: str,
+    question_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> QuestionResponse:
+    share = get_editable_share_or_404(db, share_id, identity)
+    if share.book is None:
+        raise HTTPException(status_code=409, detail="原资源已删除，不能重新出题")
+    snapshot = copy.deepcopy(share.quiz_snapshot or {})
+    questions = [
+        item
+        for item in snapshot.get("questions", [])
+        if isinstance(item, dict)
+    ]
+    current_question = _get_snapshot_question_or_404(share, question_id)
+    try:
+        regenerated = regenerate_snapshot_question(
+            db,
+            book_id=share.book_id or "",
+            book_title=share.book.title,
+            author=share.book.author,
+            resource_type=share.book.resource_type,
+            source_mode=share.source_mode,
+            difficulty=share.difficulty,
+            duration_minutes=share.duration_minutes,
+            workspace_id=share.workspace_id,
+            quiz_id=share.quiz_id,
+            exam_share_id=share.id,
+            current_question=current_question,
+            sibling_questions=questions,
+            user_id=identity.user.id,
+            generation_number=int(share.snapshot_version or 0),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    snapshot_questions_list = snapshot.get("questions", [])
+    for index, item in enumerate(snapshot_questions_list):
+        if isinstance(item, dict) and str(item.get("id")) == question_id:
+            snapshot_questions_list[index] = regenerated
+            break
+    _persist_share_snapshot(
+        db,
+        share,
+        snapshot,
+        request=request,
+        identity=identity,
+        action="exam_share.question_regenerated",
+        details={"question_id": question_id, "snapshot_version": int(share.snapshot_version or 0) + 1},
+    )
+    db.commit()
+    return to_question_response(regenerated, reveal_answers=True, include_sources=True)
+
+
+@router.delete("/exam-shares/{share_id}/versions/{version}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_exam_share_version(
+    share_id: str,
+    version: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> None:
+    share = get_editable_share_or_404(db, share_id, identity)
+    current_version = int(share.snapshot_version or 1)
+    if version >= current_version:
+        raise HTTPException(status_code=409, detail="当前版本不能删除")
+    version_row = db.scalar(
+        select(ExamShareVersion).where(
+            ExamShareVersion.exam_share_id == share.id,
+            ExamShareVersion.version == version,
+        )
+    )
+    if version_row is None:
+        raise HTTPException(status_code=404, detail="未找到这个历史版本")
+    db.delete(version_row)
+    add_audit_log(
+        db,
+        actor_user_id=identity.user.id,
+        action="exam_share.version_deleted",
+        target_type="exam_share",
+        target_id=share.id,
+        details={"version": version},
+        ip_address=client_ip(request),
+    )
+    db.commit()
 
 
 @router.get("/exam-shares/{share_id}/attempts", response_model=list[ExamAttemptSummary])
@@ -730,6 +1086,8 @@ def start_public_exam_attempt(
         participant_name=participant_name,
         participant_avatar_url=participant_avatar_url,
         access_token_hash=access_token_hash,
+        snapshot_version=share.snapshot_version,
+        quiz_snapshot=copy.deepcopy(share.quiz_snapshot),
         status="in_progress",
         max_score=share.max_score,
         started_at=utc_now(),
@@ -797,7 +1155,7 @@ def submit_public_exam_attempt(
     submitted: dict[str, AnswerSubmission] = {
         item.question_id: item for item in payload.answers
     }
-    questions = snapshot_questions(attempt.exam_share)
+    questions = snapshot_questions(attempt)
     question_ids = {str(question.get("id")) for question in questions}
     if set(submitted) - question_ids:
         raise HTTPException(status_code=422, detail="提交内容包含不属于这场考试的题目")
