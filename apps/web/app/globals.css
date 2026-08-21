@@ -4961,23 +4961,6 @@ p {
   margin-top: 1px;
 }
 
-.public-privacy-note {
-  align-items: flex-start;
-  color: var(--muted);
-  display: flex;
-  font-size: 11px;
-  gap: 8px;
-  line-height: 1.65;
-  margin-top: 17px;
-  padding: 0 5px;
-}
-
-.public-privacy-note svg {
-  color: var(--green);
-  flex: 0 0 auto;
-  margin-top: 1px;
-}
-
 .public-exam-unavailable {
   background: var(--red-soft);
   color: #984635;

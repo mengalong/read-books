@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRight, BookOpenText, CalendarClock, Clock3, ListChecks, LogOut, ScanLine, ShieldCheck, UserRound } from "lucide-react";
+import { ArrowRight, BookOpenText, CalendarClock, Clock3, ListChecks, LogOut, ScanLine, UserRound } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -107,7 +107,6 @@ export default function PublicExamEntryPage() {
           </div>
           {!(exam.identity_type === "anonymous" && exam.wechat_login_required) && <button className="button button-primary" disabled={starting} onClick={() => void handleStart()} type="button">{starting ? "正在准备……" : "开始答题"}<ArrowRight size={15} /></button>}
         </div>}
-        <div className="public-privacy-note"><ShieldCheck size={16} /><span>你的身份名称、头像、答案、成绩、提交时间、终端和 IP 将对考试分享者可见。微信认证用于识别同一微信账号，不等同于实名身份认证。</span></div>
       </main>
     </div>
   );
