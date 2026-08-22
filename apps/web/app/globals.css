@@ -4909,6 +4909,76 @@ p {
   max-width: 920px;
 }
 
+.wechat-diagnostic-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.wechat-diagnostic-steps {
+  display: grid;
+  gap: 18px;
+}
+
+.wechat-diagnostic-step {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+  padding-top: 18px;
+}
+
+.wechat-diagnostic-step:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.wechat-diagnostic-step-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.wechat-diagnostic-step-heading {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wechat-diagnostic-step-heading strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.wechat-diagnostic-step-heading span {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.wechat-diagnostic-step-copy {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.wechat-diagnostic-session {
+  margin-top: 0;
+}
+
+.wechat-diagnostic-command {
+  background: #1f2926;
+  border-radius: 5px;
+  color: #d6e5dc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.65;
+  margin: 0;
+  overflow-x: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .wechat-configuration-status {
   align-items: flex-start;
   background: #f4f8f6;

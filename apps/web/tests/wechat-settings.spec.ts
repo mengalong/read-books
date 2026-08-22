@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { mockInsecureClipboard, readCopiedText } from "./test-helpers";
+
 const currentUser = {
   id: "admin-1",
   username: "admin",
@@ -74,6 +76,7 @@ test("管理员可以配置微信登录并覆盖已保存的密钥", async ({ pa
 });
 
 test("管理员可以从微信配置页进入自检页并查看当前微信会话", async ({ page }) => {
+  await mockInsecureClipboard(page);
   await page.route("**/api/auth/me", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(currentUser) });
   });
@@ -82,7 +85,7 @@ test("管理员可以从微信配置页进入自检页并查看当前微信会�
       contentType: "application/json",
       body: JSON.stringify({
         id: "default",
-        enabled: true,
+        enabled: false,
         required_for_public_exams: false,
         app_id: "wx-test-app-id",
         app_secret_configured: true,
@@ -121,6 +124,12 @@ test("管理员可以从微信配置页进入自检页并查看当前微信会�
   await page.goto("/settings/wechat");
   await page.getByRole("link", { name: "微信登录自检" }).click();
   await expect(page.getByRole("heading", { name: "微信登录自检" })).toBeVisible();
+  const diagnosticStep = page.getByRole("article").filter({ hasText: "第 2 步 · 发起诊断登录" });
+  await expect(diagnosticStep).toBeVisible();
+  await expect(diagnosticStep.locator("pre")).toContainText("/tmp/huijuan-wechat-oauth.cookie");
+  await page.getByRole("button", { name: "复制第 2 步命令" }).click();
+  expect(await readCopiedText(page)).toContain("/api/public/wechat/diagnostic/login");
+  await expect(page.getByRole("button", { name: "开始微信登录自检" })).toBeEnabled();
   await expect(page.getByText("微信读者")).toBeVisible();
   await expect(page.getByText("OpenID：wechat-openid-1")).toBeVisible();
   await expect(page.getByText("会话到期：")).toBeVisible();

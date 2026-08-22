@@ -107,11 +107,15 @@ def start_wechat_oauth(
     *,
     share_code: str,
     verify_exam_share: bool,
+    require_enabled: bool,
 ) -> RedirectResponse:
     if verify_exam_share and db.query(ExamShare.id).filter(ExamShare.share_code == share_code).scalar() is None:
         raise HTTPException(status_code=404, detail="考试链接不存在或已经失效")
     configuration = effective_configuration(db, settings)
-    if not configuration.login_available:
+    if require_enabled:
+        if not configuration.login_available:
+            raise HTTPException(status_code=409, detail="微信登录尚未完成配置")
+    elif not configuration.configuration_complete:
         raise HTTPException(status_code=409, detail="微信登录尚未完成配置")
     state, browser_nonce = create_oauth_state(
         db,
@@ -211,7 +215,13 @@ def start_wechat_login(
     share_code: str = Query(min_length=1, max_length=80),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
-    return start_wechat_oauth(request, db, share_code=share_code, verify_exam_share=True)
+    return start_wechat_oauth(
+        request,
+        db,
+        share_code=share_code,
+        verify_exam_share=True,
+        require_enabled=True,
+    )
 
 
 @router.get("/public/wechat/diagnostic/login")
@@ -224,6 +234,7 @@ def start_wechat_diagnostic_login(
         db,
         share_code=WECHAT_DIAGNOSTIC_SHARE_CODE,
         verify_exam_share=False,
+        require_enabled=False,
     )
 
 

@@ -20,11 +20,11 @@ def reset_wechat_configuration() -> None:
         db.commit()
 
 
-def configure_wechat(client, *, required: bool = False) -> dict:
+def configure_wechat(client, *, enabled: bool = True, required: bool = False) -> dict:
     response = client.patch(
         "/api/settings/wechat-login",
         json={
-            "enabled": True,
+            "enabled": enabled,
             "required_for_public_exams": required,
             "app_id": "wx-test-app-id",
             "app_secret": "wx-test-app-secret",
@@ -207,7 +207,7 @@ def test_wechat_oauth_binds_browser_and_creates_identity(client, monkeypatch):
 
 def test_wechat_diagnostic_login_exposes_current_session(client, monkeypatch):
     reset_wechat_configuration()
-    configure_wechat(client)
+    configure_wechat(client, enabled=False)
 
     def fake_exchange(_configuration, _code):
         return {
