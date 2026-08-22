@@ -592,6 +592,26 @@ class WechatLoginConfigurationResponse(ApiModel):
     updated_at: datetime | None = None
 
 
+class WechatIdentityUserResponse(ApiModel):
+    id: str
+    openid: str
+    unionid: str | None = None
+    nickname: str
+    avatar_url: str | None = None
+    last_login_at: datetime | None = None
+
+
+class WechatIdentitySessionResponse(ApiModel):
+    id: str
+    expires_at: datetime
+    last_seen_at: datetime | None = None
+
+
+class WechatIdentityResponse(ApiModel):
+    user: WechatIdentityUserResponse
+    session: WechatIdentitySessionResponse
+
+
 class SiteFooterConfigurationUpdate(BaseModel):
     record_number: str = Field(default="", max_length=255)
     record_url: str = Field(default="", max_length=2_000)

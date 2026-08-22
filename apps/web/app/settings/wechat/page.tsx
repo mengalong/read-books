@@ -1,6 +1,7 @@
 "use client";
 
 import { CircleCheck, Eye, EyeOff, KeyRound, Save, ScanLine, ShieldCheck } from "lucide-react";
+import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 
 import { ErrorState } from "@/components/ui";
@@ -97,7 +98,11 @@ export default function WechatLoginSettingsPage() {
         </div>
 
         <div className="wechat-platform-note"><ShieldCheck size={17} /><span>启用前需要在微信开放平台完成网站应用审核，并将上方回调域名加入授权回调域。公网环境必须使用 HTTPS。</span></div>
-        <div className="form-actions">{saved && <span className="save-confirmation"><CircleCheck size={14} />配置已保存</span>}<button className="button button-primary" disabled={saving} type="submit"><Save size={15} />{saving ? "保存中……" : "保存配置"}</button></div>
+        <div className="form-actions">
+          <Link className="button button-secondary" href="/settings/wechat/test"><ScanLine size={15} />微信登录自检</Link>
+          {saved && <span className="save-confirmation"><CircleCheck size={14} />配置已保存</span>}
+          <button className="button button-primary" disabled={saving} type="submit"><Save size={15} />{saving ? "保存中……" : "保存配置"}</button>
+        </div>
       </form>
     </div>
   );

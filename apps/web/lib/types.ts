@@ -42,6 +42,22 @@ export type WechatLoginConfiguration = {
   updated_at: string | null;
 };
 
+export type WechatIdentityResponse = {
+  user: {
+    id: string;
+    openid: string;
+    unionid: string | null;
+    nickname: string;
+    avatar_url: string | null;
+    last_login_at: string | null;
+  };
+  session: {
+    id: string;
+    expires_at: string;
+    last_seen_at: string | null;
+  };
+};
+
 export type SiteFooterConfiguration = {
   id: string;
   record_number: string;

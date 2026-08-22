@@ -10,11 +10,18 @@ from app.config import get_settings
 from app.database import get_db
 from app.dependencies import require_admin
 from app.models import ExamShare, WechatLoginConfiguration
-from app.schemas import WechatLoginConfigurationResponse, WechatLoginConfigurationUpdate
+from app.schemas import (
+    WechatIdentityResponse,
+    WechatIdentitySessionResponse,
+    WechatIdentityUserResponse,
+    WechatLoginConfigurationResponse,
+    WechatLoginConfigurationUpdate,
+)
 from app.services.auth import AuthIdentity, add_audit_log
 from app.services.wechat_auth import (
     EffectiveWechatConfig,
     WechatAuthError,
+    WechatIdentity,
     authenticate_wechat_session,
     build_authorize_url,
     consume_oauth_state,
@@ -31,6 +38,7 @@ from app.services.wechat_auth import (
 
 router = APIRouter(tags=["wechat-auth"])
 settings = get_settings()
+WECHAT_DIAGNOSTIC_SHARE_CODE = "__wechat_diagnostic__"
 
 
 def client_ip(request: Request) -> str | None:
@@ -73,6 +81,62 @@ def effective_configuration_from_record(
             app_env=app_env,
         ),
     )
+
+
+def to_identity_response(identity: WechatIdentity) -> WechatIdentityResponse:
+    return WechatIdentityResponse(
+        user=WechatIdentityUserResponse(
+            id=identity.user.id,
+            openid=identity.user.openid,
+            unionid=identity.user.unionid,
+            nickname=identity.user.nickname,
+            avatar_url=identity.user.avatar_url,
+            last_login_at=identity.user.last_login_at,
+        ),
+        session=WechatIdentitySessionResponse(
+            id=identity.session.id,
+            expires_at=identity.session.expires_at,
+            last_seen_at=identity.session.last_seen_at,
+        ),
+    )
+
+
+def start_wechat_oauth(
+    request: Request,
+    db: Session,
+    *,
+    share_code: str,
+    verify_exam_share: bool,
+) -> RedirectResponse:
+    if verify_exam_share and db.query(ExamShare.id).filter(ExamShare.share_code == share_code).scalar() is None:
+        raise HTTPException(status_code=404, detail="考试链接不存在或已经失效")
+    configuration = effective_configuration(db, settings)
+    if not configuration.login_available:
+        raise HTTPException(status_code=409, detail="微信登录尚未完成配置")
+    state, browser_nonce = create_oauth_state(
+        db,
+        settings,
+        share_code=share_code,
+        ip_address=client_ip(request),
+    )
+    response = RedirectResponse(build_authorize_url(configuration, state), status_code=307)
+    response.set_cookie(
+        key=settings.wechat_oauth_cookie_name,
+        value=browser_nonce,
+        max_age=settings.wechat_oauth_state_ttl_minutes * 60,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="lax",
+        path="/api/public/wechat",
+    )
+    return response
+
+
+def callback_target(share_code: str, *, callback_base_url: str) -> str:
+    base_url = callback_base_url.rstrip("/")
+    if share_code == WECHAT_DIAGNOSTIC_SHARE_CODE:
+        return f"{base_url}/settings/wechat/test"
+    return f"{base_url}/exams/{share_code}"
 
 
 @router.get(
@@ -147,28 +211,20 @@ def start_wechat_login(
     share_code: str = Query(min_length=1, max_length=80),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
-    if db.query(ExamShare.id).filter(ExamShare.share_code == share_code).scalar() is None:
-        raise HTTPException(status_code=404, detail="考试链接不存在或已经失效")
-    configuration = effective_configuration(db, settings)
-    if not configuration.login_available:
-        raise HTTPException(status_code=409, detail="微信登录尚未完成配置")
-    state, browser_nonce = create_oauth_state(
+    return start_wechat_oauth(request, db, share_code=share_code, verify_exam_share=True)
+
+
+@router.get("/public/wechat/diagnostic/login")
+def start_wechat_diagnostic_login(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    return start_wechat_oauth(
+        request,
         db,
-        settings,
-        share_code=share_code,
-        ip_address=client_ip(request),
+        share_code=WECHAT_DIAGNOSTIC_SHARE_CODE,
+        verify_exam_share=False,
     )
-    response = RedirectResponse(build_authorize_url(configuration, state), status_code=307)
-    response.set_cookie(
-        key=settings.wechat_oauth_cookie_name,
-        value=browser_nonce,
-        max_age=settings.wechat_oauth_state_ttl_minutes * 60,
-        httponly=True,
-        secure=settings.session_cookie_secure,
-        samesite="lax",
-        path="/api/public/wechat",
-    )
-    return response
 
 
 @router.get("/public/wechat/callback")
@@ -187,7 +243,10 @@ def finish_wechat_login(
     except WechatAuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     configuration = effective_configuration(db, settings)
-    target = f"{configuration.callback_base_url}/exams/{oauth_state.share_code}"
+    target = callback_target(
+        oauth_state.share_code,
+        callback_base_url=configuration.callback_base_url,
+    )
     try:
         profile = exchange_wechat_code(configuration, code)
         user = upsert_wechat_user(db, profile)
@@ -218,6 +277,18 @@ def finish_wechat_login(
     )
     response.delete_cookie(settings.wechat_oauth_cookie_name, path="/api/public/wechat")
     return response
+
+
+@router.get("/public/wechat/me", response_model=WechatIdentityResponse)
+def get_current_wechat_identity(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> WechatIdentityResponse:
+    token = request.cookies.get(settings.wechat_session_cookie_name)
+    identity = authenticate_wechat_session(db, token) if token else None
+    if identity is None:
+        raise HTTPException(status_code=401, detail="当前浏览器尚未完成微信登录")
+    return to_identity_response(identity)
 
 
 @router.post("/public/wechat/logout", status_code=status.HTTP_204_NO_CONTENT)

@@ -72,3 +72,58 @@ test("管理员可以配置微信登录并覆盖已保存的密钥", async ({ pa
   });
   await expect(appSecretInput).toHaveValue("****************");
 });
+
+test("管理员可以从微信配置页进入自检页并查看当前微信会话", async ({ page }) => {
+  await page.route("**/api/auth/me", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(currentUser) });
+  });
+  await page.route("**/api/settings/wechat-login", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "default",
+        enabled: true,
+        required_for_public_exams: false,
+        app_id: "wx-test-app-id",
+        app_secret_configured: true,
+        callback_base_url: "https://books.example.com",
+        callback_url: "https://books.example.com/api/public/wechat/callback",
+        configuration_complete: true,
+        created_at: "2026-08-06T08:00:00Z",
+        updated_at: "2026-08-06T08:00:00Z",
+      }),
+    });
+  });
+  await page.route("**/api/public/wechat/me", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        user: {
+          id: "wechat-user-1",
+          openid: "wechat-openid-1",
+          unionid: "wechat-unionid-1",
+          nickname: "微信读者",
+          avatar_url: "https://thirdwx.qlogo.cn/avatar.jpg",
+          last_login_at: "2026-08-06T08:20:00Z",
+        },
+        session: {
+          id: "wechat-session-1",
+          expires_at: "2026-09-06T08:20:00Z",
+          last_seen_at: "2026-08-06T08:25:00Z",
+        },
+      }),
+    });
+  });
+  await page.route("**/api/public/wechat/logout", async (route) => {
+    await route.fulfill({ status: 204, body: "" });
+  });
+
+  await page.goto("/settings/wechat");
+  await page.getByRole("link", { name: "微信登录自检" }).click();
+  await expect(page.getByRole("heading", { name: "微信登录自检" })).toBeVisible();
+  await expect(page.getByText("微信读者")).toBeVisible();
+  await expect(page.getByText("OpenID：wechat-openid-1")).toBeVisible();
+  await expect(page.getByText("会话到期：")).toBeVisible();
+  await page.getByRole("button", { name: "退出微信会话" }).click();
+  await expect(page.getByText("当前浏览器还没有微信会话")).toBeVisible();
+});

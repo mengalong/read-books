@@ -205,6 +205,56 @@ def test_wechat_oauth_binds_browser_and_creates_identity(client, monkeypatch):
     assert "unionid" not in participant
 
 
+def test_wechat_diagnostic_login_exposes_current_session(client, monkeypatch):
+    reset_wechat_configuration()
+    configure_wechat(client)
+
+    def fake_exchange(_configuration, _code):
+        return {
+            "openid": "wechat-openid-2",
+            "unionid": "wechat-unionid-2",
+            "nickname": "微信自检",
+            "avatar_url": "https://thirdwx.qlogo.cn/self-check.jpg",
+        }
+
+    monkeypatch.setattr("app.routers.wechat.exchange_wechat_code", fake_exchange)
+    with TestClient(app) as public_client:
+        empty = public_client.get("/api/public/wechat/me", follow_redirects=False)
+        assert empty.status_code == 401
+
+        login = public_client.get(
+            "/api/public/wechat/diagnostic/login",
+            follow_redirects=False,
+        )
+        assert login.status_code == 307
+        authorize_url = urlparse(login.headers["location"])
+        authorize_query = parse_qs(authorize_url.query)
+        assert authorize_url.netloc == "open.weixin.qq.com"
+        assert authorize_query["appid"] == ["wx-test-app-id"]
+        assert authorize_query["scope"] == ["snsapi_login"]
+        state = authorize_query["state"][0]
+
+        callback = public_client.get(
+            "/api/public/wechat/callback",
+            params={"code": "diagnostic-code", "state": state},
+            follow_redirects=False,
+        )
+        assert callback.status_code == 303
+        assert callback.headers["location"] == "http://localhost:3000/settings/wechat/test"
+        assert get_settings().wechat_session_cookie_name in public_client.cookies
+
+        identity = public_client.get("/api/public/wechat/me")
+        assert identity.status_code == 200
+        body = identity.json()
+        assert body["user"]["nickname"] == "微信自检"
+        assert body["user"]["openid"] == "wechat-openid-2"
+        assert body["session"]["expires_at"]
+
+        logout = public_client.post("/api/public/wechat/logout")
+        assert logout.status_code == 204
+        assert public_client.get("/api/public/wechat/me").status_code == 401
+
+
 def test_required_wechat_login_blocks_anonymous_attempt(client):
     reset_wechat_configuration()
     configure_wechat(client, required=True)

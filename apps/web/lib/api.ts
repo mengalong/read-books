@@ -34,6 +34,7 @@ import type {
   ExamShareStatus,
   PublicExam,
   SiteFooterConfiguration,
+  WechatIdentityResponse,
   WechatLoginConfiguration,
 } from "@/lib/types";
 
@@ -425,6 +426,14 @@ export function getPublicExamResult(attemptId: string, token?: string | null) {
 
 export function getWechatLoginUrl(shareCode: string) {
   return `${API_BASE}/public/wechat/login?${new URLSearchParams({ share_code: shareCode })}`;
+}
+
+export function getWechatDiagnosticLoginUrl() {
+  return `${API_BASE}/public/wechat/diagnostic/login`;
+}
+
+export function getWechatIdentity() {
+  return apiFetch<WechatIdentityResponse>("/public/wechat/me");
 }
 
 export function logoutWechat() {
