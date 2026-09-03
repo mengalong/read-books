@@ -425,6 +425,9 @@ class Question(TimestampMixin, Base):
     source_chunk_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     quote_entry_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     source_segment_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    fact_key: Mapped[str | None] = mapped_column(String(1000), index=True)
+    fact_claim: Mapped[str | None] = mapped_column(Text)
+    semantic_signature: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     source_evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     max_score: Mapped[float] = mapped_column(Float)
 

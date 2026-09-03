@@ -664,6 +664,10 @@ def _apply_snapshot_question_updates(
     question: dict[str, object], payload: QuestionUpdateRequest
 ) -> None:
     changes = payload.model_dump(exclude_unset=True)
+    if changes.keys() & {"prompt", "options", "correct_answers", "knowledge_point", "reference_answer"}:
+        question["fact_key"] = None
+        question["fact_claim"] = None
+        question["semantic_signature"] = {}
     if "prompt" in changes:
         prompt = str(changes["prompt"] or "").strip()
         if not prompt:

@@ -222,6 +222,8 @@ def test_http_provider_generates_validated_questions(monkeypatch):
     assert requests[0]["timeout"] == 30
     assert "max_tokens" not in requests[0]["json"]
     assert "chunk-1" in requests[0]["json"]["messages"][1]["content"]
+    assert "fact_claim" in requests[0]["json"]["messages"][1]["content"]
+    assert "仅更换问法、题型或选项顺序不算新事实" in requests[0]["json"]["messages"][1]["content"]
 
 
 def test_http_provider_generates_model_knowledge_questions_without_pdf(monkeypatch):

@@ -810,6 +810,106 @@ def test_question_regeneration_avoids_same_type_duplicates(client, monkeypatch):
         assert untouched_multiple.prompt == "旧的多选题 3"
 
 
+def test_generation_retries_semantically_duplicate_questions(client, monkeypatch):
+    book_id, _ = create_source_book(client, "语义去重测试书")
+    calls: list[dict] = []
+
+    def single_question(prompt: str, fact_claim: str, fact_subject: str, fact_relation: str, fact_context: str, answer: str, source_id: str) -> GeneratedQuestion:
+        return GeneratedQuestion(
+            question_type="single",
+            prompt=prompt,
+            options=[
+                {"id": "A", "text": answer},
+                {"id": "B", "text": "其他答案一"},
+                {"id": "C", "text": "其他答案二"},
+                {"id": "D", "text": "其他答案三"},
+            ],
+            correct_answers=["A"],
+            explanation="测试解析",
+            knowledge_point=fact_claim,
+            estimated_seconds=45,
+            reference_answer=None,
+            grading_rubric=[],
+            source_chunk_ids=[source_id],
+            source_evidence=[],
+            max_score=6,
+            fact_claim=fact_claim,
+            semantic_signature={
+                "fact_claim": fact_claim,
+                "fact_subject": fact_subject,
+                "fact_relation": fact_relation,
+                "fact_context": fact_context,
+                "answer_signature": [answer],
+                "question_intent": "identity",
+            },
+        )
+
+    def fake_generate(self, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return [
+                single_question(
+                    "组织上派翠平到天津与余则成假扮夫妻时，翠平此前的主要身份是？",
+                    "翠平在天津假扮夫妻任务前的真实身份",
+                    "翠平",
+                    "身份",
+                    "天津假扮夫妻潜伏任务",
+                    "游击队队员",
+                    "chunk-1",
+                )
+            ]
+        if len(calls) == 2:
+            return [
+                single_question(
+                    "余则成与翠平假扮夫妻执行潜伏任务，翠平的真实身份是什么？",
+                    "翠平成为余则成妻子之前的身份",
+                    "翠平",
+                    "身份",
+                    "余则成翠平假扮夫妻执行潜伏",
+                    "游击队队员",
+                    "chunk-2",
+                )
+            ]
+        return [
+            single_question(
+                "天津站中，余则成接到的新任务地点在哪里？",
+                "余则成新任务的地点",
+                "余则成",
+                "任务地点",
+                "天津站新任务",
+                "天津站",
+                "chunk-3",
+            )
+        ]
+
+    monkeypatch.setattr(MockQuizAiProvider, "generate_questions", fake_generate)
+    response = client.post(
+        f"/api/books/{book_id}/quizzes",
+        json={"single_count": 2, "multiple_count": 0, "short_count": 0},
+    )
+    assert response.status_code == 202
+    task = wait_for_generation(client, response.json()["id"])
+    assert len(calls) == 3
+    assert calls[1]["question_exclusions"]
+    assert calls[1]["question_exclusions"][0]["fact_claim"] == "翠平在天津假扮夫妻任务前的真实身份"
+
+    quiz = client.get(f"/api/quizzes/{task['quiz_id']}")
+    assert quiz.status_code == 200
+    questions = quiz.json()["questions"]
+    assert len(questions) == 2
+    assert [question["prompt"] for question in questions] == [
+        "组织上派翠平到天津与余则成假扮夫妻时，翠平此前的主要身份是？",
+        "天津站中，余则成接到的新任务地点在哪里？",
+    ]
+    with SessionLocal() as db:
+        stored_questions = list(
+            db.scalars(
+                select(Question).where(Question.quiz_id == task["quiz_id"]).order_by(Question.position)
+            ).all()
+        )
+    assert len({question.fact_key for question in stored_questions}) == 2
+
+
 def test_book_without_pdf_uses_model_knowledge_mode_with_real_provider(client, monkeypatch):
     created = client.post(
         "/api/books",

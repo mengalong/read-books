@@ -340,6 +340,10 @@ def update_question(
         raise HTTPException(status_code=404, detail="未找到这道题目")
 
     changes = payload.model_dump(exclude_unset=True)
+    if changes.keys() & {"prompt", "options", "correct_answers", "knowledge_point", "reference_answer"}:
+        question.fact_key = None
+        question.fact_claim = None
+        question.semantic_signature = None
     if "prompt" in changes:
         prompt = clean_optional_text(changes["prompt"])
         if not prompt:

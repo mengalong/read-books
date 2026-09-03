@@ -110,12 +110,18 @@ DEFAULT_PROMPTS = {
       "grading_rubric": [],
       "source_chunk_ids": ["仅 pdf 模式填写；其他模式为空数组"],
       "question_subtype": "general | quote_speaker | quote_context | quote_meaning | character_relation | character_trait",
-      "quote_entry_ids": ["仅 material 模式填写，必须来自 SOURCE_MATERIAL"]
+      "quote_entry_ids": ["仅 material 模式填写，必须来自 SOURCE_MATERIAL"],
+      "fact_claim": "这道题实际考察的标准事实，不要写提问句",
+      "fact_subject": "事实主体",
+      "fact_relation": "事实关系，例如身份、关系、原因、结果、时间",
+      "fact_context": "限定事实的情节、章节或场景范围",
+      "answer_signature": ["正确答案对应的事实值"],
+      "question_intent": "identity | relation | cause | result | time | meaning | other"
     }
   ]
 }
 
-规则：single 必须只有一个正确选项；multiple 必须有至少两个正确选项；short 的 options 和 correct_answers 必须为空，reference_answer 必须是完整参考答案，grading_rubric 至少包含两个评分要点，每个要点包含 point、keywords、score。pdf 模式每道题至少关联一个 source_chunk_id；material 模式每道题至少关联一个 quote_entry_id；model_knowledge 模式的两类来源 ID 都必须为空。quote_speaker 只能用于 single，正确选项文本必须是资料中确认的角色。选择题必须输出四个选项。不要输出 source_evidence，后端会根据来源 ID 重建可信依据。
+规则：single 必须只有一个正确选项；multiple 必须有至少两个正确选项；short 的 options 和 correct_answers 必须为空，reference_answer 必须是完整参考答案，grading_rubric 至少包含两个评分要点，每个要点包含 point、keywords、score。每道题必须返回 fact_claim、fact_subject、fact_relation、fact_context、answer_signature 和 question_intent，用于事实级去重；fact_claim 必须描述被考察的事实，不要只是改写题干。pdf 模式每道题至少关联一个 source_chunk_id；material 模式每道题至少关联一个 quote_entry_id；model_knowledge 模式的两类来源 ID 都必须为空。quote_speaker 只能用于 single，正确选项文本必须是资料中确认的角色。选择题必须输出四个选项。不要输出 source_evidence，后端会根据来源 ID 重建可信依据。
 
 SOURCE_MATERIAL：
 {{source_material}}""",

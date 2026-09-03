@@ -31,6 +31,11 @@ from app.services.quiz_provider import (
     compact_text,
     get_quiz_provider,
 )
+from app.services.question_dedup import (
+    build_question_signature,
+    questions_test_same_fact,
+    signature_for_question,
+)
 from app.services.resource_types import resource_type_label
 from app.services.score_allocation import (
     QUIZ_TOTAL_SCORE,
@@ -372,16 +377,30 @@ def _normalize_question_text(value: str | None) -> str:
     return re.sub(r"\s+", "", value or "").strip()
 
 
-def _question_exclusion_payload(question: Question, role: str = "same_type_reference") -> dict[str, object]:
+def _prepare_generated_question(question: GeneratedQuestion) -> GeneratedQuestion:
+    signature = build_question_signature(question)
+    question.fact_key = str(signature["fact_key"])
+    question.fact_claim = str(signature["fact_claim"])
+    question.semantic_signature = signature
+    return question
+
+
+def _question_exclusion_payload(
+    question: Any, role: str = "same_type_reference"
+) -> dict[str, object]:
+    semantic_signature = signature_for_question(question)
     payload: dict[str, object] = {
         "role": role,
-        "position": question.position,
-        "question_type": question.question_type,
+        "position": getattr(question, "position", None),
+        "question_type": getattr(question, "question_type", ""),
         "prompt": compact_text(question.prompt, 140),
         "knowledge_point": compact_text(question.knowledge_point, 60),
         "source_chunk_ids": list(getattr(question, "source_chunk_ids", None) or []),
         "quote_entry_ids": list(getattr(question, "quote_entry_ids", None) or []),
         "question_subtype": str(getattr(question, "question_subtype", "general")),
+        "semantic_signature": semantic_signature,
+        "fact_key": semantic_signature["fact_key"],
+        "fact_claim": semantic_signature["fact_claim"],
     }
     if question.question_type == "short" and question.reference_answer:
         payload["reference_answer"] = compact_text(question.reference_answer, 120)
@@ -389,6 +408,7 @@ def _question_exclusion_payload(question: Question, role: str = "same_type_refer
 
 
 def _generated_question_exclusion_payload(question: GeneratedQuestion) -> dict[str, object]:
+    _prepare_generated_question(question)
     payload: dict[str, object] = {
         "role": "rejected_candidate",
         "question_type": question.question_type,
@@ -397,6 +417,9 @@ def _generated_question_exclusion_payload(question: GeneratedQuestion) -> dict[s
         "source_chunk_ids": list(question.source_chunk_ids or []),
         "quote_entry_ids": list(question.quote_entry_ids or []),
         "question_subtype": question.question_subtype,
+        "semantic_signature": question.semantic_signature,
+        "fact_key": question.fact_key,
+        "fact_claim": question.fact_claim,
     }
     if question.question_type == "short" and question.reference_answer:
         payload["reference_answer"] = compact_text(question.reference_answer, 120)
@@ -426,8 +449,15 @@ def _build_snapshot_regeneration_guidance(book_title: str, question: Any, attemp
 
 
 def _is_duplicate_question(
-    candidate: GeneratedQuestion, siblings: list[Question], recent_candidates: list[GeneratedQuestion]
+    candidate: GeneratedQuestion,
+    siblings: list[Any],
+    recent_candidates: list[GeneratedQuestion],
 ) -> bool:
+    _prepare_generated_question(candidate)
+    if any(questions_test_same_fact(candidate, sibling) for sibling in siblings):
+        return True
+    if any(questions_test_same_fact(candidate, previous) for previous in recent_candidates):
+        return True
     candidate_prompt = _normalize_question_text(candidate.prompt)
     candidate_knowledge = _normalize_question_text(candidate.knowledge_point)
     candidate_sources = set(candidate.source_chunk_ids or [])
@@ -568,10 +598,14 @@ def regenerate_quiz_question(
             if item.question_type == "short"
             else item.grading_rubric
         )
+        _prepare_generated_question(item)
         question.source_chunk_ids = item.source_chunk_ids
         question.question_subtype = item.question_subtype
         question.quote_entry_ids = item.quote_entry_ids
         question.source_segment_ids = item.source_segment_ids
+        question.fact_key = item.fact_key
+        question.fact_claim = item.fact_claim
+        question.semantic_signature = item.semantic_signature
         question.source_evidence = item.source_evidence
         db.commit()
         db.refresh(question)
@@ -713,10 +747,14 @@ def regenerate_snapshot_question(
             if item.question_type == "short"
             else item.grading_rubric
         )
+        _prepare_generated_question(item)
         next_question["source_chunk_ids"] = item.source_chunk_ids
         next_question["question_subtype"] = item.question_subtype
         next_question["quote_entry_ids"] = item.quote_entry_ids
         next_question["source_segment_ids"] = item.source_segment_ids
+        next_question["fact_key"] = item.fact_key
+        next_question["fact_claim"] = item.fact_claim
+        next_question["semantic_signature"] = item.semantic_signature
         next_question["source_evidence"] = item.source_evidence
         return next_question
 
@@ -802,36 +840,62 @@ def run_generation_task(task_id: str) -> None:
                 get_effective_prompt_templates(db),
                 usage_context,
             )
-            generated = []
+            generated: list[GeneratedQuestion] = []
+            rejected_candidates: list[GeneratedQuestion] = []
             for position, question_type in enumerate(_question_types(task), start=1):
                 task.current_question_position = position
                 task.current_phase = f"正在生成第 {position} / {task.total_questions} 道{question_type_label(question_type)}"
                 db.commit()
-                result = provider.generate_questions(
-                    chunks=chunks,
-                    file_names=file_names,
-                    single_count=1 if question_type == "single" else 0,
-                    multiple_count=1 if question_type == "multiple" else 0,
-                    short_count=1 if question_type == "short" else 0,
-                    difficulty=task.difficulty,
-                    generation_number=generation_number + position - 1,
-                    recent_chunk_ids=recent_chunk_ids,
-                    duration_minutes=task.duration_minutes,
-                    book_title=book.title,
-                    author=book.author,
-                    resource_type=book.resource_type,
-                    source_mode=task.source_mode,
-                    generation_theme=task.generation_theme,
-                    theme_requirements=_theme_requirements(
-                        task.generation_theme, theme_config
-                    ),
-                    allowed_question_subtypes=list(
-                        theme_config.get("question_subtypes", [])
-                    ),
-                )
-                if len(result) != 1:
-                    raise RuntimeError(f"第 {position} 道题生成结果数量不正确")
-                item = result[0]
+                item: GeneratedQuestion | None = None
+                for attempt in range(3):
+                    result = provider.generate_questions(
+                        chunks=chunks,
+                        file_names=file_names,
+                        single_count=1 if question_type == "single" else 0,
+                        multiple_count=1 if question_type == "multiple" else 0,
+                        short_count=1 if question_type == "short" else 0,
+                        difficulty=task.difficulty,
+                        generation_number=generation_number + position - 1 + attempt,
+                        recent_chunk_ids=recent_chunk_ids,
+                        duration_minutes=task.duration_minutes,
+                        book_title=book.title,
+                        author=book.author,
+                        resource_type=book.resource_type,
+                        source_mode=task.source_mode,
+                        question_exclusions=[
+                            *(_question_exclusion_payload(item) for item in generated),
+                            *(
+                                _generated_question_exclusion_payload(item)
+                                for item in rejected_candidates
+                            ),
+                        ],
+                        regeneration_guidance=(
+                            f"本次是第 {position} 道题，必须考察一个尚未出现的独立事实。"
+                            "仅更换题干措辞、题型或选项顺序不算新事实。"
+                            + (f"这是第 {attempt + 1} 次尝试，请避开已列出的事实。" if attempt else "")
+                        ),
+                        generation_theme=task.generation_theme,
+                        theme_requirements=_theme_requirements(
+                            task.generation_theme, theme_config
+                        ),
+                        allowed_question_subtypes=list(
+                            theme_config.get("question_subtypes", [])
+                        ),
+                    )
+                    if len(result) != 1:
+                        raise RuntimeError(f"第 {position} 道题生成结果数量不正确")
+                    candidate = _prepare_generated_question(result[0])
+                    if _is_duplicate_question(candidate, generated, rejected_candidates):
+                        rejected_candidates.append(candidate)
+                        task.current_phase = f"第 {position} 道题与已有事实重复，正在重新生成"
+                        db.commit()
+                        continue
+                    item = candidate
+                    break
+                if item is None:
+                    raise RuntimeError(
+                        f"第 {position} 道题连续重复已有事实，当前资料中可区分的独立事实不足；请降低题量或扩大出题范围"
+                    )
                 generated.append(item)
                 recent_chunk_ids.update(item.source_chunk_ids)
                 recent_chunk_ids.update(item.quote_entry_ids)
@@ -886,6 +950,9 @@ def run_generation_task(task_id: str) -> None:
                         source_chunk_ids=item.source_chunk_ids,
                         quote_entry_ids=item.quote_entry_ids,
                         source_segment_ids=item.source_segment_ids,
+                        fact_key=item.fact_key,
+                        fact_claim=item.fact_claim,
+                        semantic_signature=item.semantic_signature,
                         source_evidence=item.source_evidence,
                         max_score=item.max_score,
                     )
