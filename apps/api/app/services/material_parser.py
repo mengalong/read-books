@@ -249,6 +249,7 @@ def _parse_ass(material: ResourceMaterial) -> list[ParsedSegment]:
 
 FIELD_ALIASES = {
     "quote": ("台词", "quote", "dialogue", "text"),
+    "content": ("内容", "content"),
     "speaker": ("角色", "speaker", "character", "name"),
     "season": ("季", "season"),
     "episode": ("集", "episode"),
@@ -256,7 +257,11 @@ FIELD_ALIASES = {
     "end": ("结束时间", "end", "end_time"),
     "scene": ("场景", "scene"),
     "context": ("上下文", "context"),
+    "row_type": ("类型", "row_type", "type"),
+    "page": ("页码", "page", "page_number"),
 }
+
+NON_DIALOGUE_ROW_TYPES = {"环境描写", "旁白", "场景", "备注", "环境", "narration", "scene_description"}
 
 
 def _row_value(row: dict[str, Any], field: str) -> Any:
@@ -272,21 +277,29 @@ def _rows_to_segments(material: ResourceMaterial, rows: list[dict[str, Any]]) ->
     for position, row in enumerate(rows, start=2):
         if not any(value not in (None, "") for value in row.values()):
             continue
-        quote = _clean_dialogue(str(_row_value(row, "quote") or ""))
+        quote = _clean_dialogue(
+            str(_row_value(row, "quote") or _row_value(row, "content") or "")
+        )
         speaker = str(_row_value(row, "speaker") or "").strip()
-        if not quote or not speaker:
+        row_type = str(_row_value(row, "row_type") or "").strip()
+        if not quote:
+            continue
+        if not speaker and not row_type:
             raise ValueError(f"台词表第 {position} 行缺少台词或角色")
+        if not speaker and row_type not in NON_DIALOGUE_ROW_TYPES:
+            raise ValueError(f"台词表第 {position} 行缺少角色")
         records.append(
             ParsedSegment(
                 content=quote,
+                page_number=_parse_int(_row_value(row, "page")),
                 season_number=_parse_int(_row_value(row, "season")) or material.season_number,
                 episode_number=_parse_int(_row_value(row, "episode"))
                 or _episode_from_label(material.episode_label),
                 start_ms=_timestamp_ms(str(_row_value(row, "start") or "")),
                 end_ms=_timestamp_ms(str(_row_value(row, "end") or "")),
                 scene_label=str(_row_value(row, "scene") or "").strip() or None,
-                speaker=speaker,
-                speaker_origin="provided",
+                speaker=speaker or None,
+                speaker_origin="provided" if speaker else "unknown",
                 context=str(_row_value(row, "context") or "").strip() or None,
             )
         )
