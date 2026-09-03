@@ -27,6 +27,7 @@ from app.services.resource_types import resource_type_label, resource_type_scope
 from app.services.material_parser import normalized_quote_text
 from app.services.question_dedup import asks_for_precise_location, build_question_signature
 from app.services.embedding_index import rank_by_similarity
+from app.services.faithfulness_check import check_question_faithfulness, source_text_for_question
 
 
 @dataclass
@@ -1203,6 +1204,22 @@ class HttpQuizAiProvider:
                 if source_mode in {"pdf", "material"}
                 else []
             )
+            if source_mode in {"pdf", "material"}:
+                faithfulness = check_question_faithfulness(
+                    explanation=explanation,
+                    correct_answers_text=correct_option_text,
+                    answer_signature=raw_answer_signature
+                    if isinstance(raw_answer_signature, list)
+                    else [],
+                    source_text=source_text_for_question(
+                        raw, chunks_by_id, unique_source_ids or unique_quote_ids
+                    ),
+                )
+                if not faithfulness.passed:
+                    raise RuntimeError(
+                        f"真实模型第 {position} 道题的解析或答案与引用的原文片段几乎没有内容重合"
+                        f"（重合度 {faithfulness.overlap_ratio:.2f}），可能包含原文中不存在的内容"
+                    )
             source_segment_ids = list(
                 dict.fromkeys(
                     segment_id

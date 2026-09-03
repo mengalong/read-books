@@ -105,6 +105,7 @@
 - 增加生产环境统一服务脚本和本地一键部署脚本，使用 systemd 托管 FastAPI 与 Next.js，通过现有 Docker Nginx 将 `books.mengalong.cn` 转发到应用；远端完成 Conda 环境、依赖安装、数据库迁移、生产构建、开机自启、健康检查和首次管理员初始化验证。
 - 新增资料理解层基础设施：`MaterialUnderstanding` 表按集数/页码窗口分层生成摘要，增量刷新只重算内容变化的分组，再合并生成全局摘要；解析完成后自动异步触发，仅用作出题时的理解背景，不作为可引用来源。`ContentChunk`/`MaterialSegment`/`QuoteEntry` 增加向量字段，为后续向量检索召回做准备。台词 CSV 解析支持无角色的环境描写/旁白行。
 - 接入资料向量检索召回：PDF/资料解析完成后自动生成并存储 `ContentChunk`/`MaterialSegment`/`QuoteEntry` 的向量，出题候选池按与专题约束/重出引导的语义相似度重新排序，未配置向量模型或向量缺失时自动回退到原有随机排序。出题 Prompt 新增“背景理解”注入（全局摘要 + 命中集数的分集摘要），并明确声明背景仅用于理解、不得作为引用来源。
+- 接入规则版忠实性校验：`_validate_questions` 通过后，对 `pdf`/`material` 来源模式的题目新增一轮规则校验，复用 `question_dedup.token_similarity` 计算题目答案文本与引用原文（含说话人题的 `speaker`/`context` 元数据）的词汇重合度，重合度过低时判定为可能捏造并拒绝该题；作为已有 ID 存在性、逐字匹配校验之外新增的保护层，不放松原有校验。
 
 ## 本地验证数据
 
