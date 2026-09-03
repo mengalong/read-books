@@ -10,6 +10,7 @@
 - 文件上传：FastAPI `UploadFile` + `python-multipart`，流式写入本地磁盘
 - 数据库：SQLite + SQLAlchemy 2.0 + Alembic
 - PDF 解析：PyMuPDF，按页抽取文本并保留页码；对乱码、扫描版或受复制权限限制的 PDF，使用 macOS Vision OCR 兜底
+- 可信资料解析：标准库解析 TXT、SRT、VTT、ASS、CSV，openpyxl 以只读模式解析 XLSX 台词表
 - 出题与评分：使用统一 Provider 接口，同时支持 Mock LLM Provider 和 OpenAI 兼容 HTTP Provider
 - 检索：MVP 使用关键词/覆盖权重检索，后续替换为向量检索
 - Python 虚拟环境：Conda 环境 `read-books`，Python 3.12+
@@ -30,7 +31,7 @@ read-books/
     web/                 # Next.js 前端
     api/                 # FastAPI 后端
   data/
-    uploads/             # PDF 原始文件
+    uploads/             # PDF、字幕、剧本和台词表原始文件
     parsed/              # 可选：解析中间产物
     app.db               # SQLite 数据库
   docs/
@@ -75,7 +76,8 @@ conda activate read-books
 
 - `/`：书架
 - `/books/new`：新增书籍
-- `/books/[bookId]`：资源详情、PDF 上传与解析状态
+- `/books/[bookId]`：资源详情、PDF/可信资料上传与解析状态
+- `/books/[bookId]/quotes`：台词筛选、角色与上下文修正、确认和排除
 - `/books/[bookId]/quiz/new`：创建并查看异步出题任务
 - `/quizzes/[quizId]`：试卷概览与开始复习
 - `/reviews/[reviewId]`：一次复习任务的答题页
@@ -105,15 +107,15 @@ conda activate read-books
 选择 FastAPI + Python 的原因：
 
 - 路由、依赖注入、请求校验和 OpenAPI 生成都很适合做这种工具型产品。
-- `UploadFile` 支持文件上传，适合处理 PDF。
+- `UploadFile` 支持流式文件上传，适合处理 PDF、字幕、剧本和结构化台词表。
 - 持久化任务表配合后台线程，可以让 PDF 解析和逐题出题在请求返回后继续执行，并在服务重启时恢复未完成任务。
 - Python 生态在 PDF 解析、文本处理和后续 AI 调用上更顺手。
 
 后端主要职责：
 
 - 书籍、PDF、出题任务、试卷和复习任务的 API。
-- PDF 上传、存储、解析状态管理。
-- PDF 文本抽取和分块。
+- PDF 与可信资料的上传、存储、解析状态管理。
+- PDF 文本抽取和分块，以及字幕、剧本和台词表结构化解析。
 - 测试生成、提交评分、结果汇总。
 - Mock LLM 与未来真实 LLM 的统一适配层。
 
@@ -176,7 +178,8 @@ data/app.db
 - JSON 字段用于保存题目选项、评分要点、原文依据等结构化数据。
 - PDF 原文片段需要独立表存储，不能只存在题目 JSON 中，否则后续检索和去重会困难。
 - 大文本字段只保存必要原文片段；PDF 原文件保存在文件系统。
-- `Quiz` 和 `QuizGenerationTask` 保存 `source_mode`，明确区分 `pdf`（可追溯原文）与 `model_knowledge`（无 PDF 原文依据）。
+- `Quiz` 和 `QuizGenerationTask` 保存 `source_mode`，明确区分 `pdf`（可追溯 PDF 原文）、`material`（用户上传并确认的可信资料）与 `model_knowledge`（无逐句原文依据）。
+- `ResourceMaterial`、`MaterialSegment` 和 `QuoteEntry` 分别保存上传文件、可定位内容片段和校对后的台词；`generation_theme/theme_config` 保存专题、资料、角色和考察角度，题目保存实际引用的台词与片段 ID。
 - `Book` 保存 `resource_type`、`model_knowledge_supported` 和 `model_knowledge_checked_at`，用于区分书籍、电影和电视剧，并记录模型真实内容检查结果。
 
 ## 7. PDF 处理选型
@@ -236,7 +239,7 @@ interface QuizAiProvider {
 
 业务代码只依赖 `QuizAiProvider`，不直接依赖具体模型。
 
-真实出题分为两种来源模式。PDF 模式下，后端先选择候选 `ContentChunk`，向模型提供片段 ID、页码和原文内容；模型返回后必须通过题量、题型、选项、正确答案、参考答案、评分要点和来源片段 ID 校验，PDF 文件名、页码与原文摘录由后端根据数据库记录重建。模型知识模式下不发送 PDF 片段，只发送资源名称、主创信息、资源类型和来源模式约束，模型必须返回空的来源片段数组，后端保存空的来源证据，前端显示风险提醒。资源真实内容检查未通过时，电影和电视剧不能进入模型知识模式。两种模式都不采信模型生成的页码、文件名和摘录。客观题继续由后端确定性评分，只有问答题提交时调用模型。
+真实出题分为三种来源模式。PDF 模式下，后端先选择候选 `ContentChunk`，向模型提供片段 ID、页码和原文内容；模型返回后必须通过题量、题型、选项、正确答案、参考答案、评分要点和来源片段 ID 校验，PDF 文件名、页码与原文摘录由后端根据数据库记录重建。可信资料模式下，后端只检索已确认并启用的 `QuoteEntry`，模型必须返回实际使用的台词 ID；后端检查逐字台词、角色和专题范围，并从资料记录重建文件、季集、时间或页码。模型知识模式下不发送资料片段，只发送资源名称、主创信息、资源类型和来源模式约束，所有来源 ID 必须为空。三种模式都不采信模型生成的文件名、位置或摘录。客观题继续由后端确定性评分，只有问答题提交时调用模型。
 
 真实模型长响应的默认请求超时为 180 秒。整套试卷不再使用一次长请求，而是按题型逐题调用模型；每次调用只要求一道题，候选片段数量控制为 `max(本次题目数 + 2, 4)`，实际出题和问答评分请求不主动设置 `max_tokens`。Provider 同时兼容字符串和文本片段数组形式的 `message.content`；每题完成后提交任务进度，全部成功后再保存完整试卷；请求读取超时、模型服务自身输出达到上限或只返回推理内容时会记录失败阶段和具体错误，不会保存半成品试卷。
 
@@ -287,7 +290,7 @@ export type AppConfig = {
 
 ### 8.3 提示词模板原则
 
-提示词模板保存在 SQLite 的 `prompt_templates` 表中，出题和问答评分分别维护版本。模板只能使用后端提供的白名单变量，例如 `{{book_title}}`、`{{author}}`、`{{resource_type_label}}`、`{{resource_type_scope}}`、`{{source_mode}}`、`{{source_material}}`、`{{difficulty}}`、`{{user_answer}}` 和 `{{grading_rubric}}`。版本切换只影响模型表达和任务约束，后端仍强制校验题目结构、分数范围和来源模式；旧版模板继续兼容，新增资源类型和来源变量由默认模板提供。
+提示词模板保存在 SQLite 的 `prompt_templates` 表中，出题和问答评分分别维护版本。模板只能使用后端提供的白名单变量，例如 `{{book_title}}`、`{{author}}`、`{{resource_type_label}}`、`{{resource_type_scope}}`、`{{source_mode}}`、`{{source_material}}`、`{{generation_theme}}`、`{{theme_requirements}}`、`{{difficulty}}`、`{{user_answer}}` 和 `{{grading_rubric}}`。版本切换只影响模型表达和任务约束，后端仍强制校验题目结构、分数范围和来源模式；旧版模板继续兼容，可信资料模式会额外追加不能伪造台词和来源的系统边界。
 
 ### 8.4 模型 Token 用量记录
 
