@@ -77,6 +77,11 @@ def ensure_book_has_no_active_generation(db: Session, book: Book) -> None:
 
 def delete_book_and_files(db: Session, book: Book) -> None:
     file_paths = [pdf.file_path for pdf in book.pdfs if not pdf.file_path.startswith("demo://")]
+    file_paths.extend(
+        material.file_path
+        for material in book.materials
+        if not material.file_path.startswith("demo://")
+    )
     db.execute(
         update(ExamShare)
         .where(ExamShare.book_id == book.id)

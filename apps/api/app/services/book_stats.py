@@ -1,7 +1,16 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Book, ContentChunk, PdfDocument, Quiz, QuizGenerationTask, ReviewTask
+from app.models import (
+    Book,
+    ContentChunk,
+    PdfDocument,
+    QuoteEntry,
+    Quiz,
+    QuizGenerationTask,
+    ResourceMaterial,
+    ReviewTask,
+)
 from app.schemas import BookDetail, BookStats, BookSummary, PdfResponse, QuizSummary
 
 
@@ -15,6 +24,23 @@ def get_book_stats(db: Session, book_id: str) -> BookStats:
     chunk_count = db.scalar(
         select(func.count(ContentChunk.id)).where(ContentChunk.book_id == book_id)
     )
+    material_count, ready_material_count = db.execute(
+        select(
+            func.count(ResourceMaterial.id),
+            func.count(ResourceMaterial.id).filter(
+                ResourceMaterial.parse_status == "completed"
+            ),
+        ).where(ResourceMaterial.book_id == book_id)
+    ).one()
+    quote_count, confirmed_quote_count = db.execute(
+        select(
+            func.count(QuoteEntry.id),
+            func.count(QuoteEntry.id).filter(
+                QuoteEntry.review_status == "confirmed",
+                QuoteEntry.enabled_for_generation.is_(True),
+            ),
+        ).where(QuoteEntry.book_id == book_id)
+    ).one()
     quiz_count, average_score, last_reviewed_at, next_review_date = db.execute(
         select(
             func.count(ReviewTask.id),
@@ -31,6 +57,10 @@ def get_book_stats(db: Session, book_id: str) -> BookStats:
         average_score=round(float(average_score), 1) if average_score is not None else None,
         last_reviewed_at=last_reviewed_at,
         next_review_date=next_review_date,
+        material_count=material_count or 0,
+        ready_material_count=ready_material_count or 0,
+        quote_count=quote_count or 0,
+        confirmed_quote_count=confirmed_quote_count or 0,
     )
 
 

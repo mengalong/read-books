@@ -12,6 +12,7 @@ from app.routers.auth import router as auth_router
 from app.routers.books import admin_router as admin_books_router
 from app.routers.books import router as books_router
 from app.routers.quizzes import router as quizzes_router
+from app.routers.materials import router as materials_router
 from app.routers.site import router as site_router
 from app.routers.settings import router as settings_router
 from app.routers.wechat import router as wechat_router
@@ -22,6 +23,7 @@ from app.services.demo_data import seed_demo_data
 from app.services.auth import ensure_initial_admin
 from app.services.pdf_parser import parse_pdf_document
 from app.services.quiz_generation import recover_generation_tasks, run_generation_task
+from app.services.material_parser import parse_material_document, recover_material_tasks
 from app.services.exam_sharing import recover_exam_grading_tasks, launch_exam_grading
 
 settings = get_settings()
@@ -54,6 +56,8 @@ async def lifespan(_: FastAPI):
             )
     for pdf_id in pending_pdf_ids:
         threading.Thread(target=parse_pdf_document, args=(pdf_id,), daemon=True).start()
+    for material_id in recover_material_tasks():
+        threading.Thread(target=parse_material_document, args=(material_id,), daemon=True).start()
     with SessionLocal() as db:
         pending_generation_task_ids = recover_generation_tasks(db)
     for task_id in pending_generation_task_ids:
@@ -81,6 +85,7 @@ app.add_middleware(
 )
 
 app.include_router(books_router, prefix="/api")
+app.include_router(materials_router, prefix="/api")
 app.include_router(admin_books_router, prefix="/api")
 app.include_router(quizzes_router, prefix="/api")
 app.include_router(site_router, prefix="/api")

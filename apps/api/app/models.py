@@ -68,6 +68,9 @@ class User(TimestampMixin, Base):
     created_generation_tasks: Mapped[list[QuizGenerationTask]] = relationship(
         back_populates="created_by_user", foreign_keys="QuizGenerationTask.created_by_user_id"
     )
+    created_materials: Mapped[list[ResourceMaterial]] = relationship(
+        back_populates="created_by_user", foreign_keys="ResourceMaterial.created_by_user_id"
+    )
     usage_records: Mapped[list[ModelUsageRecord]] = relationship(
         back_populates="user", foreign_keys="ModelUsageRecord.user_id"
     )
@@ -215,6 +218,15 @@ class Book(TimestampMixin, Base):
     chunks: Mapped[list[ContentChunk]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
     )
+    materials: Mapped[list[ResourceMaterial]] = relationship(
+        back_populates="book", cascade="all, delete-orphan"
+    )
+    material_segments: Mapped[list[MaterialSegment]] = relationship(
+        back_populates="book", cascade="all, delete-orphan"
+    )
+    quote_entries: Mapped[list[QuoteEntry]] = relationship(
+        back_populates="book", cascade="all, delete-orphan"
+    )
     quizzes: Mapped[list[Quiz]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
     )
@@ -265,6 +277,100 @@ class ContentChunk(TimestampMixin, Base):
 
     book: Mapped[Book] = relationship(back_populates="chunks")
     pdf: Mapped[PdfDocument] = relationship(back_populates="chunks")
+
+
+class ResourceMaterial(TimestampMixin, Base):
+    __tablename__ = "resource_materials"
+    __table_args__ = (
+        UniqueConstraint("book_id", "file_hash", name="uq_resource_material_book_hash"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    book_id: Mapped[str] = mapped_column(
+        ForeignKey("books.id", ondelete="CASCADE"), index=True
+    )
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    material_type: Mapped[str] = mapped_column(String(30), index=True)
+    file_format: Mapped[str] = mapped_column(String(20), index=True)
+    file_name: Mapped[str] = mapped_column(String(255))
+    file_path: Mapped[str] = mapped_column(Text)
+    file_size: Mapped[int] = mapped_column(Integer, default=0)
+    file_hash: Mapped[str] = mapped_column(String(64), index=True)
+    season_number: Mapped[int | None] = mapped_column(Integer)
+    episode_label: Mapped[str | None] = mapped_column(String(80))
+    version_label: Mapped[str | None] = mapped_column(String(120))
+    parse_status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    segment_count: Mapped[int] = mapped_column(Integer, default=0)
+    quote_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    book: Mapped[Book] = relationship(back_populates="materials")
+    created_by_user: Mapped[User | None] = relationship(
+        back_populates="created_materials", foreign_keys=[created_by_user_id]
+    )
+    segments: Mapped[list[MaterialSegment]] = relationship(
+        back_populates="material", cascade="all, delete-orphan"
+    )
+    quotes: Mapped[list[QuoteEntry]] = relationship(
+        back_populates="material", cascade="all, delete-orphan"
+    )
+
+
+class MaterialSegment(TimestampMixin, Base):
+    __tablename__ = "material_segments"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    book_id: Mapped[str] = mapped_column(
+        ForeignKey("books.id", ondelete="CASCADE"), index=True
+    )
+    material_id: Mapped[str] = mapped_column(
+        ForeignKey("resource_materials.id", ondelete="CASCADE"), index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    page_number: Mapped[int | None] = mapped_column(Integer, index=True)
+    season_number: Mapped[int | None] = mapped_column(Integer, index=True)
+    episode_number: Mapped[int | None] = mapped_column(Integer, index=True)
+    start_ms: Mapped[int | None] = mapped_column(Integer)
+    end_ms: Mapped[int | None] = mapped_column(Integer)
+    scene_label: Mapped[str | None] = mapped_column(String(200))
+    speaker: Mapped[str | None] = mapped_column(String(120), index=True)
+    speaker_origin: Mapped[str] = mapped_column(String(20), default="unknown", index=True)
+
+    book: Mapped[Book] = relationship(back_populates="material_segments")
+    material: Mapped[ResourceMaterial] = relationship(back_populates="segments")
+
+
+class QuoteEntry(TimestampMixin, Base):
+    __tablename__ = "quote_entries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    book_id: Mapped[str] = mapped_column(
+        ForeignKey("books.id", ondelete="CASCADE"), index=True
+    )
+    material_id: Mapped[str] = mapped_column(
+        ForeignKey("resource_materials.id", ondelete="CASCADE"), index=True
+    )
+    source_segment_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    quote_text: Mapped[str] = mapped_column(Text)
+    normalized_text: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    speaker: Mapped[str | None] = mapped_column(String(120), index=True)
+    speaker_origin: Mapped[str] = mapped_column(String(20), default="unknown", index=True)
+    context: Mapped[str | None] = mapped_column(Text)
+    season_number: Mapped[int | None] = mapped_column(Integer, index=True)
+    episode_number: Mapped[int | None] = mapped_column(Integer, index=True)
+    start_ms: Mapped[int | None] = mapped_column(Integer)
+    end_ms: Mapped[int | None] = mapped_column(Integer)
+    page_number: Mapped[int | None] = mapped_column(Integer, index=True)
+    review_status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    enabled_for_generation: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+    book: Mapped[Book] = relationship(back_populates="quote_entries")
+    material: Mapped[ResourceMaterial] = relationship(back_populates="quotes")
 
 
 class Quiz(TimestampMixin, Base):

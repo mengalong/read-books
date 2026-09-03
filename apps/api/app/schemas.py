@@ -38,6 +38,10 @@ class BookStats(ApiModel):
     average_score: float | None = None
     last_reviewed_at: datetime | None = None
     next_review_date: date | None = None
+    material_count: int = 0
+    ready_material_count: int = 0
+    quote_count: int = 0
+    confirmed_quote_count: int = 0
 
 
 class BookSummary(ApiModel):
@@ -82,6 +86,64 @@ class PdfResponse(ApiModel):
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class MaterialResponse(ApiModel):
+    id: str
+    book_id: str
+    material_type: Literal["book_text", "script", "subtitle", "quote_sheet"]
+    file_format: Literal["pdf", "txt", "srt", "vtt", "ass", "csv", "xlsx"]
+    file_name: str
+    file_size: int
+    season_number: int | None = None
+    episode_label: str | None = None
+    version_label: str | None = None
+    parse_status: Literal["pending", "processing", "needs_review", "completed", "failed"]
+    error_message: str | None = None
+    segment_count: int = 0
+    quote_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class QuoteEntryResponse(ApiModel):
+    id: str
+    book_id: str
+    material_id: str
+    material_file_name: str
+    source_segment_ids: list[str]
+    quote_text: str
+    speaker: str | None = None
+    speaker_origin: Literal["provided", "inferred", "confirmed", "unknown"]
+    context: str | None = None
+    season_number: int | None = None
+    episode_number: int | None = None
+    start_ms: int | None = None
+    end_ms: int | None = None
+    page_number: int | None = None
+    review_status: Literal["pending", "confirmed", "rejected"]
+    enabled_for_generation: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class QuoteEntryListResponse(BaseModel):
+    items: list[QuoteEntryResponse]
+    total: int
+    speakers: list[str] = Field(default_factory=list)
+    pending_count: int = 0
+    confirmed_count: int = 0
+
+
+class QuoteEntryUpdateRequest(BaseModel):
+    speaker: str | None = Field(default=None, max_length=120)
+    context: str | None = Field(default=None, max_length=2000)
+    review_status: Literal["pending", "confirmed", "rejected"] | None = None
+    enabled_for_generation: bool | None = None
+
+
+class QuoteEntryBulkRequest(BaseModel):
+    quote_ids: list[str] = Field(min_length=1, max_length=200)
 
 
 class QuizSummary(BaseModel):
