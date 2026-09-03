@@ -291,6 +291,35 @@ def test_quote_sheet_requires_quote_and_speaker(tmp_path):
         )
 
 
+def test_qianfu_style_episode_page_csv_is_parsed(tmp_path):
+    csv_path = tmp_path / "dialogues.csv"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "集数,页码,类型,角色,内容",
+                "1,17,环境描写,,1. 空镜山城重庆 日外",
+                "1,17,台词,林怀复,……据我所知，参加旧金山会议的代表。",
+                "1,17,旁白,,甲（OS）：是呀，前不久我外甥在津浦战役中率部起义。",
+                "1,18,台词,余则成,张名义，出什么事了？",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    records = parse_material_file(
+        material_for(csv_path, file_format="csv", material_type="quote_sheet")
+    )
+
+    assert len(records) == 4
+    dialogue_records = [record for record in records if record.speaker]
+    assert len(dialogue_records) == 2
+    assert dialogue_records[0].speaker == "林怀复"
+    assert dialogue_records[0].episode_number == 1
+    assert dialogue_records[0].page_number == 17
+    non_dialogue_records = [record for record in records if not record.speaker]
+    assert len(non_dialogue_records) == 2
+
+
 def test_classic_quote_quiz_uses_material_and_preserves_snapshot(client, monkeypatch):
     book = create_resource(client, "潜伏经典台词专题")
     payload = (

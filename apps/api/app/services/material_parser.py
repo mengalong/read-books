@@ -254,7 +254,7 @@ FIELD_ALIASES = {
     "content": ("内容", "content"),
     "speaker": ("角色", "speaker", "character", "name"),
     "season": ("季", "season"),
-    "episode": ("集", "episode"),
+    "episode": ("集", "集数", "episode"),
     "start": ("开始时间", "start", "start_time"),
     "end": ("结束时间", "end", "end_time"),
     "scene": ("场景", "scene"),
