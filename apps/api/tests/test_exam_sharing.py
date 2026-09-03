@@ -333,6 +333,7 @@ def test_exam_share_question_regeneration_creates_new_version(client, monkeypatc
         assert kwargs["resource_type"] == "book"
         assert kwargs["source_mode"] == "pdf"
         assert kwargs["question_exclusions"][0]["role"] == "current_question"
+        assert kwargs["question_exclusions"][1]["question_type"] == "short"
         return [
             GeneratedQuestion(
                 question_type="single",

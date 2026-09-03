@@ -810,6 +810,149 @@ def test_question_regeneration_avoids_same_type_duplicates(client, monkeypatch):
         assert untouched_multiple.prompt == "旧的多选题 3"
 
 
+def test_question_regeneration_checks_all_question_types_for_same_fact(client, monkeypatch):
+    book_id, _ = create_source_book(client, "整卷事实重出测试书")
+    with SessionLocal() as db:
+        chunk_ids = list(
+            db.scalars(
+                select(ContentChunk.id)
+                .where(ContentChunk.book_id == book_id)
+                .order_by(ContentChunk.page_number)
+            ).all()
+        )
+        quiz = Quiz(
+            book_id=book_id,
+            title="第 1 套复习试卷",
+            difficulty="medium",
+            duration_minutes=15,
+            status="ready",
+            source_mode="pdf",
+            max_score=100,
+        )
+        db.add(quiz)
+        db.flush()
+        shared_signature = {
+            "fact_claim": "翠平在假扮夫妻任务前的真实身份",
+            "fact_subject": "翠平",
+            "fact_relation": "身份",
+            "fact_context": "天津假扮夫妻潜伏任务",
+            "answer_signature": ["游击队队员"],
+            "question_intent": "identity",
+        }
+        db.add_all(
+            [
+                Question(
+                    id="whole-q1",
+                    quiz_id=quiz.id,
+                    position=1,
+                    question_type="single",
+                    prompt="原来的身份题",
+                    options=[
+                        {"id": "A", "text": "旧答案"},
+                        {"id": "B", "text": "其他答案"},
+                    ],
+                    correct_answers=["A"],
+                    explanation="解析",
+                    knowledge_point="人物身份",
+                    difficulty="medium",
+                    estimated_seconds=45,
+                    source_chunk_ids=[chunk_ids[0]],
+                    source_evidence=[],
+                    max_score=40,
+                ),
+                Question(
+                    id="whole-q2",
+                    quiz_id=quiz.id,
+                    position=2,
+                    question_type="multiple",
+                    prompt="另一种题型询问翠平身份",
+                    options=[
+                        {"id": "A", "text": "游击队队员"},
+                        {"id": "B", "text": "其他答案"},
+                    ],
+                    correct_answers=["A"],
+                    explanation="解析",
+                    knowledge_point="人物身份",
+                    difficulty="medium",
+                    estimated_seconds=90,
+                    source_chunk_ids=[chunk_ids[1]],
+                    source_evidence=[],
+                    max_score=60,
+                    semantic_signature=shared_signature,
+                    fact_claim=shared_signature["fact_claim"],
+                ),
+            ]
+        )
+        db.commit()
+        quiz_id = quiz.id
+
+    calls: list[dict] = []
+
+    def fake_generate(self, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return [
+                GeneratedQuestion(
+                    question_type="single",
+                    prompt="换一种问法询问翠平的真实身份",
+                    options=[
+                        {"id": "A", "text": "游击队队员"},
+                        {"id": "B", "text": "其他答案"},
+                    ],
+                    correct_answers=["A"],
+                    explanation="重复事实",
+                    knowledge_point="人物身份",
+                    estimated_seconds=45,
+                    reference_answer=None,
+                    grading_rubric=[],
+                    source_chunk_ids=[chunk_ids[2]],
+                    source_evidence=[],
+                    max_score=40,
+                    fact_claim=shared_signature["fact_claim"],
+                    semantic_signature=shared_signature,
+                )
+            ]
+        return [
+            GeneratedQuestion(
+                question_type="single",
+                prompt="天津站接收新任务的地点是什么？",
+                options=[
+                    {"id": "A", "text": "天津站"},
+                    {"id": "B", "text": "上海站"},
+                ],
+                correct_answers=["A"],
+                explanation="新事实",
+                knowledge_point="任务地点",
+                estimated_seconds=45,
+                reference_answer=None,
+                grading_rubric=[],
+                source_chunk_ids=[chunk_ids[3]],
+                source_evidence=[],
+                max_score=40,
+                fact_claim="天津站接收新任务的地点",
+                semantic_signature={
+                    "fact_claim": "天津站接收新任务的地点",
+                    "fact_subject": "余则成",
+                    "fact_relation": "任务地点",
+                    "fact_context": "天津站新任务",
+                    "answer_signature": ["天津站"],
+                    "question_intent": "location",
+                },
+            )
+        ]
+
+    monkeypatch.setattr(MockQuizAiProvider, "generate_questions", fake_generate)
+    response = client.post(f"/api/quizzes/{quiz_id}/questions/whole-q1/regenerate")
+    assert response.status_code == 200
+    assert response.json()["prompt"] == "天津站接收新任务的地点是什么？"
+    assert len(calls) == 2
+    assert any(
+        item["question_type"] == "multiple"
+        and item["fact_claim"] == "翠平在假扮夫妻任务前的真实身份"
+        for item in calls[0]["question_exclusions"]
+    )
+
+
 def test_generation_retries_semantically_duplicate_questions(client, monkeypatch):
     book_id, _ = create_source_book(client, "语义去重测试书")
     calls: list[dict] = []

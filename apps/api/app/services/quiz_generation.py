@@ -488,12 +488,13 @@ def _is_duplicate_question(
 def regenerate_quiz_question(
     db: Session, quiz: Quiz, question: Question, *, user_id: str | None = None
 ) -> Question:
+    all_other_questions = [item for item in quiz.questions if item.id != question.id]
     same_type_questions = [
         item
-        for item in quiz.questions
-        if item.id != question.id and item.question_type == question.question_type
+        for item in all_other_questions
+        if item.question_type == question.question_type
     ]
-    comparison_questions = [question, *same_type_questions]
+    comparison_questions = [question, *all_other_questions]
     theme_config = dict(quiz.theme_config or {})
     if quiz.source_mode == "material":
         all_sources = _get_quote_sources(db, quiz.book_id, theme_config)
@@ -543,7 +544,7 @@ def regenerate_quiz_question(
     )
     question_exclusions = [
         _question_exclusion_payload(question, role="current_question"),
-        *(_question_exclusion_payload(item) for item in same_type_questions),
+        *(_question_exclusion_payload(item) for item in all_other_questions),
     ]
     rejected_candidates: list[GeneratedQuestion] = []
     question_type_counts = {"single": 0, "multiple": 0, "short": 0}
@@ -635,13 +636,17 @@ def regenerate_snapshot_question(
     generation_number: int = 0,
 ) -> dict[str, object]:
     current = SimpleNamespace(**current_question)
-    same_type_questions = [
+    all_other_questions = [
         SimpleNamespace(**item)
         for item in sibling_questions
         if str(item.get("id")) != str(current_question.get("id"))
-        and item.get("question_type") == current_question.get("question_type")
     ]
-    comparison_questions = [current, *same_type_questions]
+    same_type_questions = [
+        item
+        for item in all_other_questions
+        if item.question_type == current_question.get("question_type")
+    ]
+    comparison_questions = [current, *all_other_questions]
     theme_config = dict(theme_config or {})
     if source_mode == "material":
         all_sources = _get_quote_sources(db, book_id, theme_config)
@@ -689,7 +694,7 @@ def regenerate_snapshot_question(
     )
     question_exclusions = [
         _question_exclusion_payload(current, role="current_question"),
-        *(_question_exclusion_payload(item) for item in same_type_questions),
+        *(_question_exclusion_payload(item) for item in all_other_questions),
     ]
     rejected_candidates: list[GeneratedQuestion] = []
     question_type_counts = {"single": 0, "multiple": 0, "short": 0}
