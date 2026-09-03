@@ -6,7 +6,12 @@ from app.models import ContentChunk, Question, Quiz
 from app.services.model_config import EffectiveModelConfiguration
 from app.services.model_usage import new_usage_context
 from app.services.prompt_config import DEFAULT_PROMPTS, PromptTemplateDefinition
-from app.services.quiz_provider import HttpQuizAiProvider, key_sentence
+from app.services.quiz_provider import (
+    HttpQuizAiProvider,
+    MockQuizAiProvider,
+    TrustedQuoteSource,
+    key_sentence,
+)
 
 
 def make_configuration() -> EffectiveModelConfiguration:
@@ -128,6 +133,48 @@ def generated_payload(source_ids: list[str]) -> dict:
     }
 
 
+def make_trusted_quote() -> TrustedQuoteSource:
+    return TrustedQuoteSource(
+        id="quote-1",
+        material_id="material-1",
+        file_name="潜伏台词.csv",
+        material_type="quote_sheet",
+        content="会议现在开始",
+        source_segment_ids=["segment-1"],
+        speaker="吴站长",
+        context="吴站长在站内会议上宣布开始",
+        season_number=1,
+        episode_number=1,
+        start_ms=10_000,
+        end_ms=12_000,
+    )
+
+
+def generated_quote_payload(*, speaker: str = "吴站长", quote_id: str = "quote-1") -> dict:
+    return {
+        "questions": [
+            {
+                "question_type": "single",
+                "question_subtype": "quote_speaker",
+                "prompt": "可信资料中的台词“会议现在开始”由谁说出？",
+                "options": [
+                    {"id": "A", "text": "余则成"},
+                    {"id": "B", "text": speaker},
+                    {"id": "C", "text": "李涯"},
+                    {"id": "D", "text": "谢若林"},
+                ],
+                "correct_answers": ["B"],
+                "explanation": "可信资料明确记录了说话人。",
+                "knowledge_point": "吴站长经典台词",
+                "reference_answer": None,
+                "grading_rubric": [],
+                "source_chunk_ids": [],
+                "quote_entry_ids": [quote_id],
+            }
+        ]
+    }
+
+
 def test_key_sentence_prefers_long_matching_phrase():
     excerpt = "开头只是交代场景，和题目关系不大。真正相关的是他决定继续坚持音乐创作，并相信歌声能够帮助别人。后面还有补充说明。"
 
@@ -203,6 +250,85 @@ def test_http_provider_generates_model_knowledge_questions_without_pdf(monkeypat
     assert questions[0].source_evidence == []
     assert "解忧杂货店" in requests[0]["json"]["messages"][1]["content"]
     assert "model_knowledge" in requests[0]["json"]["messages"][1]["content"]
+
+
+def test_http_provider_validates_trusted_quote_and_rebuilds_evidence(monkeypatch):
+    source = make_trusted_quote()
+    payload = generated_quote_payload()
+    requests = install_chat_responses(
+        monkeypatch, [json.dumps(payload, ensure_ascii=False)]
+    )
+    provider = HttpQuizAiProvider(make_configuration())
+
+    questions = provider.generate_questions(
+        chunks=[source],
+        file_names={},
+        single_count=1,
+        multiple_count=0,
+        short_count=0,
+        difficulty="medium",
+        generation_number=0,
+        recent_chunk_ids=set(),
+        book_title="潜伏",
+        resource_type="tv_series",
+        source_mode="material",
+        generation_theme="classic_quotes",
+        theme_requirements="仅围绕可信台词出题",
+        allowed_question_subtypes=["quote_speaker"],
+    )
+
+    assert questions[0].question_subtype == "quote_speaker"
+    assert questions[0].quote_entry_ids == ["quote-1"]
+    assert questions[0].source_segment_ids == ["segment-1"]
+    assert questions[0].source_evidence[0]["material_id"] == "material-1"
+    assert questions[0].source_evidence[0]["speaker"] == "吴站长"
+    assert "quote-1" in requests[0]["json"]["messages"][1]["content"]
+    assert "可信台词资料" in requests[0]["json"]["messages"][0]["content"]
+
+
+def test_http_provider_rejects_untrusted_quote_attribution(monkeypatch):
+    source = make_trusted_quote()
+    invalid = generated_quote_payload(speaker="错误角色")
+    install_chat_responses(
+        monkeypatch,
+        [json.dumps(invalid, ensure_ascii=False), json.dumps(invalid, ensure_ascii=False)],
+    )
+    provider = HttpQuizAiProvider(make_configuration())
+
+    with pytest.raises(RuntimeError, match="正确答案与可信资料不一致"):
+        provider.generate_questions(
+            chunks=[source],
+            file_names={},
+            single_count=1,
+            multiple_count=0,
+            short_count=0,
+            difficulty="medium",
+            generation_number=0,
+            recent_chunk_ids=set(),
+            source_mode="material",
+            generation_theme="classic_quotes",
+            theme_requirements="仅围绕可信台词出题",
+            allowed_question_subtypes=["quote_speaker"],
+        )
+
+
+def test_mock_provider_respects_selected_quote_angle():
+    source = make_trusted_quote()
+    questions = MockQuizAiProvider().generate_questions(
+        chunks=[source],
+        file_names={},
+        single_count=1,
+        multiple_count=0,
+        short_count=0,
+        difficulty="medium",
+        generation_number=0,
+        recent_chunk_ids=set(),
+        source_mode="material",
+        generation_theme="classic_quotes",
+        allowed_question_subtypes=["quote_meaning"],
+    )
+
+    assert questions[0].question_subtype == "quote_meaning"
 
 
 def test_http_provider_reports_usage_for_each_model_call(monkeypatch):

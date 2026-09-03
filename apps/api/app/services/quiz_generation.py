@@ -15,15 +15,22 @@ from app.models import (
     Book,
     ContentChunk,
     PdfDocument,
+    QuoteEntry,
     Question,
     Quiz,
     QuizGenerationTask,
+    ResourceMaterial,
 )
 from app.schemas import QuizGenerateRequest
 from app.services.model_config import get_effective_model_configuration
 from app.services.model_usage import attach_quiz_to_usage, new_usage_context
 from app.services.prompt_config import get_effective_prompt_templates
-from app.services.quiz_provider import GeneratedQuestion, compact_text, get_quiz_provider
+from app.services.quiz_provider import (
+    GeneratedQuestion,
+    TrustedQuoteSource,
+    compact_text,
+    get_quiz_provider,
+)
 from app.services.resource_types import resource_type_label
 from app.services.score_allocation import (
     QUIZ_TOTAL_SCORE,
@@ -33,11 +40,36 @@ from app.services.score_allocation import (
 
 settings = get_settings()
 
+THEME_SUBTYPES = {
+    "classic_quotes": ["quote_speaker", "quote_context", "quote_meaning"],
+    "character": [
+        "quote_speaker",
+        "quote_context",
+        "quote_meaning",
+        "character_relation",
+        "character_trait",
+    ],
+}
 
-def resolve_source_mode(db: Session, book_id: str) -> str:
+
+def _normalized_theme_config(payload: QuizGenerateRequest) -> dict[str, Any]:
+    config = payload.theme_config.model_dump()
+    if payload.generation_theme == "general":
+        return {}
+    if not config["question_subtypes"]:
+        config["question_subtypes"] = list(THEME_SUBTYPES[payload.generation_theme])
+    return config
+
+
+def resolve_source_mode(
+    db: Session, book_id: str, payload: QuizGenerateRequest | None = None
+) -> str:
     book = db.get(Book, book_id)
     if not book:
         raise ValueError("未找到这本书")
+
+    if payload is not None and payload.generation_theme != "general":
+        return "material"
 
     completed_chunk = db.scalar(
         select(ContentChunk.id)
@@ -77,6 +109,54 @@ def validate_generation_request(
         raise ValueError("至少需要选择一种题型")
     if payload.page_start and payload.page_end and payload.page_start > payload.page_end:
         raise ValueError("起始页不能晚于结束页")
+    if payload.generation_theme != "general":
+        config = _normalized_theme_config(payload)
+        material_ids = config["material_ids"]
+        character_names = config["character_names"]
+        question_subtypes = set(config["question_subtypes"])
+        if not material_ids:
+            raise ValueError("经典台词或角色专题至少需要选择一份可信资料")
+        if payload.generation_theme == "character" and not character_names:
+            raise ValueError("角色专题至少需要选择一个已确认角色")
+        unsupported = question_subtypes - set(THEME_SUBTYPES[payload.generation_theme])
+        if unsupported:
+            raise ValueError("所选考察角度不适用于当前专题")
+        material_count = db.scalar(
+            select(func.count(ResourceMaterial.id)).where(
+                ResourceMaterial.book_id == book_id,
+                ResourceMaterial.id.in_(material_ids),
+                ResourceMaterial.parse_status.in_(["needs_review", "completed"]),
+            )
+        ) or 0
+        if material_count != len(set(material_ids)):
+            raise ValueError("部分可信资料不存在、尚未解析完成或不属于当前资源")
+        quote_filters = [
+            QuoteEntry.book_id == book_id,
+            QuoteEntry.material_id.in_(material_ids),
+            QuoteEntry.review_status == "confirmed",
+            QuoteEntry.enabled_for_generation.is_(True),
+        ]
+        if character_names:
+            quote_filters.append(QuoteEntry.speaker.in_(character_names))
+        available_quotes = db.scalar(
+            select(func.count(QuoteEntry.id)).where(*quote_filters)
+        ) or 0
+        total_questions = payload.single_count + payload.multiple_count + payload.short_count
+        if available_quotes < total_questions:
+            raise ValueError(
+                f"符合专题范围的可信台词只有 {available_quotes} 条，至少需要 {total_questions} 条"
+            )
+        if question_subtypes == {"quote_speaker"}:
+            if payload.multiple_count or payload.short_count:
+                raise ValueError("台词说话人角度只支持单选题，请增加其他考察角度或调整题型")
+            speaker_quotes = db.scalar(
+                select(func.count(QuoteEntry.id)).where(
+                    *quote_filters,
+                    QuoteEntry.speaker.is_not(None),
+                )
+            ) or 0
+            if speaker_quotes < payload.single_count:
+                raise ValueError("已确认说话人的台词数量不足，不能生成所需的说话人题")
     active = db.scalar(
         select(QuizGenerationTask.id).where(
             QuizGenerationTask.book_id == book_id,
@@ -90,7 +170,7 @@ def validate_generation_request(
         "processing",
     }:
         raise ValueError("该书正在后台预生成测试，请等待本次任务完成")
-    source_mode = resolve_source_mode(db, book_id)
+    source_mode = resolve_source_mode(db, book_id, payload)
     if source_mode == "model_knowledge" and (payload.page_start or payload.page_end):
         raise ValueError("没有 PDF 时不能指定页码范围")
     return book
@@ -105,13 +185,16 @@ def create_generation_task(
     created_by_user_id: str | None = None,
 ) -> QuizGenerationTask:
     validate_generation_request(db, book_id, payload, task_type)
-    source_mode = resolve_source_mode(db, book_id)
+    source_mode = resolve_source_mode(db, book_id, payload)
+    theme_config = _normalized_theme_config(payload)
     task = QuizGenerationTask(
         book_id=book_id,
         created_by_user_id=created_by_user_id,
         task_type=task_type,
         status="pending",
         source_mode=source_mode,
+        generation_theme=payload.generation_theme,
+        theme_config=theme_config,
         total_questions=payload.single_count + payload.multiple_count + payload.short_count,
         current_phase="等待开始",
         difficulty=payload.difficulty,
@@ -201,6 +284,68 @@ def _chunk_file_names(db: Session, chunks: list[ContentChunk]) -> dict[str, str]
     )
 
 
+def _get_quote_sources(
+    db: Session,
+    book_id: str,
+    theme_config: dict[str, Any],
+) -> list[TrustedQuoteSource]:
+    material_ids = [str(value) for value in theme_config.get("material_ids", [])]
+    character_names = [str(value) for value in theme_config.get("character_names", [])]
+    filters = [
+        QuoteEntry.book_id == book_id,
+        QuoteEntry.material_id.in_(material_ids),
+        QuoteEntry.review_status == "confirmed",
+        QuoteEntry.enabled_for_generation.is_(True),
+    ]
+    if character_names:
+        filters.append(QuoteEntry.speaker.in_(character_names))
+    rows = db.execute(
+        select(QuoteEntry, ResourceMaterial)
+        .join(ResourceMaterial, ResourceMaterial.id == QuoteEntry.material_id)
+        .where(*filters)
+        .order_by(
+            QuoteEntry.material_id,
+            QuoteEntry.episode_number,
+            QuoteEntry.start_ms,
+            QuoteEntry.created_at,
+        )
+    ).all()
+    return [
+        TrustedQuoteSource(
+            id=quote.id,
+            material_id=material.id,
+            file_name=material.file_name,
+            material_type=material.material_type,
+            content=quote.quote_text,
+            source_segment_ids=list(quote.source_segment_ids or []),
+            speaker=quote.speaker,
+            context=quote.context,
+            page_number=quote.page_number,
+            season_number=quote.season_number,
+            episode_number=quote.episode_number,
+            start_ms=quote.start_ms,
+            end_ms=quote.end_ms,
+        )
+        for quote, material in rows
+    ]
+
+
+def _theme_requirements(generation_theme: str, theme_config: dict[str, Any]) -> str:
+    if generation_theme == "general":
+        return "围绕资源整体内容出题，不限定角色或台词专题。"
+    characters = "、".join(theme_config.get("character_names", [])) or "全部已确认角色"
+    subtypes = "、".join(theme_config.get("question_subtypes", []))
+    if generation_theme == "classic_quotes":
+        return (
+            f"仅围绕可信资料中的经典台词出题；角色范围：{characters}；"
+            f"允许的考察角度：{subtypes}。逐字台词必须原样出现在题干中。"
+        )
+    return (
+        f"仅围绕角色 {characters} 出题；允许的考察角度：{subtypes}。"
+        "涉及逐字台词时必须原样引用可信资料。"
+    )
+
+
 def _recent_chunk_ids(db: Session, book_id: str) -> set[str]:
     recent_rows = db.scalars(
         select(Question.source_chunk_ids)
@@ -210,6 +355,17 @@ def _recent_chunk_ids(db: Session, book_id: str) -> set[str]:
         .limit(40)
     ).all()
     return {chunk_id for row in recent_rows for chunk_id in (row or [])}
+
+
+def _recent_quote_ids(db: Session, book_id: str) -> set[str]:
+    recent_rows = db.scalars(
+        select(Question.quote_entry_ids)
+        .join(Quiz, Quiz.id == Question.quiz_id)
+        .where(Quiz.book_id == book_id)
+        .order_by(Quiz.created_at.desc())
+        .limit(80)
+    ).all()
+    return {quote_id for row in recent_rows for quote_id in (row or [])}
 
 
 def _normalize_question_text(value: str | None) -> str:
@@ -224,6 +380,8 @@ def _question_exclusion_payload(question: Question, role: str = "same_type_refer
         "prompt": compact_text(question.prompt, 140),
         "knowledge_point": compact_text(question.knowledge_point, 60),
         "source_chunk_ids": list(getattr(question, "source_chunk_ids", None) or []),
+        "quote_entry_ids": list(getattr(question, "quote_entry_ids", None) or []),
+        "question_subtype": str(getattr(question, "question_subtype", "general")),
     }
     if question.question_type == "short" and question.reference_answer:
         payload["reference_answer"] = compact_text(question.reference_answer, 120)
@@ -237,6 +395,8 @@ def _generated_question_exclusion_payload(question: GeneratedQuestion) -> dict[s
         "prompt": compact_text(question.prompt, 140),
         "knowledge_point": compact_text(question.knowledge_point, 60),
         "source_chunk_ids": list(question.source_chunk_ids or []),
+        "quote_entry_ids": list(question.quote_entry_ids or []),
+        "question_subtype": question.question_subtype,
     }
     if question.question_type == "short" and question.reference_answer:
         payload["reference_answer"] = compact_text(question.reference_answer, 120)
@@ -271,9 +431,13 @@ def _is_duplicate_question(
     candidate_prompt = _normalize_question_text(candidate.prompt)
     candidate_knowledge = _normalize_question_text(candidate.knowledge_point)
     candidate_sources = set(candidate.source_chunk_ids or [])
+    candidate_quotes = set(candidate.quote_entry_ids or [])
     for question in siblings:
         question_sources = set(getattr(question, "source_chunk_ids", None) or [])
+        question_quotes = set(getattr(question, "quote_entry_ids", None) or [])
         if candidate_sources and question_sources and candidate_sources & question_sources:
+            return True
+        if candidate_quotes and question_quotes and candidate_quotes & question_quotes:
             return True
         if candidate_prompt and candidate_prompt == _normalize_question_text(question.prompt):
             return True
@@ -300,19 +464,37 @@ def regenerate_quiz_question(
         if item.id != question.id and item.question_type == question.question_type
     ]
     comparison_questions = [question, *same_type_questions]
-    all_chunks = _get_chunks(db, quiz.book_id)
-    if quiz.source_mode == "pdf" and not all_chunks:
-        raise ValueError("没有可用于出题的 PDF 原文")
-
-    blocked_chunk_ids = {
-        chunk_id
-        for sibling in same_type_questions
-        for chunk_id in (sibling.source_chunk_ids or [])
-    }
-    preferred_chunks = [chunk for chunk in all_chunks if chunk.id not in blocked_chunk_ids]
-    chunks = preferred_chunks or all_chunks
-    recent_chunk_ids = set() if preferred_chunks else blocked_chunk_ids
-    file_names = _chunk_file_names(db, chunks)
+    theme_config = dict(quiz.theme_config or {})
+    if quiz.source_mode == "material":
+        all_sources = _get_quote_sources(db, quiz.book_id, theme_config)
+        if not all_sources:
+            raise ValueError("没有可用于重出题的可信台词，资料可能已删除或停用")
+        blocked_source_ids = {
+            quote_id
+            for sibling in same_type_questions
+            for quote_id in (sibling.quote_entry_ids or [])
+        }
+        preferred_sources = [
+            source for source in all_sources if source.id not in blocked_source_ids
+        ]
+        chunks = preferred_sources or all_sources
+        recent_chunk_ids = set() if preferred_sources else blocked_source_ids
+        file_names = {}
+    else:
+        all_chunks = _get_chunks(db, quiz.book_id)
+        if quiz.source_mode == "pdf" and not all_chunks:
+            raise ValueError("没有可用于出题的 PDF 原文")
+        blocked_source_ids = {
+            chunk_id
+            for sibling in same_type_questions
+            for chunk_id in (sibling.source_chunk_ids or [])
+        }
+        preferred_chunks = [
+            chunk for chunk in all_chunks if chunk.id not in blocked_source_ids
+        ]
+        chunks = preferred_chunks or all_chunks
+        recent_chunk_ids = set() if preferred_chunks else blocked_source_ids
+        file_names = _chunk_file_names(db, chunks)
     base_generation_number = db.scalar(
         select(func.count(Quiz.id)).where(Quiz.book_id == quiz.book_id)
     ) or 0
@@ -360,6 +542,9 @@ def regenerate_quiz_question(
                 ),
             ],
             regeneration_guidance=_build_regeneration_guidance(quiz, question, attempt),
+            generation_theme=quiz.generation_theme,
+            theme_requirements=_theme_requirements(quiz.generation_theme, theme_config),
+            allowed_question_subtypes=list(theme_config.get("question_subtypes", [])),
         )
         if len(result) != 1:
             raise RuntimeError("重出结果数量不正确")
@@ -384,6 +569,9 @@ def regenerate_quiz_question(
             else item.grading_rubric
         )
         question.source_chunk_ids = item.source_chunk_ids
+        question.question_subtype = item.question_subtype
+        question.quote_entry_ids = item.quote_entry_ids
+        question.source_segment_ids = item.source_segment_ids
         question.source_evidence = item.source_evidence
         db.commit()
         db.refresh(question)
@@ -400,6 +588,8 @@ def regenerate_snapshot_question(
     author: str,
     resource_type: str,
     source_mode: str,
+    generation_theme: str = "general",
+    theme_config: dict[str, Any] | None = None,
     difficulty: str,
     duration_minutes: int,
     workspace_id: str | None = None,
@@ -418,19 +608,37 @@ def regenerate_snapshot_question(
         and item.get("question_type") == current_question.get("question_type")
     ]
     comparison_questions = [current, *same_type_questions]
-    all_chunks = _get_chunks(db, book_id)
-    if source_mode == "pdf" and not all_chunks:
-        raise ValueError("没有可用于出题的 PDF 原文")
-
-    blocked_chunk_ids = {
-        chunk_id
-        for sibling in same_type_questions
-        for chunk_id in (getattr(sibling, "source_chunk_ids", None) or [])
-    }
-    preferred_chunks = [chunk for chunk in all_chunks if chunk.id not in blocked_chunk_ids]
-    chunks = preferred_chunks or all_chunks
-    recent_chunk_ids = set() if preferred_chunks else blocked_chunk_ids
-    file_names = _chunk_file_names(db, chunks)
+    theme_config = dict(theme_config or {})
+    if source_mode == "material":
+        all_sources = _get_quote_sources(db, book_id, theme_config)
+        if not all_sources:
+            raise ValueError("没有可用于重出题的可信台词，资料可能已删除或停用")
+        blocked_source_ids = {
+            quote_id
+            for sibling in same_type_questions
+            for quote_id in (getattr(sibling, "quote_entry_ids", None) or [])
+        }
+        preferred_sources = [
+            source for source in all_sources if source.id not in blocked_source_ids
+        ]
+        chunks = preferred_sources or all_sources
+        recent_chunk_ids = set() if preferred_sources else blocked_source_ids
+        file_names = {}
+    else:
+        all_chunks = _get_chunks(db, book_id)
+        if source_mode == "pdf" and not all_chunks:
+            raise ValueError("没有可用于出题的 PDF 原文")
+        blocked_source_ids = {
+            chunk_id
+            for sibling in same_type_questions
+            for chunk_id in (getattr(sibling, "source_chunk_ids", None) or [])
+        }
+        preferred_chunks = [
+            chunk for chunk in all_chunks if chunk.id not in blocked_source_ids
+        ]
+        chunks = preferred_chunks or all_chunks
+        recent_chunk_ids = set() if preferred_chunks else blocked_source_ids
+        file_names = _chunk_file_names(db, chunks)
     provider = get_quiz_provider(
         settings,
         get_effective_model_configuration(db, settings),
@@ -478,6 +686,9 @@ def regenerate_snapshot_question(
             regeneration_guidance=_build_snapshot_regeneration_guidance(
                 book_title, current, attempt
             ),
+            generation_theme=generation_theme,
+            theme_requirements=_theme_requirements(generation_theme, theme_config),
+            allowed_question_subtypes=list(theme_config.get("question_subtypes", [])),
         )
         if len(result) != 1:
             raise RuntimeError("重出结果数量不正确")
@@ -503,6 +714,9 @@ def regenerate_snapshot_question(
             else item.grading_rubric
         )
         next_question["source_chunk_ids"] = item.source_chunk_ids
+        next_question["question_subtype"] = item.question_subtype
+        next_question["quote_entry_ids"] = item.quote_entry_ids
+        next_question["source_segment_ids"] = item.source_segment_ids
         next_question["source_evidence"] = item.source_evidence
         return next_question
 
@@ -543,22 +757,36 @@ def run_generation_task(task_id: str) -> None:
             return
         task.status = "processing"
         task.current_phase = (
-            "正在准备原文片段" if task.source_mode == "pdf" else "正在准备资源信息"
+            "正在准备原文片段"
+            if task.source_mode == "pdf"
+            else (
+                "正在准备可信台词"
+                if task.source_mode == "material"
+                else "正在准备资源信息"
+            )
         )
         db.commit()
 
         try:
             book = db.get(Book, task.book_id)
-            chunks = _get_chunks(db, task.book_id, task.page_start, task.page_end)
             if not book:
                 raise RuntimeError("未找到这本书")
-            if task.source_mode == "pdf" and not chunks:
-                raise RuntimeError("没有可用于出题的 PDF 原文")
-            file_names = _chunk_file_names(db, chunks)
+            theme_config = dict(task.theme_config or {})
+            if task.source_mode == "material":
+                chunks = _get_quote_sources(db, task.book_id, theme_config)
+                if len(chunks) < task.total_questions:
+                    raise RuntimeError("符合专题范围的可信台词数量不足")
+                file_names = {}
+                recent_chunk_ids = _recent_quote_ids(db, task.book_id)
+            else:
+                chunks = _get_chunks(db, task.book_id, task.page_start, task.page_end)
+                if task.source_mode == "pdf" and not chunks:
+                    raise RuntimeError("没有可用于出题的 PDF 原文")
+                file_names = _chunk_file_names(db, chunks)
+                recent_chunk_ids = _recent_chunk_ids(db, task.book_id)
             generation_number = db.scalar(
                 select(func.count(Quiz.id)).where(Quiz.book_id == task.book_id)
             ) or 0
-            recent_chunk_ids = _recent_chunk_ids(db, task.book_id)
             usage_context = new_usage_context(
                 task.task_type,
                 f"《{book.title}》后台预出题"
@@ -593,12 +821,20 @@ def run_generation_task(task_id: str) -> None:
                     author=book.author,
                     resource_type=book.resource_type,
                     source_mode=task.source_mode,
+                    generation_theme=task.generation_theme,
+                    theme_requirements=_theme_requirements(
+                        task.generation_theme, theme_config
+                    ),
+                    allowed_question_subtypes=list(
+                        theme_config.get("question_subtypes", [])
+                    ),
                 )
                 if len(result) != 1:
                     raise RuntimeError(f"第 {position} 道题生成结果数量不正确")
                 item = result[0]
                 generated.append(item)
                 recent_chunk_ids.update(item.source_chunk_ids)
+                recent_chunk_ids.update(item.quote_entry_ids)
                 task.completed_questions = position
                 task.current_phase = f"已完成第 {position} / {task.total_questions} 道题"
                 db.commit()
@@ -613,13 +849,19 @@ def run_generation_task(task_id: str) -> None:
                         item.grading_rubric, max_score
                     )
 
+            theme_label = {
+                "classic_quotes": "经典台词专题",
+                "character": "角色专题",
+            }.get(task.generation_theme, "复习试卷")
             quiz = Quiz(
                 book_id=task.book_id,
-                title=f"第 {generation_number + 1} 套复习试卷",
+                title=f"第 {generation_number + 1} 套{theme_label}",
                 difficulty=task.difficulty,
                 duration_minutes=task.duration_minutes,
                 status="ready",
                 source_mode=task.source_mode,
+                generation_theme=task.generation_theme,
+                theme_config=theme_config,
                 max_score=QUIZ_TOTAL_SCORE,
                 generation_task_id=task.id,
             )
@@ -631,6 +873,7 @@ def run_generation_task(task_id: str) -> None:
                         quiz_id=quiz.id,
                         position=position,
                         question_type=item.question_type,
+                        question_subtype=item.question_subtype,
                         prompt=item.prompt,
                         options=item.options,
                         correct_answers=item.correct_answers,
@@ -641,6 +884,8 @@ def run_generation_task(task_id: str) -> None:
                         reference_answer=item.reference_answer,
                         grading_rubric=item.grading_rubric,
                         source_chunk_ids=item.source_chunk_ids,
+                        quote_entry_ids=item.quote_entry_ids,
+                        source_segment_ids=item.source_segment_ids,
                         source_evidence=item.source_evidence,
                         max_score=item.max_score,
                     )

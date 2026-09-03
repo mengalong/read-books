@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
 import fitz
 import pytest
 from openpyxl import Workbook
 
 from app.database import SessionLocal
-from app.models import ResourceMaterial
+from app.models import ExamShare, ResourceMaterial
 from app.services.material_parser import parse_material_document, parse_material_file
 
 
@@ -59,6 +60,19 @@ def material_for(path: Path, *, file_format: str, material_type: str) -> Resourc
         file_hash="hash",
         parse_status="pending",
     )
+
+
+def wait_for_generation(client, task_id: str) -> dict:
+    for _ in range(100):
+        response = client.get(f"/api/quiz-generation-tasks/{task_id}")
+        assert response.status_code == 200
+        task = response.json()
+        if task["status"] == "completed":
+            return task
+        if task["status"] == "failed":
+            raise AssertionError(task["error_message"])
+        time.sleep(0.01)
+    raise AssertionError("专题出题任务在测试等待时间内没有完成")
 
 
 def test_structured_quote_sheet_is_ready_for_generation(client, monkeypatch):
@@ -275,3 +289,122 @@ def test_quote_sheet_requires_quote_and_speaker(tmp_path):
         parse_material_file(
             material_for(csv_path, file_format="csv", material_type="quote_sheet")
         )
+
+
+def test_classic_quote_quiz_uses_material_and_preserves_snapshot(client, monkeypatch):
+    book = create_resource(client, "潜伏经典台词专题")
+    payload = (
+        "台词,角色,集,上下文\n"
+        "会议现在开始,吴站长,1,站内会议\n"
+        "这件事要谨慎,余则成,2,秘密交谈\n"
+        "先把情况弄清楚,李涯,3,调查讨论\n"
+    ).encode("utf-8")
+    material = upload_without_background_parse(
+        client,
+        monkeypatch,
+        book["id"],
+        name="topic-quotes.csv",
+        content=payload,
+        material_type="quote_sheet",
+    )
+    parse_material_document(material["id"])
+
+    generated = client.post(
+        f"/api/books/{book['id']}/quizzes",
+        json={
+            "duration_minutes": 15,
+            "difficulty": "medium",
+            "single_count": 1,
+            "multiple_count": 1,
+            "short_count": 1,
+            "generation_theme": "classic_quotes",
+            "theme_config": {
+                "material_ids": [material["id"]],
+                "character_names": [],
+                "question_subtypes": [
+                    "quote_speaker",
+                    "quote_context",
+                    "quote_meaning",
+                ],
+            },
+        },
+    )
+    assert generated.status_code == 202
+    task = wait_for_generation(client, generated.json()["id"])
+    assert task["source_mode"] == "material"
+    assert task["generation_theme"] == "classic_quotes"
+    assert task["theme_config"]["material_ids"] == [material["id"]]
+
+    quiz = client.get(f"/api/quizzes/{task['quiz_id']}")
+    assert quiz.status_code == 200
+    body = quiz.json()
+    assert body["source_mode"] == "material"
+    assert body["generation_theme"] == "classic_quotes"
+    assert len(body["questions"]) == 3
+    assert len({item["quote_entry_ids"][0] for item in body["questions"]}) == 3
+    assert all(item["source_segment_ids"] for item in body["questions"])
+    assert all(item["source_evidence"][0]["material_id"] == material["id"] for item in body["questions"])
+
+    shared = client.post(f"/api/quizzes/{task['quiz_id']}/exam-shares", json={})
+    assert shared.status_code == 201
+    public_exam = client.get(f"/api/public/exams/{shared.json()['share_code']}")
+    assert public_exam.status_code == 200
+    assert public_exam.json()["generation_theme"] == "classic_quotes"
+    attempt = client.post(
+        f"/api/public/exams/{shared.json()['share_code']}/attempts",
+        json={"participant_name": "本地测试用户"},
+    )
+    assert attempt.status_code == 201
+    assert attempt.json()["generation_theme"] == "classic_quotes"
+    assert all(not question["quote_entry_ids"] for question in attempt.json()["questions"])
+    assert all(not question["source_segment_ids"] for question in attempt.json()["questions"])
+    assert all(not question["source_evidence"] for question in attempt.json()["questions"])
+    with SessionLocal() as db:
+        share = db.get(ExamShare, shared.json()["id"])
+        assert share.quiz_snapshot["generation_theme"] == "classic_quotes"
+        assert share.quiz_snapshot["theme_config"]["material_ids"] == [material["id"]]
+        assert all(question["quote_entry_ids"] for question in share.quiz_snapshot["questions"])
+
+
+def test_topic_generation_validates_material_count_and_character(client, monkeypatch):
+    book = create_resource(client, "潜伏专题范围校验")
+    material = upload_without_background_parse(
+        client,
+        monkeypatch,
+        book["id"],
+        name="single-quote.csv",
+        content="台词,角色\n会议现在开始,吴站长\n".encode("utf-8"),
+        material_type="quote_sheet",
+    )
+    parse_material_document(material["id"])
+    base = {
+        "duration_minutes": 15,
+        "difficulty": "medium",
+        "single_count": 2,
+        "multiple_count": 0,
+        "short_count": 0,
+        "generation_theme": "classic_quotes",
+        "theme_config": {
+            "material_ids": [material["id"]],
+            "question_subtypes": ["quote_speaker"],
+        },
+    }
+    insufficient = client.post(f"/api/books/{book['id']}/quizzes", json=base)
+    assert insufficient.status_code == 409
+    assert "只有 1 条" in insufficient.json()["detail"]
+
+    character_payload = {
+        **base,
+        "single_count": 1,
+        "generation_theme": "character",
+        "theme_config": {
+            "material_ids": [material["id"]],
+            "character_names": ["不存在的角色"],
+            "question_subtypes": ["quote_speaker"],
+        },
+    }
+    missing_character = client.post(
+        f"/api/books/{book['id']}/quizzes", json=character_payload
+    )
+    assert missing_character.status_code == 409
+    assert "只有 0 条" in missing_character.json()["detail"]

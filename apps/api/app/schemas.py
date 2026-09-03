@@ -4,6 +4,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+SourceMode = Literal["pdf", "material", "model_knowledge"]
+GenerationTheme = Literal["general", "classic_quotes", "character"]
+
+
 class ApiModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -153,7 +157,9 @@ class QuizSummary(BaseModel):
     difficulty: str
     duration_minutes: int
     status: str
-    source_mode: Literal["pdf", "model_knowledge"] = "pdf"
+    source_mode: SourceMode = "pdf"
+    generation_theme: GenerationTheme = "general"
+    theme_config: dict[str, Any] = Field(default_factory=dict)
     question_count: int
     single_count: int = 0
     multiple_count: int = 0
@@ -197,10 +203,17 @@ class ChunkResponse(ApiModel):
 class SourceEvidence(BaseModel):
     chunk_id: str
     file_name: str
-    page_number: int
+    page_number: int | None = None
     excerpt: str
     highlight: str | None = None
     support: str
+    material_id: str | None = None
+    material_type: str | None = None
+    season_number: int | None = None
+    episode_number: int | None = None
+    start_ms: int | None = None
+    end_ms: int | None = None
+    speaker: str | None = None
 
 
 class QuestionOption(BaseModel):
@@ -218,6 +231,26 @@ class QuestionUpdateRequest(BaseModel):
     grading_rubric: list[dict[str, Any]] | None = None
 
 
+class QuizThemeConfig(BaseModel):
+    material_ids: list[str] = Field(default_factory=list, max_length=50)
+    character_names: list[str] = Field(default_factory=list, max_length=20)
+    question_subtypes: list[
+        Literal[
+            "quote_speaker",
+            "quote_context",
+            "quote_meaning",
+            "character_relation",
+            "character_trait",
+        ]
+    ] = Field(default_factory=list, max_length=5)
+
+    @field_validator("material_ids", "character_names", "question_subtypes")
+    @classmethod
+    def unique_non_empty_values(cls, values: list[str]) -> list[str]:
+        cleaned = [value.strip() for value in values if value.strip()]
+        return list(dict.fromkeys(cleaned))
+
+
 class QuizGenerateRequest(BaseModel):
     duration_minutes: int = Field(default=15, ge=5, le=45)
     difficulty: Literal["easy", "medium", "hard"] = "medium"
@@ -226,6 +259,8 @@ class QuizGenerateRequest(BaseModel):
     short_count: int = Field(default=2, ge=0, le=8)
     page_start: int | None = Field(default=None, ge=1)
     page_end: int | None = Field(default=None, ge=1)
+    generation_theme: GenerationTheme = "general"
+    theme_config: QuizThemeConfig = Field(default_factory=QuizThemeConfig)
 
 
 class QuizGenerationTaskResponse(BaseModel):
@@ -233,7 +268,9 @@ class QuizGenerationTaskResponse(BaseModel):
     book_id: str
     task_type: str
     status: Literal["pending", "processing", "completed", "failed"]
-    source_mode: Literal["pdf", "model_knowledge"]
+    source_mode: SourceMode
+    generation_theme: GenerationTheme = "general"
+    theme_config: dict[str, Any] = Field(default_factory=dict)
     total_questions: int
     completed_questions: int
     current_question_position: int | None
@@ -253,6 +290,7 @@ class QuestionResponse(ApiModel):
     id: str
     position: int
     question_type: str
+    question_subtype: str = "general"
     prompt: str
     options: list[QuestionOption]
     explanation: str | None = None
@@ -262,6 +300,8 @@ class QuestionResponse(ApiModel):
     reference_answer: str | None = None
     grading_rubric: list[dict[str, Any]] = Field(default_factory=list)
     source_evidence: list[SourceEvidence]
+    quote_entry_ids: list[str] = Field(default_factory=list)
+    source_segment_ids: list[str] = Field(default_factory=list)
     max_score: float
     correct_answers: list[str] | None = None
 
@@ -274,7 +314,9 @@ class QuizResponse(ApiModel):
     difficulty: str
     duration_minutes: int
     status: str
-    source_mode: Literal["pdf", "model_knowledge"]
+    source_mode: SourceMode
+    generation_theme: GenerationTheme = "general"
+    theme_config: dict[str, Any] = Field(default_factory=dict)
     total_score: float | None
     max_score: float
     elapsed_seconds: int | None
@@ -334,6 +376,7 @@ class ExamQuestionResponse(BaseModel):
     id: str
     position: int
     question_type: Literal["single", "multiple", "short"]
+    question_subtype: str = "general"
     prompt: str
     options: list[QuestionOption] = Field(default_factory=list)
     knowledge_point: str
@@ -345,6 +388,8 @@ class ExamQuestionResponse(BaseModel):
     reference_answer: str | None = None
     grading_rubric: list[dict[str, Any]] = Field(default_factory=list)
     source_evidence: list[SourceEvidence] = Field(default_factory=list)
+    quote_entry_ids: list[str] = Field(default_factory=list)
+    source_segment_ids: list[str] = Field(default_factory=list)
 
 
 class PublicExamResponse(BaseModel):
@@ -357,7 +402,9 @@ class PublicExamResponse(BaseModel):
     owner_display_name: str
     difficulty: str
     duration_minutes: int
-    source_mode: Literal["pdf", "model_knowledge"]
+    source_mode: SourceMode
+    generation_theme: GenerationTheme = "general"
+    theme_config: dict[str, Any] = Field(default_factory=dict)
     max_score: float
     question_count: int
     single_count: int
@@ -421,7 +468,9 @@ class ExamAttemptResponse(BaseModel):
     submitted_ip_address: str | None = None
     ip_changed: bool = False
     duration_minutes: int
-    source_mode: Literal["pdf", "model_knowledge"]
+    source_mode: SourceMode
+    generation_theme: GenerationTheme = "general"
+    theme_config: dict[str, Any] = Field(default_factory=dict)
     questions: list[ExamQuestionResponse]
     answers: list[ExamAnswerResponse] = Field(default_factory=list)
     weak_knowledge_points: list[ExamWeakKnowledgePoint] = Field(default_factory=list)
@@ -464,7 +513,9 @@ class ExamShareSummary(BaseModel):
     book_title: str
     book_author: str
     quiz_title: str
-    source_mode: Literal["pdf", "model_knowledge"]
+    source_mode: SourceMode
+    generation_theme: GenerationTheme = "general"
+    theme_config: dict[str, Any] = Field(default_factory=dict)
     difficulty: str
     duration_minutes: int
     max_score: float
@@ -514,7 +565,9 @@ class ExamShareEditResponse(BaseModel):
     book_title: str
     book_author: str
     quiz_title: str
-    source_mode: Literal["pdf", "model_knowledge"]
+    source_mode: SourceMode
+    generation_theme: GenerationTheme = "general"
+    theme_config: dict[str, Any] = Field(default_factory=dict)
     difficulty: str
     duration_minutes: int
     max_score: float
@@ -550,7 +603,9 @@ class ReviewTaskResponse(BaseModel):
     title: str
     attempt_number: int
     status: Literal["in_progress", "submitted"]
-    source_mode: Literal["pdf", "model_knowledge"]
+    source_mode: SourceMode
+    generation_theme: GenerationTheme = "general"
+    theme_config: dict[str, Any] = Field(default_factory=dict)
     difficulty: str
     duration_minutes: int
     total_score: float | None

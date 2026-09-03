@@ -48,6 +48,7 @@ from app.services.exam_sharing import (
     launch_exam_grading,
     retry_exam_grading,
     serialize_quiz,
+    snapshot_payload,
     snapshot_questions,
     unanswered_grade,
 )
@@ -218,6 +219,7 @@ def to_share_summary(share: ExamShare) -> ExamShareSummary:
         for attempt in completed
         if attempt.max_score
     ]
+    snapshot = snapshot_payload(share)
     return ExamShareSummary(
         id=share.id,
         share_code=share.share_code,
@@ -233,6 +235,8 @@ def to_share_summary(share: ExamShare) -> ExamShareSummary:
         book_author=share.book_author,
         quiz_title=share.quiz_title,
         source_mode=share.source_mode,
+        generation_theme=str(snapshot.get("generation_theme", "general")),
+        theme_config=dict(snapshot.get("theme_config") or {}),
         difficulty=share.difficulty,
         duration_minutes=share.duration_minutes,
         max_score=share.max_score,
@@ -284,6 +288,7 @@ def to_share_version_summary(
 
 def to_edit_response(share: ExamShare) -> ExamShareEditResponse:
     current_version = int(share.snapshot_version or 1)
+    snapshot = snapshot_payload(share)
     return ExamShareEditResponse(
         id=share.id,
         share_code=share.share_code,
@@ -298,6 +303,8 @@ def to_edit_response(share: ExamShare) -> ExamShareEditResponse:
         book_author=share.book_author,
         quiz_title=share.quiz_title,
         source_mode=share.source_mode,
+        generation_theme=str(snapshot.get("generation_theme", "general")),
+        theme_config=dict(snapshot.get("theme_config") or {}),
         difficulty=share.difficulty,
         duration_minutes=share.duration_minutes,
         max_score=share.max_score,
@@ -329,6 +336,7 @@ def to_question_response(
         id=str(question["id"]),
         position=int(question.get("position", 0)),
         question_type=question["question_type"],
+        question_subtype=str(question.get("question_subtype", "general")),
         prompt=str(question.get("prompt", "")),
         options=question.get("options") or [],
         knowledge_point=str(question.get("knowledge_point", "")),
@@ -340,6 +348,8 @@ def to_question_response(
         reference_answer=(question.get("reference_answer") if reveal_answers else None),
         grading_rubric=list(question.get("grading_rubric") or []) if include_sources else [],
         source_evidence=list(question.get("source_evidence") or []) if include_sources else [],
+        quote_entry_ids=list(question.get("quote_entry_ids") or []) if include_sources else [],
+        source_segment_ids=list(question.get("source_segment_ids") or []) if include_sources else [],
     )
 
 
@@ -363,6 +373,7 @@ def to_attempt_response(
             0,
         ),
     )
+    snapshot = snapshot_payload(attempt)
     return ExamAttemptResponse(
         id=attempt.id,
         exam_share_id=attempt.exam_share_id,
@@ -388,6 +399,8 @@ def to_attempt_response(
         ip_changed=attempt_ip_changed(attempt) if manager_view else False,
         duration_minutes=attempt.exam_share.duration_minutes,
         source_mode=attempt.exam_share.source_mode,
+        generation_theme=str(snapshot.get("generation_theme", "general")),
+        theme_config=dict(snapshot.get("theme_config") or {}),
         questions=[
             to_question_response(
                 question,
@@ -796,6 +809,8 @@ def regenerate_exam_share_question(
             author=share.book.author,
             resource_type=share.book.resource_type,
             source_mode=share.source_mode,
+            generation_theme=str(snapshot.get("generation_theme", "general")),
+            theme_config=dict(snapshot.get("theme_config") or {}),
             difficulty=share.difficulty,
             duration_minutes=share.duration_minutes,
             workspace_id=share.workspace_id,
@@ -985,6 +1000,8 @@ def get_public_exam(
         difficulty=share.difficulty,
         duration_minutes=share.duration_minutes,
         source_mode=share.source_mode,
+        generation_theme=str(snapshot_payload(share).get("generation_theme", "general")),
+        theme_config=dict(snapshot_payload(share).get("theme_config") or {}),
         max_score=share.max_score,
         question_count=question_count,
         single_count=single_count,

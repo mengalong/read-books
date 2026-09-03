@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies import require_ready_identity
-from app.models import QuoteEntry, ResourceMaterial
+from app.models import QuoteEntry, QuizGenerationTask, ResourceMaterial
 from app.routers.books import ensure_book_is_active, get_book_or_404
 from app.schemas import (
     MaterialResponse,
@@ -222,6 +222,17 @@ def delete_material(
     material = _material_or_404(db, book_id, material_id, identity)
     if material.parse_status == "processing":
         raise HTTPException(status_code=409, detail="资料正在解析，完成后才能删除")
+    active_tasks = db.scalars(
+        select(QuizGenerationTask).where(
+            QuizGenerationTask.book_id == book_id,
+            QuizGenerationTask.status.in_(["pending", "processing"]),
+        )
+    ).all()
+    if any(
+        material_id in (task.theme_config or {}).get("material_ids", [])
+        for task in active_tasks
+    ):
+        raise HTTPException(status_code=409, detail="资料正在用于生成专题试卷，完成后才能删除")
     file_path = material.file_path
     db.delete(material)
     db.commit()

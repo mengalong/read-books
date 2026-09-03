@@ -63,6 +63,7 @@ def serialize_question(question: Question) -> dict[str, Any]:
         "id": question.id,
         "position": question.position,
         "question_type": question.question_type,
+        "question_subtype": question.question_subtype,
         "prompt": question.prompt,
         "options": list(question.options or []),
         "correct_answers": list(question.correct_answers or []),
@@ -73,6 +74,8 @@ def serialize_question(question: Question) -> dict[str, Any]:
         "reference_answer": question.reference_answer,
         "grading_rubric": list(question.grading_rubric or []),
         "source_chunk_ids": list(question.source_chunk_ids or []),
+        "quote_entry_ids": list(question.quote_entry_ids or []),
+        "source_segment_ids": list(question.source_segment_ids or []),
         "source_evidence": list(question.source_evidence or []),
         "max_score": question.max_score,
     }
@@ -86,6 +89,8 @@ def serialize_quiz(quiz: Quiz) -> dict[str, Any]:
         "difficulty": quiz.difficulty,
         "duration_minutes": quiz.duration_minutes,
         "source_mode": quiz.source_mode,
+        "generation_theme": quiz.generation_theme,
+        "theme_config": dict(quiz.theme_config or {}),
         "max_score": quiz.max_score,
         "questions": [serialize_question(question) for question in quiz.questions],
     }
