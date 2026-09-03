@@ -25,7 +25,7 @@ from app.services.prompt_config import (
 )
 from app.services.resource_types import resource_type_label, resource_type_scope_hint
 from app.services.material_parser import normalized_quote_text
-from app.services.question_dedup import build_question_signature
+from app.services.question_dedup import asks_for_precise_location, build_question_signature
 
 
 @dataclass
@@ -1070,6 +1070,14 @@ class HttpQuizAiProvider:
             fact_relation = self._question_text(raw, "fact_relation") or question_subtype
             fact_context = self._question_text(raw, "fact_context") or ""
             question_intent = self._question_text(raw, "question_intent") or question_subtype
+            if asks_for_precise_location(
+                prompt,
+                fact_relation=fact_relation,
+                question_intent=question_intent,
+            ):
+                raise RuntimeError(
+                    f"真实模型第 {position} 道题不能询问精确的集数、时间点或资料出处位置"
+                )
             raw_answer_signature = raw.get("answer_signature", [])
             if raw_answer_signature and (
                 not isinstance(raw_answer_signature, list)
@@ -1322,6 +1330,10 @@ class HttpQuizAiProvider:
             "answer_signature 和 question_intent。fact_claim 必须描述实际考察的事实，不要只改写题干；"
             "仅更换问法、题型或选项顺序不算新事实。"
         )
+        location_guidance = (
+            "来源定位只用于后端核验和答题后的依据展示；不要让考生回答台词或情节出自哪一集、哪一页、"
+            "哪一章、具体时间点或其他精确出处位置。对话场景题应考察语境、人物处境和事件背景。"
+        )
         source_boundary = (
             rendered_system_prompt
             + "\n\n系统来源边界：本次没有 PDF 原文，只能根据资源名称、类型、主创信息和模型知识生成；"
@@ -1350,6 +1362,8 @@ class HttpQuizAiProvider:
                     )
                     + "\n\n"
                     + semantic_dedup_guidance
+                    + "\n\n"
+                    + location_guidance
                 ),
             },
         ]

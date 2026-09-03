@@ -343,11 +343,11 @@ def _theme_requirements(generation_theme: str, theme_config: dict[str, Any]) -> 
     if generation_theme == "classic_quotes":
         return (
             f"仅围绕可信资料中的经典台词出题；角色范围：{characters}；"
-            f"允许的考察角度：{subtypes}。逐字台词必须原样出现在题干中。"
+            f"允许的考察角度：{subtypes}。逐字台词必须原样出现在题干中；对话场景只考察语境、人物处境和事件背景，不考精确集数、时间点或出处位置。"
         )
     return (
         f"仅围绕角色 {characters} 出题；允许的考察角度：{subtypes}。"
-        "涉及逐字台词时必须原样引用可信资料。"
+        "涉及逐字台词时必须原样引用可信资料；不考精确集数、时间点或出处位置。"
     )
 
 

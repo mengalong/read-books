@@ -12,6 +12,7 @@ from app.services.quiz_provider import (
     TrustedQuoteSource,
     key_sentence,
 )
+from app.services.question_dedup import asks_for_precise_location
 
 
 def make_configuration() -> EffectiveModelConfiguration:
@@ -286,6 +287,47 @@ def test_http_provider_validates_trusted_quote_and_rebuilds_evidence(monkeypatch
     assert questions[0].source_evidence[0]["speaker"] == "吴站长"
     assert "quote-1" in requests[0]["json"]["messages"][1]["content"]
     assert "可信台词资料" in requests[0]["json"]["messages"][0]["content"]
+
+
+def test_precise_episode_questions_are_rejected(monkeypatch):
+    source = make_trusted_quote()
+    payload = generated_quote_payload()
+    question = payload["questions"][0]
+    question["question_subtype"] = "quote_context"
+    question["prompt"] = "可信资料中的台词“会议现在开始”出自哪一集？"
+    question["options"] = [
+        {"id": "A", "text": "第 1 集"},
+        {"id": "B", "text": "第 2 集"},
+        {"id": "C", "text": "第 3 集"},
+        {"id": "D", "text": "第 4 集"},
+    ]
+    question["correct_answers"] = ["A"]
+    question["fact_relation"] = "集数"
+    question["question_intent"] = "episode"
+    install_chat_responses(
+        monkeypatch,
+        [json.dumps(payload, ensure_ascii=False), json.dumps(payload, ensure_ascii=False)],
+    )
+    provider = HttpQuizAiProvider(make_configuration())
+
+    with pytest.raises(RuntimeError, match="不能询问精确的集数"):
+        provider.generate_questions(
+            chunks=[source],
+            file_names={},
+            single_count=1,
+            multiple_count=0,
+            short_count=0,
+            difficulty="medium",
+            generation_number=0,
+            recent_chunk_ids=set(),
+            source_mode="material",
+            generation_theme="classic_quotes",
+            theme_requirements="对话场景只考察语境",
+            allowed_question_subtypes=["quote_context"],
+        )
+
+    assert asks_for_precise_location("这句台词发生在哪一集？")
+    assert asks_for_precise_location("这句台词反映了什么处境？") is False
 
 
 def test_http_provider_rejects_untrusted_quote_attribution(monkeypatch):
@@ -625,6 +667,7 @@ def test_http_provider_uses_custom_generation_prompt(monkeypatch):
 
     assert requests[0]["json"]["messages"][0]["content"] == "自定义系统 medium"
     assert requests[0]["json"]["messages"][1]["content"].startswith("自定义用户 1/1/1/20")
+    assert "不要让考生回答台词或情节出自哪一集" in requests[0]["json"]["messages"][1]["content"]
 
 
 def test_http_provider_renders_regeneration_context(monkeypatch):

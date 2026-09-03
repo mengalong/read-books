@@ -22,6 +22,27 @@ _QUESTION_NOISE_PATTERNS = (
     re.compile(r"(?:请问|请判断|请说明|请概括|关于|正确的是|错误的是)"),
 )
 
+_PRECISE_LOCATION_PATTERNS = (
+    re.compile(r"(?:哪一集|第几集|哪一话|第几话|哪一章|第几章)"),
+    re.compile(r"(?:出自|来自|发生在|出现于|位于)[^？?。；\n]{0,18}(?:第?\d+集|哪一集|第几集|哪一话|哪一章)"),
+    re.compile(r"(?:具体|准确|精确)(?:时间|时间点|时间码|集数|出处|位置)"),
+    re.compile(r"(?:哪分钟|几分几秒|第?\d+分(?:钟)?(?:第?\d+秒)?)"),
+)
+
+_PRECISE_LOCATION_RELATIONS = {
+    "集数",
+    "哪一集",
+    "第几集",
+    "时间点",
+    "时间码",
+    "出处位置",
+    "来源位置",
+    "episode",
+    "episode_number",
+    "timestamp",
+    "timecode",
+}
+
 
 def normalize_fact_text(value: Any) -> str:
     """Normalize Chinese fact fields without attempting to rewrite their meaning."""
@@ -58,6 +79,21 @@ def token_similarity(left: str, right: str) -> float:
     if not left_tokens or not right_tokens:
         return 0.0
     return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+
+
+def asks_for_precise_location(
+    prompt: Any,
+    *,
+    fact_relation: Any = "",
+    question_intent: Any = "",
+) -> bool:
+    """Return whether a question asks the user to recall an exact source location."""
+    prompt_text = normalize_fact_text(prompt)
+    if any(pattern.search(prompt_text) for pattern in _PRECISE_LOCATION_PATTERNS):
+        return True
+    relation = normalize_fact_text(fact_relation)
+    intent = normalize_fact_text(question_intent)
+    return relation in _PRECISE_LOCATION_RELATIONS or intent in _PRECISE_LOCATION_RELATIONS
 
 
 def _as_list(value: Any) -> list[str]:
