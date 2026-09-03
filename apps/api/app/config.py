@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     llm_model: str | None = None
     llm_timeout_ms: int = 180_000
     llm_temperature: float = 0.2
+    llm_embedding_model: str | None = None
+    llm_embedding_timeout_ms: int = 60_000
+    material_understanding_enabled: bool = True
 
     @model_validator(mode="after")
     def resolve_local_paths(self) -> "Settings":
