@@ -32,6 +32,7 @@ from app.services.quiz_provider import (
     get_quiz_provider,
 )
 from app.services.question_dedup import (
+    question_keywords,
     questions_test_same_fact,
     refresh_question_signature,
     signature_for_question,
@@ -337,6 +338,75 @@ def _get_quote_sources(
     ]
 
 
+MODEL_KNOWLEDGE_MATERIAL_MIN_MATCHES = 1  # 3+ char n-gram overlaps are already high-precision
+
+
+def _get_all_confirmed_quote_sources(db: Session, book_id: str) -> list[TrustedQuoteSource]:
+    """Return every confirmed, generation-enabled quote for a book regardless of theme scope."""
+    rows = db.execute(
+        select(QuoteEntry, ResourceMaterial)
+        .join(ResourceMaterial, ResourceMaterial.id == QuoteEntry.material_id)
+        .where(
+            QuoteEntry.book_id == book_id,
+            QuoteEntry.review_status == "confirmed",
+            QuoteEntry.enabled_for_generation.is_(True),
+        )
+        .order_by(
+            QuoteEntry.material_id,
+            QuoteEntry.episode_number,
+            QuoteEntry.start_ms,
+            QuoteEntry.created_at,
+        )
+    ).all()
+    return [
+        TrustedQuoteSource(
+            id=quote.id,
+            material_id=material.id,
+            file_name=material.file_name,
+            material_type=material.material_type,
+            content=quote.quote_text,
+            source_segment_ids=list(quote.source_segment_ids or []),
+            speaker=quote.speaker,
+            context=quote.context,
+            page_number=quote.page_number,
+            season_number=quote.season_number,
+            episode_number=quote.episode_number,
+            start_ms=quote.start_ms,
+            end_ms=quote.end_ms,
+        )
+        for quote, material in rows
+    ]
+
+
+def _matching_quote_sources_for_question(
+    sources: list[TrustedQuoteSource], question: Any
+) -> list[TrustedQuoteSource]:
+    """Pick confirmed quotes relevant to a single question via a keyword pre-filter.
+
+    This lets a question regenerated after new trusted material was uploaded reuse that
+    material even when it falls outside the quiz's original theme scope, without sending
+    the model every confirmed quote in the book.
+    """
+    signature = signature_for_question(question)
+    keywords = question_keywords(
+        getattr(question, "knowledge_point", None),
+        getattr(question, "prompt", None),
+        signature.get("fact_subject"),
+        signature.get("fact_claim"),
+        signature.get("fact_context"),
+    )
+    if not keywords:
+        return []
+    scored: list[tuple[int, TrustedQuoteSource]] = []
+    for source in sources:
+        source_keywords = question_keywords(source.content, source.speaker, source.context)
+        overlap = len(keywords & source_keywords)
+        if overlap:
+            scored.append((overlap, source))
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [source for _, source in scored[:20]]
+
+
 def _theme_requirements(generation_theme: str, theme_config: dict[str, Any]) -> str:
     if generation_theme == "general":
         return "围绕资源整体内容出题，不限定角色或台词专题。"
@@ -532,6 +602,7 @@ def regenerate_quiz_question(
     ]
     comparison_questions = [question, *all_other_questions]
     theme_config = dict(quiz.theme_config or {})
+    effective_source_mode = quiz.source_mode
     if quiz.source_mode == "material":
         all_sources = _get_quote_sources(db, quiz.book_id, theme_config)
         if not all_sources:
@@ -548,20 +619,37 @@ def regenerate_quiz_question(
         recent_chunk_ids = set() if preferred_sources else blocked_source_ids
         file_names = {}
     else:
-        all_chunks = _get_chunks(db, quiz.book_id)
-        if quiz.source_mode == "pdf" and not all_chunks:
-            raise ValueError("没有可用于出题的 PDF 原文")
-        blocked_source_ids = {
-            chunk_id
-            for sibling in same_type_questions
-            for chunk_id in (sibling.source_chunk_ids or [])
-        }
-        preferred_chunks = [
-            chunk for chunk in all_chunks if chunk.id not in blocked_source_ids
-        ]
-        chunks = preferred_chunks or all_chunks
-        recent_chunk_ids = set() if preferred_chunks else blocked_source_ids
-        file_names = _chunk_file_names(db, chunks)
+        matched_sources = _matching_quote_sources_for_question(
+            _get_all_confirmed_quote_sources(db, quiz.book_id), question
+        )
+        if len(matched_sources) >= MODEL_KNOWLEDGE_MATERIAL_MIN_MATCHES:
+            effective_source_mode = "material"
+            blocked_source_ids = {
+                quote_id
+                for sibling in same_type_questions
+                for quote_id in (sibling.quote_entry_ids or [])
+            }
+            preferred_sources = [
+                source for source in matched_sources if source.id not in blocked_source_ids
+            ]
+            chunks = preferred_sources or matched_sources
+            recent_chunk_ids = set() if preferred_sources else blocked_source_ids
+            file_names = {}
+        else:
+            all_chunks = _get_chunks(db, quiz.book_id)
+            if quiz.source_mode == "pdf" and not all_chunks:
+                raise ValueError("没有可用于出题的 PDF 原文")
+            blocked_source_ids = {
+                chunk_id
+                for sibling in same_type_questions
+                for chunk_id in (sibling.source_chunk_ids or [])
+            }
+            preferred_chunks = [
+                chunk for chunk in all_chunks if chunk.id not in blocked_source_ids
+            ]
+            chunks = preferred_chunks or all_chunks
+            recent_chunk_ids = set() if preferred_chunks else blocked_source_ids
+            file_names = _chunk_file_names(db, chunks)
     base_generation_number = db.scalar(
         select(func.count(Quiz.id)).where(Quiz.book_id == quiz.book_id)
     ) or 0
@@ -600,7 +688,7 @@ def regenerate_quiz_question(
             book_title=quiz.book.title,
             author=quiz.book.author,
             resource_type=quiz.book.resource_type,
-            source_mode=quiz.source_mode,
+            source_mode=effective_source_mode,
             question_exclusions=[
                 *question_exclusions,
                 *(
@@ -644,6 +732,9 @@ def regenerate_quiz_question(
         question.fact_claim = item.fact_claim
         question.semantic_signature = item.semantic_signature
         question.source_evidence = item.source_evidence
+        question.source_mode = (
+            effective_source_mode if effective_source_mode != quiz.source_mode else None
+        )
         db.commit()
         db.refresh(question)
         return question
@@ -684,6 +775,7 @@ def regenerate_snapshot_question(
     ]
     comparison_questions = [current, *all_other_questions]
     theme_config = dict(theme_config or {})
+    effective_source_mode = source_mode
     if source_mode == "material":
         all_sources = _get_quote_sources(db, book_id, theme_config)
         if not all_sources:
@@ -700,20 +792,37 @@ def regenerate_snapshot_question(
         recent_chunk_ids = set() if preferred_sources else blocked_source_ids
         file_names = {}
     else:
-        all_chunks = _get_chunks(db, book_id)
-        if source_mode == "pdf" and not all_chunks:
-            raise ValueError("没有可用于出题的 PDF 原文")
-        blocked_source_ids = {
-            chunk_id
-            for sibling in same_type_questions
-            for chunk_id in (getattr(sibling, "source_chunk_ids", None) or [])
-        }
-        preferred_chunks = [
-            chunk for chunk in all_chunks if chunk.id not in blocked_source_ids
-        ]
-        chunks = preferred_chunks or all_chunks
-        recent_chunk_ids = set() if preferred_chunks else blocked_source_ids
-        file_names = _chunk_file_names(db, chunks)
+        matched_sources = _matching_quote_sources_for_question(
+            _get_all_confirmed_quote_sources(db, book_id), current
+        )
+        if len(matched_sources) >= MODEL_KNOWLEDGE_MATERIAL_MIN_MATCHES:
+            effective_source_mode = "material"
+            blocked_source_ids = {
+                quote_id
+                for sibling in same_type_questions
+                for quote_id in (getattr(sibling, "quote_entry_ids", None) or [])
+            }
+            preferred_sources = [
+                source for source in matched_sources if source.id not in blocked_source_ids
+            ]
+            chunks = preferred_sources or matched_sources
+            recent_chunk_ids = set() if preferred_sources else blocked_source_ids
+            file_names = {}
+        else:
+            all_chunks = _get_chunks(db, book_id)
+            if source_mode == "pdf" and not all_chunks:
+                raise ValueError("没有可用于出题的 PDF 原文")
+            blocked_source_ids = {
+                chunk_id
+                for sibling in same_type_questions
+                for chunk_id in (getattr(sibling, "source_chunk_ids", None) or [])
+            }
+            preferred_chunks = [
+                chunk for chunk in all_chunks if chunk.id not in blocked_source_ids
+            ]
+            chunks = preferred_chunks or all_chunks
+            recent_chunk_ids = set() if preferred_chunks else blocked_source_ids
+            file_names = _chunk_file_names(db, chunks)
     provider = get_quiz_provider(
         settings,
         get_effective_model_configuration(db, settings),
@@ -750,7 +859,7 @@ def regenerate_snapshot_question(
             book_title=book_title,
             author=author,
             resource_type=resource_type,
-            source_mode=source_mode,
+            source_mode=effective_source_mode,
             question_exclusions=[
                 *question_exclusions,
                 *(
@@ -797,6 +906,9 @@ def regenerate_snapshot_question(
         next_question["fact_claim"] = item.fact_claim
         next_question["semantic_signature"] = item.semantic_signature
         next_question["source_evidence"] = item.source_evidence
+        next_question["source_mode"] = (
+            effective_source_mode if effective_source_mode != source_mode else None
+        )
         return next_question
 
     raise ValueError("重出失败，请先调整同类题目或原文来源后再试")

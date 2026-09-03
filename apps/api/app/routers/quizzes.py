@@ -141,6 +141,7 @@ def to_question_response(question: Question, reveal_answers: bool) -> QuestionRe
         source_segment_ids=list(question.source_segment_ids or []),
         max_score=question.max_score,
         correct_answers=question.correct_answers if reveal_answers else None,
+        source_mode=question.source_mode,
     )
 
 

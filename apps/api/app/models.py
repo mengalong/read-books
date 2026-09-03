@@ -430,6 +430,7 @@ class Question(TimestampMixin, Base):
     semantic_signature: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     source_evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     max_score: Mapped[float] = mapped_column(Float)
+    source_mode: Mapped[str | None] = mapped_column(String(30))
 
     quiz: Mapped[Quiz] = relationship(back_populates="questions")
     answer: Mapped[Answer | None] = relationship(

@@ -351,6 +351,7 @@ def to_question_response(
         source_evidence=list(question.get("source_evidence") or []) if include_sources else [],
         quote_entry_ids=list(question.get("quote_entry_ids") or []) if include_sources else [],
         source_segment_ids=list(question.get("source_segment_ids") or []) if include_sources else [],
+        source_mode=question.get("source_mode"),
     )
 
 

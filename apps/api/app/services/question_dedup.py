@@ -73,6 +73,23 @@ def _ngrams(value: str, sizes: tuple[int, ...] = (2, 3)) -> set[str]:
     return tokens
 
 
+def question_keywords(*values: Any) -> set[str]:
+    """Extract keyword tokens usable for a lightweight relevance pre-filter.
+
+    Chinese text has no whitespace between words, so a simple regex split would
+    return one giant token per phrase. Reuse the bigram/trigram strategy from the
+    fact-signature similarity check, but keep only 3-character-and-longer tokens:
+    single characters and common two-character function words (e.g. "的", "是")
+    would otherwise overlap between almost any two unrelated Chinese sentences.
+    """
+    keywords: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        keywords.update(token for token in _ngrams(str(value), sizes=(3,)) if len(token) >= 3)
+    return keywords
+
+
 def token_similarity(left: str, right: str) -> float:
     left_tokens = _ngrams(left)
     right_tokens = _ngrams(right)

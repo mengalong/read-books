@@ -304,6 +304,7 @@ class QuestionResponse(ApiModel):
     source_segment_ids: list[str] = Field(default_factory=list)
     max_score: float
     correct_answers: list[str] | None = None
+    source_mode: SourceMode | None = None
 
 
 class QuizResponse(ApiModel):
@@ -390,6 +391,7 @@ class ExamQuestionResponse(BaseModel):
     source_evidence: list[SourceEvidence] = Field(default_factory=list)
     quote_entry_ids: list[str] = Field(default_factory=list)
     source_segment_ids: list[str] = Field(default_factory=list)
+    source_mode: SourceMode | None = None
 
 
 class PublicExamResponse(BaseModel):

@@ -81,6 +81,7 @@ def serialize_question(question: Question) -> dict[str, Any]:
         "semantic_signature": dict(question.semantic_signature or {}),
         "source_evidence": list(question.source_evidence or []),
         "max_score": question.max_score,
+        "source_mode": question.source_mode,
     }
 
 

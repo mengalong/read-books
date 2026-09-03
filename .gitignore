@@ -32,3 +32,4 @@ data/parsed/*
 
 # Local source books are intentionally kept outside version control.
 /*.pdf
+t.sh

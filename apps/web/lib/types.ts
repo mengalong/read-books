@@ -434,6 +434,7 @@ export type Question = {
   source_segment_ids: string[];
   max_score: number;
   correct_answers: string[] | null;
+  source_mode?: SourceMode | null;
 };
 
 export type Quiz = {
@@ -562,6 +563,7 @@ export type ExamQuestion = {
   source_evidence: SourceEvidence[];
   quote_entry_ids: string[];
   source_segment_ids: string[];
+  source_mode?: SourceMode | null;
 };
 
 export type ExamAnswer = {

@@ -13,6 +13,8 @@ from app.models import (
     PdfDocument,
     Question,
     Quiz,
+    QuoteEntry,
+    ResourceMaterial,
     User,
     WorkspaceMember,
 )
@@ -838,6 +840,123 @@ def test_question_regeneration_avoids_same_type_duplicates(client, monkeypatch):
         assert updated.prompt == "重出的单选题"
         assert untouched_single.prompt == "旧的单选题 2"
         assert untouched_multiple.prompt == "旧的多选题 3"
+
+
+def test_question_regeneration_upgrades_to_material_mode_when_quotes_match(client, monkeypatch):
+    book_id, _ = create_source_book(client, "补充资料重出测试书")
+    with SessionLocal() as db:
+        chunk_ids = list(
+            db.scalars(
+                select(ContentChunk.id)
+                .where(ContentChunk.book_id == book_id)
+                .order_by(ContentChunk.page_number)
+            ).all()
+        )
+        quiz = Quiz(
+            book_id=book_id,
+            title="第 1 套复习试卷",
+            difficulty="medium",
+            duration_minutes=15,
+            status="ready",
+            source_mode="pdf",
+            max_score=100,
+        )
+        db.add(quiz)
+        db.flush()
+        question = Question(
+            id="pdf-q1",
+            quiz_id=quiz.id,
+            position=1,
+            question_type="single",
+            prompt="翠平此前在游击队中的主要身份是什么？",
+            options=[
+                {"id": "A", "text": "游击队队员"},
+                {"id": "B", "text": "地下党交通员"},
+                {"id": "C", "text": "国民党军官"},
+                {"id": "D", "text": "普通商人"},
+            ],
+            correct_answers=["A"],
+            explanation="解析",
+            knowledge_point="翠平人物身份",
+            difficulty="medium",
+            estimated_seconds=45,
+            source_chunk_ids=[chunk_ids[0]],
+            source_evidence=[],
+            max_score=100,
+        )
+        db.add(question)
+
+        material = ResourceMaterial(
+            book_id=book_id,
+            material_type="dialogue",
+            file_format="srt",
+            file_name="潜伏字幕.srt",
+            file_path="demo://quotes",
+            file_size=2048,
+            file_hash="material-hash-1",
+            parse_status="completed",
+        )
+        db.add(material)
+        db.flush()
+        db.add(
+            QuoteEntry(
+                book_id=book_id,
+                material_id=material.id,
+                quote_text="翠平说：我此前一直是游击队里的队员。",
+                normalized_text="翠平说我此前一直是游击队里的队员",
+                content_hash="quote-hash-1",
+                speaker="翠平",
+                context="翠平向余则成回忆自己此前的游击队队员身份",
+                review_status="confirmed",
+                enabled_for_generation=True,
+            )
+        )
+        db.commit()
+        quiz_id = quiz.id
+
+    calls: list[dict] = []
+
+    def fake_generate(self, **kwargs):
+        calls.append(kwargs)
+        return [
+            GeneratedQuestion(
+                question_type="single",
+                prompt="翠平向余则成假扮夫妻时，两人的关系设定是什么？",
+                options=[
+                    {"id": "A", "text": "工作搭档"},
+                    {"id": "B", "text": "亲兄妹"},
+                    {"id": "C", "text": "上下级"},
+                    {"id": "D", "text": "陌生人"},
+                ],
+                correct_answers=["A"],
+                explanation="依据可信台词重出",
+                knowledge_point="翠平人物关系",
+                estimated_seconds=45,
+                reference_answer=None,
+                grading_rubric=[],
+                source_chunk_ids=[],
+                quote_entry_ids=[kwargs["chunks"][0].id],
+                source_evidence=[],
+                max_score=100,
+            )
+        ]
+
+    monkeypatch.setattr(MockQuizAiProvider, "generate_questions", fake_generate)
+
+    response = client.post(f"/api/quizzes/{quiz_id}/questions/pdf-q1/regenerate")
+    assert response.status_code == 200, response.json()
+    body = response.json()
+    assert len(calls) == 1, calls
+    assert calls[0]["source_mode"] == "material", calls[0]["source_mode"]
+    assert all(isinstance(chunk, ContentChunk) is False for chunk in calls[0]["chunks"])
+
+    with SessionLocal() as db:
+        updated = db.get(Question, "pdf-q1")
+        refreshed_quiz = db.get(Quiz, quiz_id)
+        assert updated.source_mode == "material", updated.source_mode
+        assert refreshed_quiz.source_mode == "pdf"
+    assert body["source_mode"] == "material", body
+    assert body["quote_entry_ids"]
 
 
 def test_question_regeneration_checks_all_question_types_for_same_fact(client, monkeypatch):
