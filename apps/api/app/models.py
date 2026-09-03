@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     JSON,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -227,6 +228,9 @@ class Book(TimestampMixin, Base):
     quote_entries: Mapped[list[QuoteEntry]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
     )
+    material_understandings: Mapped[list["MaterialUnderstanding"]] = relationship(
+        back_populates="book", cascade="all, delete-orphan"
+    )
     quizzes: Mapped[list[Quiz]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
     )
@@ -274,6 +278,8 @@ class ContentChunk(TimestampMixin, Base):
     sequence: Mapped[int] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(Text)
     char_count: Mapped[int] = mapped_column(Integer)
+    embedding: Mapped[bytes | None] = mapped_column(LargeBinary)
+    embedding_model: Mapped[str | None] = mapped_column(String(120))
 
     book: Mapped[Book] = relationship(back_populates="chunks")
     pdf: Mapped[PdfDocument] = relationship(back_populates="chunks")
@@ -339,6 +345,8 @@ class MaterialSegment(TimestampMixin, Base):
     scene_label: Mapped[str | None] = mapped_column(String(200))
     speaker: Mapped[str | None] = mapped_column(String(120), index=True)
     speaker_origin: Mapped[str] = mapped_column(String(20), default="unknown", index=True)
+    embedding: Mapped[bytes | None] = mapped_column(LargeBinary)
+    embedding_model: Mapped[str | None] = mapped_column(String(120))
 
     book: Mapped[Book] = relationship(back_populates="material_segments")
     material: Mapped[ResourceMaterial] = relationship(back_populates="segments")
@@ -368,9 +376,34 @@ class QuoteEntry(TimestampMixin, Base):
     page_number: Mapped[int | None] = mapped_column(Integer, index=True)
     review_status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     enabled_for_generation: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    embedding: Mapped[bytes | None] = mapped_column(LargeBinary)
+    embedding_model: Mapped[str | None] = mapped_column(String(120))
 
     book: Mapped[Book] = relationship(back_populates="quote_entries")
     material: Mapped[ResourceMaterial] = relationship(back_populates="quotes")
+
+
+class MaterialUnderstanding(TimestampMixin, Base):
+    __tablename__ = "material_understandings"
+    __table_args__ = (
+        UniqueConstraint(
+            "book_id", "scope_type", "scope_ref", name="uq_material_understanding_scope"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    book_id: Mapped[str] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    scope_type: Mapped[str] = mapped_column(String(20), index=True)
+    scope_ref: Mapped[str] = mapped_column(String(60), default="", index=True)
+    summary_text: Mapped[str] = mapped_column(Text, default="")
+    key_entities: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    source_segment_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    source_chunk_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    content_signature: Mapped[str | None] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+    book: Mapped[Book] = relationship(back_populates="material_understandings")
 
 
 class Quiz(TimestampMixin, Base):
