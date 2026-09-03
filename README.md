@@ -114,6 +114,7 @@ scripts/server.sh logs
 ## 文档
 
 - [需求设计](docs/reading-review-system-requirements.md)
+- [可信台词资料与角色专题出题设计](docs/trusted-dialogue-topic-design.md)
 - [技术选型](docs/technical-selection.md)
 - [开发状态](docs/development-status.md)
 - [多用户模式改造计划](docs/multi-user-mode-plan.md)
