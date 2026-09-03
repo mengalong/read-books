@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import Base, SessionLocal, engine
-from app.models import PdfDocument
+from app.models import PdfDocument, ResourceMaterial
 from app.routers.auth import router as auth_router
 from app.routers.books import admin_router as admin_books_router
 from app.routers.books import router as books_router
@@ -24,6 +24,7 @@ from app.services.auth import ensure_initial_admin
 from app.services.pdf_parser import parse_pdf_document
 from app.services.quiz_generation import recover_generation_tasks, run_generation_task
 from app.services.material_parser import parse_material_document, recover_material_tasks
+from app.services.material_understanding import refresh_material_understanding
 from app.services.exam_sharing import recover_exam_grading_tasks, launch_exam_grading
 
 settings = get_settings()
@@ -58,6 +59,17 @@ async def lifespan(_: FastAPI):
         threading.Thread(target=parse_pdf_document, args=(pdf_id,), daemon=True).start()
     for material_id in recover_material_tasks():
         threading.Thread(target=parse_material_document, args=(material_id,), daemon=True).start()
+    with SessionLocal() as db:
+        pending_understanding_book_ids = list(
+            dict.fromkeys(
+                row
+                for row in db.scalars(select(ResourceMaterial.book_id)).all()
+            )
+        )
+    for understanding_book_id in pending_understanding_book_ids:
+        threading.Thread(
+            target=refresh_material_understanding, args=(understanding_book_id,), daemon=True
+        ).start()
     with SessionLocal() as db:
         pending_generation_task_ids = recover_generation_tasks(db)
     for task_id in pending_generation_task_ids:

@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import threading
+
 import fitz
 from sqlalchemy import delete, select
 
@@ -427,7 +429,13 @@ def parse_material_document(material_id: str) -> None:
             material.segment_count = len(records)
             material.quote_count = quote_count
             material.parse_status = "needs_review" if pending_count else "completed"
+            book_id = material.book_id
             db.commit()
+            from app.services.material_understanding import refresh_material_understanding
+
+            threading.Thread(
+                target=refresh_material_understanding, args=(book_id,), daemon=True
+            ).start()
         except Exception as exc:
             logger.exception("可信资料解析失败: %s", material_id)
             db.rollback()
