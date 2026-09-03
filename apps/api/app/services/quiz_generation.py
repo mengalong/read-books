@@ -32,8 +32,8 @@ from app.services.quiz_provider import (
     get_quiz_provider,
 )
 from app.services.question_dedup import (
-    build_question_signature,
     questions_test_same_fact,
+    refresh_question_signature,
     signature_for_question,
 )
 from app.services.resource_types import resource_type_label
@@ -55,6 +55,8 @@ THEME_SUBTYPES = {
         "character_trait",
     ],
 }
+
+HISTORICAL_FACT_PROMPT_LIMIT = 30
 
 
 def _normalized_theme_config(payload: QuizGenerateRequest) -> dict[str, Any]:
@@ -373,15 +375,43 @@ def _recent_quote_ids(db: Session, book_id: str) -> set[str]:
     return {quote_id for row in recent_rows for quote_id in (row or [])}
 
 
+def _historical_questions(db: Session, book_id: str) -> list[Question]:
+    questions = list(
+        db.scalars(
+            select(Question)
+            .join(Quiz, Quiz.id == Question.quiz_id)
+            .where(Quiz.book_id == book_id)
+            .order_by(Quiz.created_at.desc(), Question.position)
+        ).all()
+    )
+    for question in questions:
+        if not question.fact_key or not question.fact_claim or not question.semantic_signature:
+            refresh_question_signature(question)
+    return questions
+
+
+def _historical_question_exclusions(questions: list[Question]) -> list[dict[str, object]]:
+    exclusions: list[dict[str, object]] = []
+    seen_fact_keys: set[str] = set()
+    for question in questions:
+        signature = signature_for_question(question)
+        fact_key = str(signature["fact_key"])
+        if fact_key and fact_key in seen_fact_keys:
+            continue
+        if fact_key:
+            seen_fact_keys.add(fact_key)
+        exclusions.append(_question_exclusion_payload(question, role="historical_question"))
+        if len(exclusions) >= HISTORICAL_FACT_PROMPT_LIMIT:
+            break
+    return exclusions
+
+
 def _normalize_question_text(value: str | None) -> str:
     return re.sub(r"\s+", "", value or "").strip()
 
 
 def _prepare_generated_question(question: GeneratedQuestion) -> GeneratedQuestion:
-    signature = build_question_signature(question)
-    question.fact_key = str(signature["fact_key"])
-    question.fact_claim = str(signature["fact_claim"])
-    question.semantic_signature = signature
+    refresh_question_signature(question)
     return question
 
 
@@ -452,8 +482,14 @@ def _is_duplicate_question(
     candidate: GeneratedQuestion,
     siblings: list[Any],
     recent_candidates: list[GeneratedQuestion],
+    historical_questions: list[Any] | None = None,
 ) -> bool:
     _prepare_generated_question(candidate)
+    if any(
+        questions_test_same_fact(candidate, historical)
+        for historical in (historical_questions or [])
+    ):
+        return True
     if any(questions_test_same_fact(candidate, sibling) for sibling in siblings):
         return True
     if any(questions_test_same_fact(candidate, previous) for previous in recent_candidates):
@@ -845,6 +881,8 @@ def run_generation_task(task_id: str) -> None:
                 get_effective_prompt_templates(db),
                 usage_context,
             )
+            historical_questions = _historical_questions(db, task.book_id)
+            historical_exclusions = _historical_question_exclusions(historical_questions)
             generated: list[GeneratedQuestion] = []
             rejected_candidates: list[GeneratedQuestion] = []
             for position, question_type in enumerate(_question_types(task), start=1):
@@ -868,6 +906,7 @@ def run_generation_task(task_id: str) -> None:
                         resource_type=book.resource_type,
                         source_mode=task.source_mode,
                         question_exclusions=[
+                            *historical_exclusions,
                             *(_question_exclusion_payload(item) for item in generated),
                             *(
                                 _generated_question_exclusion_payload(item)
@@ -890,7 +929,12 @@ def run_generation_task(task_id: str) -> None:
                     if len(result) != 1:
                         raise RuntimeError(f"第 {position} 道题生成结果数量不正确")
                     candidate = _prepare_generated_question(result[0])
-                    if _is_duplicate_question(candidate, generated, rejected_candidates):
+                    if _is_duplicate_question(
+                        candidate,
+                        generated,
+                        rejected_candidates,
+                        historical_questions,
+                    ):
                         rejected_candidates.append(candidate)
                         task.current_phase = f"第 {position} 道题与已有事实重复，正在重新生成"
                         db.commit()
@@ -899,7 +943,7 @@ def run_generation_task(task_id: str) -> None:
                     break
                 if item is None:
                     raise RuntimeError(
-                        f"第 {position} 道题连续重复已有事实，当前资料中可区分的独立事实不足；请降低题量或扩大出题范围"
+                        f"第 {position} 道题连续重复当前或历史试卷中的已有事实，当前资料中可区分的独立事实不足；请降低题量或扩大出题范围"
                     )
                 generated.append(item)
                 recent_chunk_ids.update(item.source_chunk_ids)

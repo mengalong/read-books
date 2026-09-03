@@ -93,7 +93,7 @@ DEFAULT_PROMPTS = {
 单题重出附加要求：
 {{regeneration_guidance}}
 
-同类题目参考（仅用于避免与本试卷中的其他同类题目重复）：
+已考察事实参考（包含本试卷和同一资源的历史试卷，必须避免重复）：
 {{question_exclusions}}
 
 请严格返回一个 JSON 对象，不要返回 Markdown 或额外解释，格式如下：

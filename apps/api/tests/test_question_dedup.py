@@ -81,3 +81,26 @@ def test_same_fact_detected_when_context_wording_varies():
     }
 
     assert questions_test_same_fact(first, second)
+
+
+def test_generic_prompt_shell_does_not_merge_different_knowledge_points():
+    first = SimpleNamespace(
+        question_type="short",
+        question_subtype="general",
+        prompt="请用自己的话概括第 2 页这段内容的核心观点，并说明关键理由。",
+        options=[],
+        correct_answers=[],
+        knowledge_point="间隔练习",
+        reference_answer="间隔练习通过拉开复习时间，减缓长期记忆的遗忘。",
+    )
+    second = SimpleNamespace(
+        question_type="short",
+        question_subtype="general",
+        prompt="请用自己的话概括第 8 页这段内容的核心观点，并说明关键理由。",
+        options=[],
+        correct_answers=[],
+        knowledge_point="情境线索",
+        reference_answer="情境线索能够帮助提取记忆，但过度依赖单一场景会限制迁移。",
+    )
+
+    assert not questions_test_same_fact(first, second)

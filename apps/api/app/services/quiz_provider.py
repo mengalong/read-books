@@ -1328,7 +1328,8 @@ class HttpQuizAiProvider:
         semantic_dedup_guidance = (
             "事实级去重约束：每道题必须返回 fact_claim、fact_subject、fact_relation、fact_context、"
             "answer_signature 和 question_intent。fact_claim 必须描述实际考察的事实，不要只改写题干；"
-            "仅更换问法、题型或选项顺序不算新事实。"
+            "仅更换问法、题型或选项顺序不算新事实。QUESTION_EXCLUSIONS 同时包含本卷和历史试卷"
+            "已经考察的事实，必须全部避开。"
         )
         location_guidance = (
             "来源定位只用于后端核验和答题后的依据展示；不要让考生回答台词或情节出自哪一集、哪一页、"

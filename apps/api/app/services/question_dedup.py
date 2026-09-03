@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from typing import Any
 
 
@@ -176,7 +176,8 @@ def build_question_signature(
     if not fact_subject:
         fact_subject = normalize_fact_text(_get_value(source, "knowledge_point", ""))
     if not fact_relation:
-        fact_relation = normalize_fact_text(_get_value(source, "question_subtype", ""))
+        fallback_relation = normalize_fact_text(_get_value(source, "question_subtype", ""))
+        fact_relation = "" if fallback_relation == "general" else fallback_relation
     if not fact_context:
         fact_context = normalize_fact_text(knowledge_value or "")
 
@@ -205,6 +206,22 @@ def build_question_signature(
 
 def signature_for_question(source: Any) -> dict[str, Any]:
     return build_question_signature(source)
+
+
+def refresh_question_signature(source: Any) -> dict[str, Any]:
+    """Rebuild and persist the derived fact fields on a question-like object."""
+    signature = build_question_signature(source)
+    values = {
+        "fact_key": signature["fact_key"],
+        "fact_claim": signature["fact_claim"],
+        "semantic_signature": signature,
+    }
+    if isinstance(source, MutableMapping):
+        source.update(values)
+    else:
+        for name, value in values.items():
+            setattr(source, name, value)
+    return signature
 
 
 def _answer_similarity(left: dict[str, Any], right: dict[str, Any]) -> float:

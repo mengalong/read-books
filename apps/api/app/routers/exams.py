@@ -53,6 +53,7 @@ from app.services.exam_sharing import (
     unanswered_grade,
 )
 from app.services.quiz_generation import regenerate_snapshot_question
+from app.services.question_dedup import refresh_question_signature
 from app.services.wechat_auth import (
     WechatIdentity,
     effective_configuration as effective_wechat_configuration,
@@ -695,6 +696,7 @@ def _apply_snapshot_question_updates(
             raise HTTPException(status_code=422, detail="问答题不需要标准选项答案")
         question["options"] = []
         question["correct_answers"] = []
+        refresh_question_signature(question)
         return
 
     option_ids = [
@@ -736,6 +738,8 @@ def _apply_snapshot_question_updates(
         if question_type == "multiple" and len(deduped) < 1:
             raise HTTPException(status_code=422, detail="多选题至少要有一个标准答案")
         question["correct_answers"] = deduped
+
+    refresh_question_signature(question)
 
 
 @router.get("/exam-shares/{share_id}/editable", response_model=ExamShareEditResponse)

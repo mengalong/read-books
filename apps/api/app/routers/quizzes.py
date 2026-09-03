@@ -34,6 +34,7 @@ from app.services.model_config import get_effective_model_configuration
 from app.services.model_usage import new_usage_context
 from app.services.book_stats import to_quiz_summary
 from app.services.prompt_config import get_effective_prompt_templates
+from app.services.question_dedup import refresh_question_signature
 from app.services.quiz_generation import regenerate_quiz_question, start_generation_task
 from app.services.quiz_provider import GradeResult, get_quiz_provider, key_sentence
 
@@ -407,6 +408,7 @@ def update_question(
                 raise HTTPException(status_code=422, detail="多选题至少要有一个标准答案")
             question.correct_answers = deduped
 
+    refresh_question_signature(question)
     db.commit()
     db.refresh(question)
     return to_question_response(question, True)

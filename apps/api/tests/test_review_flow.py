@@ -381,6 +381,12 @@ def test_update_quiz_question_and_reveal_latest_content(client):
     assert updated.status_code == 200
     assert updated.json()["prompt"] == "修正后的题干"
     assert updated.json()["correct_answers"] == ["B"]
+    with SessionLocal() as db:
+        refreshed_question = db.get(Question, question.id)
+        assert refreshed_question is not None
+        assert refreshed_question.fact_key
+        assert refreshed_question.fact_claim == "修正后的题干"
+        assert refreshed_question.semantic_signature["answer_signature"] == ["正确选项"]
 
     submitted = client.post(
         f"/api/reviews/{review.json()['id']}/submit",
@@ -493,6 +499,30 @@ def test_multiple_choice_scores_zero_on_wrong_selection_and_partial_on_missing_s
 
 def test_generate_submit_and_avoid_recent_sources(client):
     book_id, _ = create_source_book(client, "复习流程测试书", "复习流程作者")
+    distinct_contents = [
+        "主动回忆要求学习者脱离材料，从记忆中主动提取答案。",
+        "间隔练习通过拉开复习时间，减缓长期记忆的遗忘。",
+        "交错练习把不同类型的问题混合起来，训练策略选择能力。",
+        "自我解释要求说明推理过程，帮助发现理解中的断点。",
+        "生成效应表明自己组织出的答案通常比直接阅读记得更牢。",
+        "及时反馈可以纠正错误记忆，避免错误答案被反复强化。",
+        "睡眠会参与记忆巩固，连续熬夜不利于长期保持。",
+        "情境线索能够帮助提取记忆，但过度依赖单一场景会限制迁移。",
+        "目标拆解把复杂任务划分为可检查的小步骤，降低执行负担。",
+        "错题复盘应分析错误原因，而不只是重新抄写标准答案。",
+    ]
+    with SessionLocal() as db:
+        chunks = list(
+            db.scalars(
+                select(ContentChunk)
+                .where(ContentChunk.book_id == book_id)
+                .order_by(ContentChunk.page_number)
+            ).all()
+        )
+        for chunk, content in zip(chunks, distinct_contents, strict=True):
+            chunk.content = content
+            chunk.char_count = len(content)
+        db.commit()
     payload = {
         "duration_minutes": 15,
         "difficulty": "medium",
@@ -1051,6 +1081,123 @@ def test_generation_retries_semantically_duplicate_questions(client, monkeypatch
             ).all()
         )
     assert len({question.fact_key for question in stored_questions}) == 2
+
+
+def test_generation_retries_fact_already_used_by_historical_quiz(client, monkeypatch):
+    book_id, _ = create_source_book(client, "跨试卷事实去重测试书")
+    shared_signature = {
+        "fact_claim": "翠平在天津假扮夫妻任务前的真实身份",
+        "fact_subject": "翠平",
+        "fact_relation": "身份",
+        "fact_context": "天津假扮夫妻潜伏任务",
+        "answer_signature": ["游击队队员"],
+        "question_intent": "identity",
+    }
+    with SessionLocal() as db:
+        chunk_ids = list(
+            db.scalars(
+                select(ContentChunk.id)
+                .where(ContentChunk.book_id == book_id)
+                .order_by(ContentChunk.page_number)
+            ).all()
+        )
+        historical_quiz = Quiz(
+            book_id=book_id,
+            title="历史试卷",
+            difficulty="medium",
+            duration_minutes=15,
+            status="ready",
+            source_mode="pdf",
+            max_score=100,
+        )
+        db.add(historical_quiz)
+        db.flush()
+        historical_question = Question(
+            quiz_id=historical_quiz.id,
+            position=1,
+            question_type="single",
+            prompt="组织派翠平到天津前，她在游击队中的身份是什么？",
+            options=[
+                {"id": "A", "text": "游击队队员"},
+                {"id": "B", "text": "机要秘书"},
+                {"id": "C", "text": "天津站特务"},
+                {"id": "D", "text": "普通商人"},
+            ],
+            correct_answers=["A"],
+            explanation="翠平此前是游击队队员。",
+            knowledge_point="人物身份",
+            difficulty="medium",
+            estimated_seconds=45,
+            source_chunk_ids=[chunk_ids[0]],
+            source_evidence=[],
+            max_score=100,
+            fact_claim=shared_signature["fact_claim"],
+            semantic_signature=shared_signature,
+        )
+        db.add(historical_question)
+        db.commit()
+        historical_question_id = historical_question.id
+
+    calls: list[dict] = []
+
+    def generated_question(*, duplicate: bool) -> GeneratedQuestion:
+        signature = shared_signature if duplicate else {
+            "fact_claim": "余则成接收新任务的地点",
+            "fact_subject": "余则成",
+            "fact_relation": "任务地点",
+            "fact_context": "天津站新任务",
+            "answer_signature": ["天津站"],
+            "question_intent": "location",
+        }
+        return GeneratedQuestion(
+            question_type="single",
+            prompt=(
+                "余则成与翠平假扮夫妻时，翠平此前的真实身份是什么？"
+                if duplicate
+                else "余则成接收新任务的地点在哪里？"
+            ),
+            options=[
+                {"id": "A", "text": signature["answer_signature"][0]},
+                {"id": "B", "text": "错误答案一"},
+                {"id": "C", "text": "错误答案二"},
+                {"id": "D", "text": "错误答案三"},
+            ],
+            correct_answers=["A"],
+            explanation="测试解析",
+            knowledge_point="人物身份" if duplicate else "任务地点",
+            estimated_seconds=45,
+            reference_answer=None,
+            grading_rubric=[],
+            source_chunk_ids=[chunk_ids[1] if duplicate else chunk_ids[2]],
+            source_evidence=[],
+            max_score=100,
+            fact_claim=signature["fact_claim"],
+            semantic_signature=signature,
+        )
+
+    def fake_generate(self, **kwargs):
+        calls.append(kwargs)
+        return [generated_question(duplicate=len(calls) == 1)]
+
+    monkeypatch.setattr(MockQuizAiProvider, "generate_questions", fake_generate)
+    response = client.post(
+        f"/api/books/{book_id}/quizzes",
+        json={"single_count": 1, "multiple_count": 0, "short_count": 0},
+    )
+    assert response.status_code == 202
+    task = wait_for_generation(client, response.json()["id"])
+
+    assert len(calls) == 2
+    assert calls[0]["question_exclusions"][0]["role"] == "historical_question"
+    assert calls[0]["question_exclusions"][0]["fact_claim"] == shared_signature["fact_claim"]
+    quiz = client.get(f"/api/quizzes/{task['quiz_id']}")
+    assert quiz.status_code == 200
+    assert quiz.json()["questions"][0]["prompt"] == "余则成接收新任务的地点在哪里？"
+    with SessionLocal() as db:
+        historical_question = db.get(Question, historical_question_id)
+        assert historical_question is not None
+        assert historical_question.fact_key
+        assert historical_question.semantic_signature["fact_subject"] == "翠平"
 
 
 def test_book_without_pdf_uses_model_knowledge_mode_with_real_provider(client, monkeypatch):
