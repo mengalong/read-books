@@ -1,6 +1,6 @@
 # 资料理解层设计（轻量方案）
 
-实施状态（2026-09-04）：数据结构与增量摘要生成已完成；向量检索召回、Prompt 背景注入与规则版忠实性校验正在实施中。
+实施状态（2026-09-04）：数据结构、增量摘要生成、向量检索召回和 Prompt 背景注入已完成；规则版忠实性校验正在实施中。
 
 ## 1. 背景与目标
 
@@ -66,13 +66,15 @@
 
 PDF 场景（`parse_pdf_document`）同理，按页码窗口分组生成摘要，设计已预留 `scope_type="page_range"`，实现将在后续批次接入。
 
-### 4.2 向量检索召回（规划中）
+### 4.2 向量检索召回（已完成，`app/services/embedding_index.py`）
 
-解析完成后为每条 `MaterialSegment`/`QuoteEntry`/`ContentChunk` 调用 `embedding_client.get_embedding_client()` 生成并存储向量。出题时，`_candidate_chunks`（`quiz_provider.py`）会优先按“与近期已考察事实、专题关键词”的向量相似度排序候选池，替代当前基于 `generation_number` 的随机 shuffle，同时保留“最近使用过的片段降权”的既有去重逻辑。
+`refresh_book_embeddings(book_id)` 在 PDF/资料解析完成后由后台线程异步调用，为该书所有尚未生成向量或向量模型已过期的 `ContentChunk`/`MaterialSegment`/`QuoteEntry` 批量调用 `embedding_client.get_embedding_client()` 生成并存储向量（未配置 `LLM_EMBEDDING_MODEL` 或 mock 模式下直接跳过，不影响主流程）。
 
-### 4.3 Prompt 背景注入（规划中）
+出题时，`HttpQuizAiProvider._candidate_chunks` 新增 `relevance_query` 参数（由专题约束 `theme_requirements` 和重出引导 `regeneration_guidance` 拼接而来），调用 `rank_by_similarity` 按与该查询的余弦相似度对“尚未使用过的候选”重新排序；只有当候选片段存在匹配当前配置模型的向量时才生效，否则回退到原有的按 `generation_number` 随机 shuffle，不影响现有行为。已使用过的候选（`recent_chunk_ids` 命中）仍保持随机 shuffle 降权，不参与相似度排序。
 
-`_generation_values` 会在 `source_material` 之外新增一个独立字段（如 `background_context`），仅包含 `get_understanding_context()` 返回的摘要文本。Prompt 会明确声明：该背景仅用于理解剧情/内容脉络，不得引用摘要中的具体表述作为答案依据，所有可引用内容仍必须来自 `source_material` 列表。
+### 4.3 Prompt 背景注入（已完成）
+
+`_generation_values` 新增 `background_context` 字段，取值来自 `material_understanding.get_understanding_context()`：包含全局摘要，以及命中候选台词所属集数的分集摘要。Prompt 中新增独立的“背景理解”段落，明确声明该背景仅用于理解剧情/内容脉络，不得作为可引用来源、不得把其中的具体表述当作答案依据，所有可引用内容仍必须来自 `SOURCE_MATERIAL`。`regenerate_quiz_question`、`regenerate_snapshot_question`、`run_generation_task` 三处出题入口均已接入。
 
 ### 4.4 规则版忠实性校验（规划中）
 

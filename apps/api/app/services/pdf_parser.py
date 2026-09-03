@@ -2,6 +2,7 @@ import re
 import logging
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import fitz
@@ -147,7 +148,13 @@ def parse_pdf_document(pdf_id: str) -> None:
             pdf.page_count = page_count
             pdf.chunk_count = len(parsed)
             pdf.parse_status = "completed"
+            book_id = pdf.book_id
             db.commit()
+            from app.services.embedding_index import refresh_book_embeddings
+
+            threading.Thread(
+                target=refresh_book_embeddings, args=(book_id,), daemon=True
+            ).start()
         except Exception as exc:
             logger.exception("PDF 解析失败: %s", pdf_id)
             db.rollback()

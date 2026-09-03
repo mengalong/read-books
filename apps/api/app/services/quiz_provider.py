@@ -26,6 +26,7 @@ from app.services.prompt_config import (
 from app.services.resource_types import resource_type_label, resource_type_scope_hint
 from app.services.material_parser import normalized_quote_text
 from app.services.question_dedup import asks_for_precise_location, build_question_signature
+from app.services.embedding_index import rank_by_similarity
 
 
 @dataclass
@@ -112,6 +113,7 @@ class QuizAiProvider(Protocol):
         generation_theme: str = "general",
         theme_requirements: str = "",
         allowed_question_subtypes: list[str] | None = None,
+        background_context: str = "",
     ) -> list[GeneratedQuestion]: ...
 
     def grade_short_answer(self, question: Question, answer: str) -> GradeResult: ...
@@ -225,6 +227,7 @@ class MockQuizAiProvider:
         generation_theme: str = "general",
         theme_requirements: str = "",
         allowed_question_subtypes: list[str] | None = None,
+        background_context: str = "",
     ) -> list[GeneratedQuestion]:
         if not chunks:
             raise RuntimeError("没有 PDF 时需要启用已配置的大模型，当前模拟接口不支持资源知识出题")
@@ -700,11 +703,13 @@ class HttpQuizAiProvider:
         prompt_templates: dict[str, PromptTemplateDefinition] | None = None,
         usage_context: ModelUsageContext | None = None,
         usage_recorder: Callable[[ModelUsageEvent], None] | None = None,
+        settings: Settings | None = None,
     ):
         self.configuration = configuration
         self.prompt_templates = prompt_templates or DEFAULT_PROMPTS
         self.usage_context = usage_context
         self.usage_recorder = usage_recorder or record_model_usage
+        self.settings = settings
         self._call_number = 0
 
     def _endpoint(self) -> str:
@@ -844,10 +849,19 @@ class HttpQuizAiProvider:
         total: int,
         generation_number: int,
         recent_chunk_ids: set[str],
+        relevance_query: str = "",
     ) -> list[ContentChunk | TrustedQuoteSource]:
         fresh = [chunk for chunk in chunks if chunk.id not in recent_chunk_ids]
         repeated = [chunk for chunk in chunks if chunk.id in recent_chunk_ids]
-        random.Random(generation_number).shuffle(fresh)
+        ranked_fresh = None
+        if relevance_query.strip() and self.settings is not None:
+            ranked_fresh = rank_by_similarity(
+                fresh, relevance_query, configuration=self.configuration, settings=self.settings
+            )
+        if ranked_fresh is not None:
+            fresh = ranked_fresh
+        else:
+            random.Random(generation_number).shuffle(fresh)
         random.Random(generation_number + 97).shuffle(repeated)
         candidate_limit = min(len(chunks), max(total + 2, 4))
         return (fresh + repeated)[:candidate_limit]
@@ -904,6 +918,7 @@ class HttpQuizAiProvider:
         regeneration_guidance: str = "",
         generation_theme: str = "general",
         theme_requirements: str = "",
+        background_context: str = "",
     ) -> dict[str, str]:
         if source_mode == "material":
             source_material = [
@@ -958,6 +973,7 @@ class HttpQuizAiProvider:
             "regeneration_guidance": regeneration_guidance.strip(),
             "generation_theme": generation_theme,
             "theme_requirements": theme_requirements.strip(),
+            "background_context": background_context.strip() or "无",
         }
 
     def _normalize_rubric(
@@ -1301,9 +1317,15 @@ class HttpQuizAiProvider:
         generation_theme: str = "general",
         theme_requirements: str = "",
         allowed_question_subtypes: list[str] | None = None,
+        background_context: str = "",
     ) -> list[GeneratedQuestion]:
         total = single_count + multiple_count + short_count
-        candidates = self._candidate_chunks(chunks, total, generation_number, recent_chunk_ids)
+        relevance_query = " ".join(
+            part for part in (theme_requirements, regeneration_guidance) if part.strip()
+        )
+        candidates = self._candidate_chunks(
+            chunks, total, generation_number, recent_chunk_ids, relevance_query
+        )
         if source_mode == "pdf" and len(candidates) < 1:
             return []
         generation_values = self._generation_values(
@@ -1321,6 +1343,7 @@ class HttpQuizAiProvider:
             regeneration_guidance,
             generation_theme,
             theme_requirements,
+            background_context,
         )
         rendered_system_prompt = render_prompt(
             self.prompt_templates["generation"].system_prompt, generation_values
@@ -1334,6 +1357,12 @@ class HttpQuizAiProvider:
         location_guidance = (
             "来源定位只用于后端核验和答题后的依据展示；不要让考生回答台词或情节出自哪一集、哪一页、"
             "哪一章、具体时间点或其他精确出处位置。对话场景题应考察语境、人物处境和事件背景。"
+        )
+        background_guidance = (
+            f"背景理解（仅用于理解剧情/内容脉络，不得作为可引用来源，不得把其中的具体表述当作答案依据，"
+            f"所有可引用内容仍必须来自 SOURCE_MATERIAL）：\n{background_context}"
+            if background_context.strip() and background_context.strip() != "无"
+            else ""
         )
         source_boundary = (
             rendered_system_prompt
@@ -1365,6 +1394,7 @@ class HttpQuizAiProvider:
                     + semantic_dedup_guidance
                     + "\n\n"
                     + location_guidance
+                    + (f"\n\n{background_guidance}" if background_guidance else "")
                 ),
             },
         ]
@@ -1481,4 +1511,4 @@ def get_quiz_provider(
         )
     if configuration.provider_mode == "mock":
         return MockQuizAiProvider()
-    return HttpQuizAiProvider(configuration, prompt_templates, usage_context=usage_context)
+    return HttpQuizAiProvider(configuration, prompt_templates, usage_context=usage_context, settings=settings)

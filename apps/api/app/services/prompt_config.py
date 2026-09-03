@@ -30,6 +30,7 @@ PROMPT_VARIABLES = {
         "regeneration_guidance",
         "generation_theme",
         "theme_requirements",
+        "background_context",
     ),
     "grading": (
         "source_mode",
@@ -198,6 +199,7 @@ def prompt_values_for_preview(prompt_type: str) -> dict[str, str]:
             "regeneration_guidance": "",
             "generation_theme": "general（综合内容）",
             "theme_requirements": "围绕资源整体内容出题，不限定角色或台词专题。",
+            "background_context": "无",
             "source_material": json.dumps(
                 [
                     {

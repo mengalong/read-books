@@ -31,6 +31,7 @@ from app.services.quiz_provider import (
     compact_text,
     get_quiz_provider,
 )
+from app.services.material_understanding import get_understanding_context
 from app.services.question_dedup import (
     question_keywords,
     questions_test_same_fact,
@@ -407,6 +408,17 @@ def _matching_quote_sources_for_question(
     return [source for _, source in scored[:20]]
 
 
+def _background_context_for_chunks(
+    db: Session, book_id: str, chunks: list[ContentChunk | TrustedQuoteSource]
+) -> str:
+    episode_numbers = {
+        chunk.episode_number
+        for chunk in chunks
+        if isinstance(chunk, TrustedQuoteSource) and chunk.episode_number is not None
+    }
+    return get_understanding_context(db, book_id, episode_numbers=episode_numbers or None)
+
+
 def _theme_requirements(generation_theme: str, theme_config: dict[str, Any]) -> str:
     if generation_theme == "general":
         return "围绕资源整体内容出题，不限定角色或台词专题。"
@@ -700,6 +712,7 @@ def regenerate_quiz_question(
             generation_theme=quiz.generation_theme,
             theme_requirements=_theme_requirements(quiz.generation_theme, theme_config),
             allowed_question_subtypes=list(theme_config.get("question_subtypes", [])),
+            background_context=_background_context_for_chunks(db, quiz.book_id, chunks),
         )
         if len(result) != 1:
             raise RuntimeError("重出结果数量不正确")
@@ -873,6 +886,7 @@ def regenerate_snapshot_question(
             generation_theme=generation_theme,
             theme_requirements=_theme_requirements(generation_theme, theme_config),
             allowed_question_subtypes=list(theme_config.get("question_subtypes", [])),
+            background_context=_background_context_for_chunks(db, book_id, chunks),
         )
         if len(result) != 1:
             raise RuntimeError("重出结果数量不正确")
@@ -995,6 +1009,7 @@ def run_generation_task(task_id: str) -> None:
             )
             historical_questions = _historical_questions(db, task.book_id)
             historical_exclusions = _historical_question_exclusions(historical_questions)
+            background_context = _background_context_for_chunks(db, task.book_id, chunks)
             generated: list[GeneratedQuestion] = []
             rejected_candidates: list[GeneratedQuestion] = []
             for position, question_type in enumerate(_question_types(task), start=1):
@@ -1037,6 +1052,7 @@ def run_generation_task(task_id: str) -> None:
                         allowed_question_subtypes=list(
                             theme_config.get("question_subtypes", [])
                         ),
+                        background_context=background_context,
                     )
                     if len(result) != 1:
                         raise RuntimeError(f"第 {position} 道题生成结果数量不正确")
