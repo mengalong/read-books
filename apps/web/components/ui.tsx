@@ -27,6 +27,7 @@ export function StatusBadge({ status }: { status: string }) {
 
 export function BookCard({ book, href }: { book: BookSummary; href?: string }) {
   const hasPdf = book.stats.pdf_count > 0;
+  const hasTrustedMaterial = (book.stats.material_count || 0) > 0;
 
   return (
     <Link className="book-card" href={href || `/books/${book.id}`}>
@@ -42,16 +43,16 @@ export function BookCard({ book, href }: { book: BookSummary; href?: string }) {
       <div className="tag-row">
         {book.shelf_status === "unlisted" && <StatusBadge status="unlisted" />}
         <span className="tag">{resourceTypeLabel(book.resource_type)}</span>
-        <span className={`tag pdf-status-tag ${hasPdf ? "has-pdf" : "no-pdf"}`}>
-          {hasPdf ? <FileText size={12} /> : <FileX2 size={12} />}
-          {hasPdf ? "已上传 PDF" : "未上传 PDF"}
+        <span className={`tag pdf-status-tag ${hasPdf || hasTrustedMaterial ? "has-pdf" : "no-pdf"}`}>
+          {hasPdf || hasTrustedMaterial ? <FileText size={12} /> : <FileX2 size={12} />}
+          {hasPdf ? "已上传 PDF" : hasTrustedMaterial ? "已有可信资料" : "暂无可信资料"}
         </span>
         {book.owner_display_name && <span className="tag book-owner-tag"><UserRound size={12} />归属：{book.owner_display_name}</span>}
         {book.tags.slice(0, 3).map((tag) => <span className="tag" key={tag}>{tag}</span>)}
       </div>
       <div className="book-card-bottom">
         <div className="book-stats">
-          <span>{book.stats.completed_pdf_count} 份原文</span>
+          <span>{book.stats.completed_pdf_count + (book.stats.ready_material_count || 0)} 份资料</span>
           <span>{book.stats.quiz_count} 次测试</span>
           <span>{book.stats.average_score === null ? "未测试" : `平均 ${book.stats.average_score}%`}</span>
         </div>
@@ -62,6 +63,13 @@ export function BookCard({ book, href }: { book: BookSummary; href?: string }) {
 }
 
 export function SourceModeNotice({ sourceMode, compact = false }: { sourceMode: SourceMode; compact?: boolean }) {
+  if (sourceMode === "material") return <div className={`source-mode-warning material-source${compact ? " compact" : ""}`}>
+    <FileText size={17} />
+    <div>
+      <strong>本次使用可信资料出题</strong>
+      <span>题目中的台词、角色和场景来自用户上传并确认的资料，系统保留对应文件及位置用于校验。</span>
+    </div>
+  </div>;
   if (sourceMode !== "model_knowledge") return null;
   return <div className={`source-mode-warning${compact ? " compact" : ""}`}>
     <AlertCircle size={17} />
@@ -73,6 +81,19 @@ export function SourceModeNotice({ sourceMode, compact = false }: { sourceMode: 
 }
 
 export function EvidenceList({ evidence, open = false, sourceMode = "pdf" }: { evidence: SourceEvidence[]; open?: boolean; sourceMode?: SourceMode }) {
+  function evidenceLocation(item: SourceEvidence) {
+    if (sourceMode === "material") {
+      const parts = [
+        item.speaker || null,
+        item.season_number ? `第 ${item.season_number} 季` : null,
+        item.episode_number ? `第 ${item.episode_number} 集` : null,
+        item.page_number ? `第 ${item.page_number} 页` : null,
+      ].filter(Boolean);
+      return [item.file_name, ...parts].join(" · ");
+    }
+    return `${item.file_name}${item.page_number ? ` · 第 ${item.page_number} 页` : ""}`;
+  }
+
   function renderExcerpt(item: SourceEvidence) {
     const fallback = item.excerpt.match(/[^。！？；\n]+(?:[。！？；]|$)/)?.[0]?.trim();
     const highlight = (item.highlight || fallback || "").trim();
@@ -88,11 +109,11 @@ export function EvidenceList({ evidence, open = false, sourceMode = "pdf" }: { e
 
   return (
     <details className="evidence" open={open}>
-      <summary>原文依据（{evidence.length} 处，答题时默认折叠）</summary>
+      <summary>{sourceMode === "material" ? "可信资料依据" : "原文依据"}（{evidence.length} 处，答题时默认折叠）</summary>
       <div className="evidence-body">
         {evidence.map((item) => (
           <div key={item.chunk_id} style={{ marginBottom: 14 }}>
-            <div className="evidence-meta"><FileText size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />{item.file_name} · 第 {item.page_number} 页</div>
+            <div className="evidence-meta"><FileText size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />{evidenceLocation(item)}</div>
             <p className="evidence-excerpt">{renderExcerpt(item)}</p>
             <p className="evidence-support">依据说明：{item.support}</p>
           </div>

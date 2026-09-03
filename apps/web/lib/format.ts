@@ -1,4 +1,4 @@
-import type { ResourceType } from "@/lib/types";
+import type { GenerationTheme, ResourceMaterial, ResourceType } from "@/lib/types";
 
 const BEIJING_TIME_ZONE = "Asia/Shanghai";
 
@@ -72,6 +72,7 @@ export function statusLabel(status: string) {
     reviewing: "复习中",
     pending: "等待解析",
     processing: "解析中",
+    needs_review: "待校对",
     completed: "解析完成",
     failed: "解析失败",
     ready: "待完成",
@@ -87,8 +88,36 @@ export function statusLabel(status: string) {
     grading_failed: "评分失败",
     anonymous: "匿名参与者",
     user: "登录用户",
+    confirmed: "已确认",
+    rejected: "已排除",
   };
   return labels[status] || status;
+}
+
+export function materialTypeLabel(value: ResourceMaterial["material_type"]) {
+  return {
+    book_text: "原文资料",
+    script: "剧本或整理稿",
+    subtitle: "字幕",
+    quote_sheet: "结构化台词表",
+  }[value];
+}
+
+export function generationThemeLabel(value: GenerationTheme) {
+  return {
+    general: "综合内容",
+    classic_quotes: "经典台词",
+    character: "角色专题",
+  }[value];
+}
+
+export function formatMediaTime(milliseconds: number | null | undefined) {
+  if (milliseconds === null || milliseconds === undefined) return null;
+  const totalSeconds = Math.floor(milliseconds / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor(totalSeconds % 3600 / 60);
+  const seconds = totalSeconds % 60;
+  return `${hours ? `${String(hours).padStart(2, "0")}:` : ""}${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 export function resourceTypeLabel(value: ResourceType | string | null | undefined) {

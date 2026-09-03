@@ -6,6 +6,8 @@ import type {
   ModelConnectionTestResult,
   ModelProviderMode,
   PdfDocument,
+  QuoteEntry,
+  QuoteEntryList,
   PreGenerationResponse,
   PromptPreview,
   PromptTemplate,
@@ -17,6 +19,9 @@ import type {
   QuestionUpdatePayload,
   ReadingStatus,
   ResourceType,
+  ResourceMaterial,
+  GenerationTheme,
+  QuizThemeConfig,
   ShelfStatus,
   ReviewTask,
   ReviewTaskSummary,
@@ -201,6 +206,92 @@ export function uploadPdf(bookId: string, file: File) {
   return apiFetch<PdfDocument>(`/books/${bookId}/pdfs`, { method: "POST", body: formData });
 }
 
+export function getMaterials(bookId: string) {
+  return apiFetch<ResourceMaterial[]>(`/books/${bookId}/materials`);
+}
+
+export function uploadMaterial(
+  bookId: string,
+  file: File,
+  payload: {
+    material_type: ResourceMaterial["material_type"];
+    season_number?: number;
+    episode_label?: string;
+    version_label?: string;
+  },
+) {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("material_type", payload.material_type);
+  if (payload.season_number) formData.append("season_number", String(payload.season_number));
+  if (payload.episode_label) formData.append("episode_label", payload.episode_label);
+  if (payload.version_label) formData.append("version_label", payload.version_label);
+  return apiFetch<ResourceMaterial>(`/books/${bookId}/materials`, {
+    method: "POST",
+    body: formData,
+  });
+}
+
+export function reparseMaterial(bookId: string, materialId: string) {
+  return apiFetch<ResourceMaterial>(`/books/${bookId}/materials/${materialId}/reparse`, {
+    method: "POST",
+  });
+}
+
+export function deleteMaterial(bookId: string, materialId: string) {
+  return apiFetch<void>(`/books/${bookId}/materials/${materialId}`, { method: "DELETE" });
+}
+
+export function getQuotes(
+  bookId: string,
+  filters: {
+    material_id?: string;
+    speaker?: string;
+    review_status?: QuoteEntry["review_status"];
+    search?: string;
+    page?: number;
+    page_size?: number;
+  } = {},
+) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  });
+  const suffix = params.size ? `?${params.toString()}` : "";
+  return apiFetch<QuoteEntryList>(`/books/${bookId}/quotes${suffix}`);
+}
+
+export function updateQuote(
+  bookId: string,
+  quoteId: string,
+  payload: {
+    speaker?: string | null;
+    context?: string | null;
+    review_status?: QuoteEntry["review_status"];
+    enabled_for_generation?: boolean;
+  },
+) {
+  return apiFetch<QuoteEntry>(`/books/${bookId}/quotes/${quoteId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function bulkReviewQuotes(
+  bookId: string,
+  quoteIds: string[],
+  action: "confirm" | "reject",
+) {
+  return apiFetch<QuoteEntry[]>(`/books/${bookId}/quotes/bulk-${action}`, {
+    method: "POST",
+    body: JSON.stringify({ quote_ids: quoteIds }),
+  });
+}
+
+export function getQuoteSheetTemplateUrl() {
+  return `${API_BASE}/material-templates/quote-sheet.csv`;
+}
+
 export function startPreGeneration(bookId: string) {
   return apiFetch<PreGenerationResponse>(`/books/${bookId}/pre-generation`, {
     method: "POST",
@@ -225,6 +316,8 @@ export function generateQuiz(
     short_count: number;
     page_start?: number;
     page_end?: number;
+    generation_theme?: GenerationTheme;
+    theme_config?: QuizThemeConfig;
   },
 ) {
   return apiFetch<QuizGenerationTask>(`/books/${bookId}/quizzes`, {

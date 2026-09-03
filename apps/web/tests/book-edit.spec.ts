@@ -36,10 +36,10 @@ test("修改书籍信息并返回详情页", async ({ page }) => {
   });
 
   await page.goto("/books/book-edit/edit");
-  await expect(page.getByRole("heading", { name: "修改书籍信息" })).toBeVisible();
-  await expect(page.getByLabel("书名")).toHaveValue("红楼梦");
+  await expect(page.getByRole("heading", { name: "修改资源信息" })).toBeVisible();
+  await expect(page.getByLabel("资源名称")).toHaveValue("红楼梦");
 
-  await page.getByLabel("书名").fill("红楼梦（校订版）");
+  await page.getByLabel("资源名称").fill("红楼梦（校订版）");
   await page.getByLabel("一句话备注").fill("更新后的简介");
   await page.getByLabel("阅读状态").selectOption("reviewing");
   await page.getByLabel("标签").fill("古典文学，版本研究");

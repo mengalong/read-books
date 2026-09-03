@@ -155,8 +155,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </>}
         </nav>
         <div className="sidebar-note">
-          <strong><BookOpenText size={13} /> 原文优先</strong>
-          上传 PDF 时保留页码与原文依据；没有电子版时可使用模型知识兜底。
+          <strong><BookOpenText size={13} /> 可信资料优先</strong>
+          上传 PDF、字幕或台词表时保留原始依据；没有资料时可使用模型知识兜底。
         </div>
         <div className="sidebar-account">
           <span className="account-avatar">{user.display_name.slice(0, 1)}</span>

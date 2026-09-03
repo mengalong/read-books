@@ -234,7 +234,21 @@ export type PreGenerationResponse = {
 };
 
 export type QuestionType = "single" | "multiple" | "short";
-export type SourceMode = "pdf" | "model_knowledge";
+export type SourceMode = "pdf" | "material" | "model_knowledge";
+export type GenerationTheme = "general" | "classic_quotes" | "character";
+export type QuestionSubtype =
+  | "general"
+  | "quote_speaker"
+  | "quote_context"
+  | "quote_meaning"
+  | "character_relation"
+  | "character_trait";
+
+export type QuizThemeConfig = {
+  material_ids: string[];
+  character_names: string[];
+  question_subtypes: QuestionSubtype[];
+};
 
 export type BookStats = {
   pdf_count: number;
@@ -244,6 +258,10 @@ export type BookStats = {
   average_score: number | null;
   last_reviewed_at: string | null;
   next_review_date: string | null;
+  material_count: number;
+  ready_material_count: number;
+  quote_count: number;
+  confirmed_quote_count: number;
 };
 
 export type BookSummary = {
@@ -290,6 +308,53 @@ export type PdfDocument = {
   updated_at: string;
 };
 
+export type ResourceMaterial = {
+  id: string;
+  book_id: string;
+  material_type: "book_text" | "script" | "subtitle" | "quote_sheet";
+  file_format: "pdf" | "txt" | "srt" | "vtt" | "ass" | "csv" | "xlsx";
+  file_name: string;
+  file_size: number;
+  season_number: number | null;
+  episode_label: string | null;
+  version_label: string | null;
+  parse_status: "pending" | "processing" | "needs_review" | "completed" | "failed";
+  error_message: string | null;
+  segment_count: number;
+  quote_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type QuoteEntry = {
+  id: string;
+  book_id: string;
+  material_id: string;
+  material_file_name: string;
+  source_segment_ids: string[];
+  quote_text: string;
+  speaker: string | null;
+  speaker_origin: "provided" | "inferred" | "confirmed" | "unknown";
+  context: string | null;
+  season_number: number | null;
+  episode_number: number | null;
+  start_ms: number | null;
+  end_ms: number | null;
+  page_number: number | null;
+  review_status: "pending" | "confirmed" | "rejected";
+  enabled_for_generation: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type QuoteEntryList = {
+  items: QuoteEntry[];
+  total: number;
+  speakers: string[];
+  pending_count: number;
+  confirmed_count: number;
+};
+
 export type BookDetail = BookSummary & { pdfs: PdfDocument[]; quizzes: QuizSummary[] };
 
 export type QuizSummary = {
@@ -300,6 +365,8 @@ export type QuizSummary = {
   duration_minutes: number;
   status: string;
   source_mode: SourceMode;
+  generation_theme: GenerationTheme;
+  theme_config: QuizThemeConfig;
   question_count: number;
   single_count: number;
   multiple_count: number;
@@ -324,10 +391,17 @@ export type Chunk = {
 export type SourceEvidence = {
   chunk_id: string;
   file_name: string;
-  page_number: number;
+  page_number: number | null;
   excerpt: string;
   highlight?: string | null;
   support: string;
+  material_id?: string | null;
+  material_type?: string | null;
+  season_number?: number | null;
+  episode_number?: number | null;
+  start_ms?: number | null;
+  end_ms?: number | null;
+  speaker?: string | null;
 };
 
 export type QuestionOption = { id: string; text: string };
@@ -346,6 +420,7 @@ export type Question = {
   id: string;
   position: number;
   question_type: QuestionType;
+  question_subtype: QuestionSubtype;
   prompt: string;
   options: QuestionOption[];
   explanation: string | null;
@@ -355,6 +430,8 @@ export type Question = {
   reference_answer: string | null;
   grading_rubric: { point: string; keywords?: string[]; score?: number }[];
   source_evidence: SourceEvidence[];
+  quote_entry_ids: string[];
+  source_segment_ids: string[];
   max_score: number;
   correct_answers: string[] | null;
 };
@@ -368,6 +445,8 @@ export type Quiz = {
   duration_minutes: number;
   status: "ready" | "submitted";
   source_mode: SourceMode;
+  generation_theme: GenerationTheme;
+  theme_config: QuizThemeConfig;
   total_score: number | null;
   max_score: number;
   elapsed_seconds: number | null;
@@ -383,6 +462,8 @@ export type QuizGenerationTask = {
   task_type: string;
   status: "pending" | "processing" | "completed" | "failed";
   source_mode: SourceMode;
+  generation_theme: GenerationTheme;
+  theme_config: QuizThemeConfig;
   total_questions: number;
   completed_questions: number;
   current_question_position: number | null;
@@ -424,6 +505,8 @@ export type ReviewTask = {
   attempt_number: number;
   status: "in_progress" | "submitted";
   source_mode: SourceMode;
+  generation_theme: GenerationTheme;
+  theme_config: QuizThemeConfig;
   difficulty: string;
   duration_minutes: number;
   total_score: number | null;
@@ -465,6 +548,7 @@ export type ExamQuestion = {
   id: string;
   position: number;
   question_type: QuestionType;
+  question_subtype: QuestionSubtype;
   prompt: string;
   options: QuestionOption[];
   knowledge_point: string;
@@ -476,6 +560,8 @@ export type ExamQuestion = {
   reference_answer: string | null;
   grading_rubric: { point: string; keywords?: string[]; score?: number }[];
   source_evidence: SourceEvidence[];
+  quote_entry_ids: string[];
+  source_segment_ids: string[];
 };
 
 export type ExamAnswer = {
@@ -526,6 +612,8 @@ export type ExamAttempt = {
   ip_changed: boolean;
   duration_minutes: number;
   source_mode: SourceMode;
+  generation_theme: GenerationTheme;
+  theme_config: QuizThemeConfig;
   questions: ExamQuestion[];
   answers: ExamAnswer[];
   weak_knowledge_points: ExamWeakKnowledgePoint[];
@@ -569,6 +657,8 @@ export type ExamShare = {
   book_author: string;
   quiz_title: string;
   source_mode: SourceMode;
+  generation_theme: GenerationTheme;
+  theme_config: QuizThemeConfig;
   difficulty: string;
   duration_minutes: number;
   max_score: number;
@@ -616,6 +706,8 @@ export type ExamShareEdit = {
   book_author: string;
   quiz_title: string;
   source_mode: SourceMode;
+  generation_theme: GenerationTheme;
+  theme_config: QuizThemeConfig;
   difficulty: string;
   duration_minutes: number;
   max_score: number;
@@ -637,6 +729,8 @@ export type PublicExam = {
   difficulty: string;
   duration_minutes: number;
   source_mode: SourceMode;
+  generation_theme: GenerationTheme;
+  theme_config: QuizThemeConfig;
   max_score: number;
   question_count: number;
   single_count: number;

@@ -1,15 +1,15 @@
 "use client";
 
-import { AlertCircle, Archive, ArchiveRestore, ArrowLeft, BookOpen, Check, CheckCircle2, Copy, FileText, History, LoaderCircle, PencilLine, Play, Share2, Sparkles, Trash2, UploadCloud, X } from "lucide-react";
+import { AlertCircle, Archive, ArchiveRestore, ArrowLeft, BookOpen, Check, CheckCircle2, Copy, FileText, History, LoaderCircle, MessageSquareQuote, PencilLine, Play, RefreshCcw, Share2, Sparkles, Trash2, UploadCloud, X } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { BookCover, EmptyState, ErrorState, NextReview, SourceModeNotice, StatusBadge, formatPdfMeta } from "@/components/ui";
-import { ApiError, createExamShare, deleteBook, deletePdf, deleteQuiz, getBook, getChunks, restoreBook, unlistBook, uploadPdf } from "@/lib/api";
+import { ApiError, createExamShare, deleteBook, deleteMaterial, deletePdf, deleteQuiz, getBook, getChunks, getMaterials, getQuoteSheetTemplateUrl, reparseMaterial, restoreBook, unlistBook, uploadMaterial, uploadPdf } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
-import { formatDate, formatDateTime, resourceAuthorLabel, resourceTypeLabel, scorePercentage } from "@/lib/format";
-import type { BookDetail, Chunk, ExamShare, PdfDocument, QuizSummary } from "@/lib/types";
+import { formatDate, formatDateTime, formatFileSize, generationThemeLabel, materialTypeLabel, resourceAuthorLabel, resourceTypeLabel, scorePercentage } from "@/lib/format";
+import type { BookDetail, Chunk, ExamShare, PdfDocument, QuizSummary, ResourceMaterial } from "@/lib/types";
 
 const difficultyLabels: Record<string, string> = {
   easy: "基础",
@@ -23,8 +23,17 @@ export default function BookDetailPage() {
   const bookId = params.bookId;
   const [book, setBook] = useState<BookDetail | null>(null);
   const [chunks, setChunks] = useState<Chunk[]>([]);
+  const [materials, setMaterials] = useState<ResourceMaterial[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [materialDialogOpen, setMaterialDialogOpen] = useState(false);
+  const [materialType, setMaterialType] = useState<ResourceMaterial["material_type"]>("subtitle");
+  const [materialFile, setMaterialFile] = useState<File | null>(null);
+  const [materialSeason, setMaterialSeason] = useState("");
+  const [materialEpisode, setMaterialEpisode] = useState("");
+  const [materialVersion, setMaterialVersion] = useState("");
+  const [uploadingMaterial, setUploadingMaterial] = useState(false);
+  const [managingMaterialId, setManagingMaterialId] = useState<string | null>(null);
   const [deletingQuizId, setDeletingQuizId] = useState<string | null>(null);
   const [managingBook, setManagingBook] = useState(false);
   const [sharingQuiz, setSharingQuiz] = useState<QuizSummary | null>(null);
@@ -38,8 +47,14 @@ export default function BookDetailPage() {
 
   async function refresh(loadChunks = true) {
     try {
-      const nextBook = await getBook(bookId);
+      const [bookResult, materialResult] = await Promise.allSettled([
+        getBook(bookId),
+        getMaterials(bookId),
+      ]);
+      if (bookResult.status === "rejected") throw bookResult.reason;
+      const nextBook = bookResult.value;
       setBook(nextBook);
+      setMaterials(materialResult.status === "fulfilled" ? materialResult.value : []);
       if (loadChunks && nextBook.stats.chunk_count > 0) setChunks(await getChunks(bookId));
       setError("");
     } catch (reason: unknown) {
@@ -52,10 +67,11 @@ export default function BookDetailPage() {
   useEffect(() => { void refresh(); }, [bookId]);
 
   useEffect(() => {
-    if (!book?.pdfs.some((pdf) => pdf.parse_status === "pending" || pdf.parse_status === "processing") && !book?.active_generation_task_id) return;
+    const parsingMaterial = materials.some((material) => ["pending", "processing"].includes(material.parse_status));
+    if (!book?.pdfs.some((pdf) => pdf.parse_status === "pending" || pdf.parse_status === "processing") && !book?.active_generation_task_id && !parsingMaterial) return;
     const timer = window.setInterval(() => { void refresh(); }, 2200);
     return () => window.clearInterval(timer);
-  }, [book]);
+  }, [book, materials]);
 
   const completed = book?.stats.completed_pdf_count || 0;
   const pending = book?.pdfs.filter((pdf) => pdf.parse_status !== "completed").length || 0;
@@ -68,7 +84,8 @@ export default function BookDetailPage() {
       || (book.resource_type === "book" && book.model_knowledge_supported !== false)
     ),
   );
-  const canGenerate = Boolean(book && isActive && !generating && (hasPdfSource || canUseModelKnowledge));
+  const hasTrustedQuotes = Boolean(book?.stats.confirmed_quote_count);
+  const canGenerate = Boolean(book && isActive && !generating && (hasPdfSource || canUseModelKnowledge || hasTrustedQuotes));
   const previewChunks = useMemo(() => chunks.slice(0, 4), [chunks]);
 
   async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
@@ -94,6 +111,64 @@ export default function BookDetailPage() {
       await refresh();
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "PDF 删除失败");
+    }
+  }
+
+  function openMaterialDialog() {
+    if (!book) return;
+    setMaterialType(book.resource_type === "book" ? "book_text" : "subtitle");
+    setMaterialFile(null);
+    setMaterialSeason("");
+    setMaterialEpisode("");
+    setMaterialVersion("");
+    setMaterialDialogOpen(true);
+  }
+
+  async function handleMaterialUpload(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!materialFile) return;
+    setUploadingMaterial(true);
+    setError("");
+    try {
+      await uploadMaterial(bookId, materialFile, {
+        material_type: materialType,
+        ...(materialSeason ? { season_number: Number(materialSeason) } : {}),
+        ...(materialEpisode.trim() ? { episode_label: materialEpisode.trim() } : {}),
+        ...(materialVersion.trim() ? { version_label: materialVersion.trim() } : {}),
+      });
+      setMaterialDialogOpen(false);
+      await refresh(false);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "可信资料上传失败");
+    } finally {
+      setUploadingMaterial(false);
+    }
+  }
+
+  async function handleMaterialReparse(material: ResourceMaterial) {
+    setManagingMaterialId(material.id);
+    setError("");
+    try {
+      await reparseMaterial(bookId, material.id);
+      await refresh(false);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "资料重新解析失败");
+    } finally {
+      setManagingMaterialId(null);
+    }
+  }
+
+  async function handleMaterialDelete(material: ResourceMaterial) {
+    if (!window.confirm(`确定删除“${material.file_name}”吗？以后将不能再基于这份资料出题或重出题，已有试卷继续保留。`)) return;
+    setManagingMaterialId(material.id);
+    setError("");
+    try {
+      await deleteMaterial(bookId, material.id);
+      await refresh(false);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "可信资料删除失败");
+    } finally {
+      setManagingMaterialId(null);
     }
   }
 
@@ -177,7 +252,7 @@ export default function BookDetailPage() {
   }
 
   async function handleDeleteBook() {
-    if (!book || !window.confirm(`确定永久删除《${book.title}》吗？PDF、试卷、复习记录和答案都会一并删除，且无法恢复。`)) return;
+    if (!book || !window.confirm(`确定永久删除《${book.title}》吗？PDF、可信资料、试卷、复习记录和答案都会一并删除，且无法恢复。`)) return;
     setManagingBook(true);
     setError("");
     try {
@@ -220,7 +295,7 @@ export default function BookDetailPage() {
 
       {book.model_knowledge_message && <div className={`shelf-status-banner${book.model_knowledge_supported === false ? " warning" : ""}`}><AlertCircle size={18} /><div><strong>{book.model_knowledge_supported === true ? "模型真实内容检查通过" : book.model_knowledge_supported === false ? "模型真实内容检查未通过" : "模型真实内容检查未执行"}</strong><span>{book.model_knowledge_message}</span></div></div>}
 
-      {isActive && !hasPdfSource && canUseModelKnowledge && !generating && <SourceModeNotice sourceMode="model_knowledge" />}
+      {isActive && !hasPdfSource && !hasTrustedQuotes && canUseModelKnowledge && !generating && <SourceModeNotice sourceMode="model_knowledge" />}
 
       {book.active_generation_task_id && <div className="generation-progress processing">
         <div className="generation-progress-heading"><div><span className="eyebrow">出题任务</span><strong>{book.active_generation_phase || "正在后台生成题目"}</strong></div><LoaderCircle className="spin" size={21} /></div>
@@ -238,10 +313,34 @@ export default function BookDetailPage() {
 
       <div className="metrics-grid book-detail-metrics" style={{ marginBottom: 25 }}>
         <div className="metric"><div className="metric-label">原文资料</div><div className="metric-value">{completed}<span className="metric-detail">份已完成</span></div></div>
-        <div className="metric"><div className="metric-label">已解析片段</div><div className="metric-value">{book.stats.chunk_count}<span className="metric-detail">段</span></div></div>
+        <div className="metric"><div className="metric-label">可信台词</div><div className="metric-value">{book.stats.confirmed_quote_count}<span className="metric-detail">/{book.stats.quote_count} 条</span></div></div>
         <div className="metric"><div className="metric-label">复习试卷</div><div className="metric-value">{book.quizzes.length}<span className="metric-detail">套</span></div></div>
         <div className="metric"><div className="metric-label">下次建议复习</div><div className="metric-value" style={{ fontSize: 18 }}>{formatDate(book.stats.next_review_date)}</div></div>
       </div>
+
+      <section className="content-panel trusted-material-panel">
+        <div className="section-title">
+          <h2>可信资料</h2>
+          <div className="section-actions">
+            {book.stats.quote_count > 0 && <Link className="button button-secondary" href={`/books/${book.id}/quotes`}><MessageSquareQuote size={15} />校对台词</Link>}
+            {isActive && <button className="button button-primary" onClick={openMaterialDialog} type="button"><UploadCloud size={15} />上传资料</button>}
+          </div>
+        </div>
+        {materials.length ? <div className="material-list">{materials.map((material) => <div className="material-row" key={material.id}>
+          <div className="file-icon material-file-icon"><MessageSquareQuote size={16} /></div>
+          <div className="file-main">
+            <div className="file-name" title={material.file_name}>{material.file_name}</div>
+            <div className="file-meta">{materialTypeLabel(material.material_type)} · {material.file_format.toUpperCase()} · {formatFileSize(material.file_size)}{material.season_number ? ` · 第 ${material.season_number} 季` : ""}{material.episode_label ? ` · ${material.episode_label}` : ""}{material.version_label ? ` · ${material.version_label}` : ""}</div>
+            <div className="file-meta">{material.segment_count} 个片段 · {material.quote_count} 条台词{material.error_message ? ` · ${material.error_message}` : ""}</div>
+          </div>
+          <StatusBadge status={material.parse_status} />
+          <div className="material-row-actions">
+            {material.parse_status === "needs_review" && <Link aria-label={`校对${material.file_name}`} className="button button-quiet" href={`/books/${book.id}/quotes?material_id=${material.id}`} title="校对台词"><MessageSquareQuote size={15} /></Link>}
+            {material.parse_status === "failed" && <button aria-label={`重新解析${material.file_name}`} className="button button-quiet" disabled={managingMaterialId === material.id} onClick={() => void handleMaterialReparse(material)} title="重新解析" type="button"><RefreshCcw size={15} /></button>}
+            <button aria-label={`删除可信资料${material.file_name}`} className="button button-quiet" disabled={managingMaterialId === material.id || material.parse_status === "processing"} onClick={() => void handleMaterialDelete(material)} title="删除资料" type="button"><Trash2 size={15} /></button>
+          </div>
+        </div>)}</div> : <EmptyState title="还没有可信资料" detail={book.resource_type === "book" ? "可以上传原文、剧本、字幕或结构化台词表，用于生成可追溯的专题试卷。" : "上传字幕、剧本或结构化台词表后，可以生成经典台词和角色专题试卷。"} />}
+      </section>
 
       <section className="content-panel quiz-library">
         <div className="section-title"><h2>复习试卷</h2><span>{book.quizzes.length ? "可重复选择同一套试卷复习" : "等待生成"}</span></div>
@@ -251,7 +350,7 @@ export default function BookDetailPage() {
             <div className="quiz-library-main">
               <strong>{quiz.title}</strong>
               <span>难度：{difficultyLabels[quiz.difficulty] || quiz.difficulty} · {quiz.question_count} 道题 · {quiz.duration_minutes} 分钟 · 创建于 {formatDateTime(quiz.created_at)}</span>
-              <span>出题依据：{quiz.source_mode === "model_knowledge" ? "模型知识（无 PDF 原文）" : "已解析 PDF 原文"}</span>
+              <span>出题依据：{quiz.source_mode === "model_knowledge" ? "模型知识（无逐句依据）" : quiz.source_mode === "material" ? "可信台词资料" : "已解析 PDF 原文"} · {generationThemeLabel(quiz.generation_theme)}</span>
               <span>题目构成：单选 {quiz.single_count} · 多选 {quiz.multiple_count} · 问答 {quiz.short_count}</span>
             </div>
             <div className="quiz-library-stats"><span>已复习 {quiz.review_count} 次</span><strong>{latestPercent === null ? "暂无成绩" : `最近得分率 ${latestPercent}%`}</strong></div>
@@ -274,7 +373,7 @@ export default function BookDetailPage() {
         })}</div>}
       </section>
 
-      <div className="detail-columns">
+      {book.resource_type === "book" && <div className="detail-columns">
         <section className="content-panel">
           <div className="section-title"><h2>原文资料</h2><span>{pending ? `${pending} 个文件处理中` : "默认按页保留依据"}</span></div>
           <div className="file-list">
@@ -286,12 +385,11 @@ export default function BookDetailPage() {
             </div>)}
           {book.pdfs.length === 0 && <EmptyState title={book.resource_type === "book" ? "还没有 PDF" : "暂未配置原文资料"} detail={book.resource_type === "book" ? "可以上传读过的原文以获得页码和逐句依据；当前也可以使用已配置模型的知识生成测试。" : "电影和电视剧不支持 PDF 上传；请在模型真实内容检查通过后生成试卷。"} />}
           </div>
-          {isActive && book.resource_type === "book" && <div className="upload-zone">
+          {isActive && <div className="upload-zone">
             <UploadCloud size={23} />
             <div className="upload-zone-copy"><strong>{uploading ? "正在上传……" : "补充一份 PDF"}</strong><span>不设置产品层面的大小上限；大文件上传后会在后台解析，请在此页等待状态更新。</span></div>
             <input className="upload-input" accept="application/pdf,.pdf" disabled={uploading} onChange={handleUpload} type="file" />
           </div>}
-          {isActive && book.resource_type !== "book" && <div className="shelf-status-banner"><AlertCircle size={18} /><div><strong>电影和电视剧不支持 PDF 上传</strong><span>请依赖模型真实内容检查结果出题；如果你手头有可解析的脚本或字幕文本，也可以先整理成 PDF 再上传。</span></div></div>}
         </section>
 
         <section className="content-panel">
@@ -299,7 +397,7 @@ export default function BookDetailPage() {
           {previewChunks.length > 0 ? <div className="chunk-list">{previewChunks.map((chunk) => <article className="chunk-item" key={chunk.id}><div className="chunk-heading">第 {chunk.page_number} 页 · {chunk.file_name}</div><p>{chunk.content}</p></article>)}</div> : <EmptyState title="暂时没有片段" detail="PDF 完成解析后，会在这里看到按页保存的原文。" />}
           {chunks.length > 0 && <p className="field-hint" style={{ marginTop: 17 }}><BookOpen size={13} style={{ verticalAlign: "-3px", marginRight: 4 }} />测试中的每道题都会保留同样的页码和原文片段。</p>}
         </section>
-      </div>
+      </div>}
 
       {sharingQuiz && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) closeShare(); }} role="presentation">
         <section aria-labelledby="share-exam-title" aria-modal="true" className="modal-panel exam-share-modal" role="dialog">
@@ -316,9 +414,25 @@ export default function BookDetailPage() {
               <label className="switch-control" htmlFor="share-has-expiry"><input checked={shareHasExpiry} id="share-has-expiry" onChange={(event) => setShareHasExpiry(event.target.checked)} type="checkbox" /><span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span><span className="switch-label">{shareHasExpiry ? "已开启" : "未开启"}</span></label>
             </div>
             {shareHasExpiry && <label className="field"><span>答题截止时间</span><input min={toDateTimeLocal(new Date())} onChange={(event) => setShareExpiresAt(event.target.value)} required type="datetime-local" value={shareExpiresAt} /><small>按当前设备的本地时间填写，保存后统一按北京时间展示。</small></label>}
-            <div className="copy-scope-note">公开答题页不会展示 PDF 文件名、页码或原文摘录。参与者提交后可以查看分数、答案和解析。</div>
+            <div className="copy-scope-note">公开答题页不会展示可信资料文件名、位置或原文摘录。参与者提交后可以查看分数、答案和解析。</div>
             <div className="modal-actions"><button className="button button-secondary" disabled={sharing} onClick={closeShare} type="button">取消</button><button className="button button-primary" disabled={sharing || !shareName.trim()} type="submit"><Share2 size={15} />{sharing ? "正在创建……" : "生成考试链接"}</button></div>
           </form>}
+        </section>
+      </div>}
+      {materialDialogOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target && !uploadingMaterial) setMaterialDialogOpen(false); }} role="presentation">
+        <section aria-labelledby="material-upload-title" aria-modal="true" className="modal-panel material-upload-modal" role="dialog">
+          <div className="modal-heading"><div><h2 id="material-upload-title">上传可信资料</h2><p>系统会在后台解析文件，并把需要确认的角色台词送到校对页。</p></div><button aria-label="关闭上传资料弹窗" className="modal-close" disabled={uploadingMaterial} onClick={() => setMaterialDialogOpen(false)} title="关闭" type="button"><X size={18} /></button></div>
+          <form onSubmit={handleMaterialUpload}>
+            <label className="field"><span>资料类型</span><select onChange={(event) => { setMaterialType(event.target.value as ResourceMaterial["material_type"]); setMaterialFile(null); }} value={materialType}>{book.resource_type === "book" && <option value="book_text">原文资料（PDF、TXT）</option>}<option value="script">剧本或整理稿（PDF、TXT）</option><option value="subtitle">字幕（SRT、VTT、ASS）</option><option value="quote_sheet">结构化台词表（CSV、XLSX）</option></select></label>
+            <label className="field"><span>选择文件</span><input accept={materialAccept(materialType)} key={materialType} onChange={(event) => setMaterialFile(event.target.files?.[0] || null)} required type="file" /></label>
+            <div className="form-grid compact-grid">
+              <label className="field"><span>季数（可选）</span><input max={999} min={1} onChange={(event) => setMaterialSeason(event.target.value)} type="number" value={materialSeason} /></label>
+              <label className="field"><span>集数或范围（可选）</span><input maxLength={80} onChange={(event) => setMaterialEpisode(event.target.value)} placeholder="例如：第 1 集" value={materialEpisode} /></label>
+            </div>
+            <label className="field"><span>版本说明（可选）</span><input maxLength={120} onChange={(event) => setMaterialVersion(event.target.value)} placeholder="例如：DVD 字幕版" value={materialVersion} /></label>
+            {materialType === "quote_sheet" && <p className="field-hint">台词表必须包含“台词”和“角色”两列；可以从 <a href={getQuoteSheetTemplateUrl()}>模板文件</a> 开始整理。</p>}
+            <div className="modal-actions"><button className="button button-secondary" disabled={uploadingMaterial} onClick={() => setMaterialDialogOpen(false)} type="button">取消</button><button className="button button-primary" disabled={uploadingMaterial || !materialFile} type="submit"><UploadCloud size={15} />{uploadingMaterial ? "正在上传……" : "上传并解析"}</button></div>
+          </form>
         </section>
       </div>}
     </div>
@@ -332,4 +446,10 @@ function defaultExpirationValue() {
 function toDateTimeLocal(value: Date) {
   const offset = value.getTimezoneOffset() * 60_000;
   return new Date(value.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function materialAccept(materialType: ResourceMaterial["material_type"]) {
+  if (materialType === "subtitle") return ".srt,.vtt,.ass";
+  if (materialType === "quote_sheet") return ".csv,.xlsx";
+  return ".pdf,.txt,application/pdf,text/plain";
 }
