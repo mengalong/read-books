@@ -11,14 +11,14 @@
 
 本设计只解决第二类问题：**在忠实原文的前提下，让系统对已上传资料有更完整的理解，出题时既能精确引用原文，又能利用整体上下文避免断章取义**。
 
-核心原则不变：摘要、向量检索都只是"理解与召回"的辅助手段，绝不能成为可引用的事实来源。最终题目仍然只能引用 `MaterialSegment` / `QuoteEntry` / `ContentChunk` 的原文 ID，`_validate_questions` 的 ID 存在性校验和台词逐字匹配校验保持不变、不放松。综合内容模式在 PDF 与可信台词同时存在时使用 `combined`，两类来源进入同一候选池；只有两类资料都不存在时才允许真实模型使用 `model_knowledge` 兜底。
+核心原则不变：摘要、向量检索都只是"理解与召回"的辅助手段，绝不能成为可引用的事实来源。最终题目仍然只能引用 `MaterialSegment` / `QuoteEntry` / `ContentChunk` 的原文 ID，来源 ID、说话人归属和精确出处问题继续硬校验。台词题允许逐字引用、自然转述或概括含义，`quote_entry_id` 负责来源追溯，不再要求题干机械包含完整原句。综合内容模式在 PDF 与可信台词同时存在时使用 `combined`，两类来源进入同一候选池；只有两类资料都不存在时才允许真实模型使用 `model_knowledge` 兜底。
 
 ## 2. 技术选型（已确认，不再讨论新增知识图谱/ES）
 
 评估了引入独立知识库底座、知识图谱、Elasticsearch 等重型架构的方案，结论是：现有资料规模（单本书/单部剧，几千到几万条片段）用不上这些基础设施，复杂度收益比不合理。采用以下轻量方案：
 
 1. **摘要策略：增量更新**。按“集数”（台词资料）或“页码窗口”（PDF，每 20 页一组）分组生成局部摘要，再基于局部摘要合并生成一份全局摘要。新增资料时，只有内容变化的分组会重新生成摘要，通过对比 `content_signature`（分组内片段 ID 排序后取 sha256）判断是否需要重新生成，未变化的分组直接复用旧摘要。
-2. **忠实性校验：规则版**。不引入模型二次校验（避免新增一次不确定的模型调用），复用已有的 `question_dedup.token_similarity`（2/3 字 n-gram 的 Jaccard 相似度）计算题目答案文本（`explanation` + `correct_answers` + `answer_signature`）与引用原文片段的词汇重合度，重合度低于阈值时判定为可能捏造。
+2. **忠实性校验：规则版分级信号**。不引入模型二次校验（避免新增一次不确定的模型调用），复用已有的 `question_dedup.token_similarity`（2/3 字 n-gram 的 Jaccard 相似度）计算题目答案文本（`explanation` + `correct_answers` + `answer_signature`）与引用原文片段的词汇重合度。极低重合度判定为失败，中间区间记录 warning 并允许合理的语义转述，避免把理解题误判为格式错误。
 3. **召回方式：向量检索**。为 `ContentChunk`、`MaterialSegment`、`QuoteEntry` 生成并存储 embedding（`LargeBinary` 存储 `struct.pack` 序列化后的 float 数组，配合纯 Python 余弦相似度计算，不引入 numpy/向量数据库依赖），出题时按语义相似度召回候选片段，替代原来的随机 shuffle。
 4. **摘要不需要人工审核**：摘要只作为背景理解注入 Prompt，不直接展示给用户、不作为答案依据展示，因此不需要审核工作流；生成失败时记录 `status=failed` 和 `error_message`，下一次增量刷新会重试。
 
@@ -78,12 +78,12 @@ PDF 场景（`parse_pdf_document`）同理，按页码窗口分组生成摘要�
 
 ### 4.4 规则版忠实性校验（已完成，`app/services/faithfulness_check.py`）
 
-`_validate_questions` 通过之后，对 `source_mode` 为 `pdf`/`material`/`combined` 的题目新增一轮规则校验，作为已有 ID 存在性校验和台词逐字匹配校验之外的额外保护层（不替代、不放松原有校验）：
+`_validate_questions` 通过之后，对 `source_mode` 为 `pdf`/`material`/`combined` 的题目新增一轮规则校验，作为来源 ID、说话人和精确出处硬校验之外的额外保护层：
 
 - `source_text_for_question` 拼接题目引用的每一个已验证来源（`ContentChunk.content` / `MaterialSegment.content` / `TrustedQuoteSource.content`）的正文，说话人题（`quote_speaker` 等子类型）额外拼接 `speaker`、`context` 元数据字段，因为说话人姓名和场景说明本身不在 `content` 正文里，只存在于这些元数据字段中，若不纳入会造成误判。
-- `check_question_faithfulness` 复用 `question_dedup.token_similarity`，计算 `explanation + correct_answers_text + answer_signature` 拼接文本与来源文本的 2/3 字 n-gram Jaccard 相似度，低于 `MIN_OVERLAP_RATIO`（当前 0.03）判定为不通过。
-- 阈值经过对比实测校准：正常的合理复述重合度约 0.07~0.09；完全捏造、与原文无关的内容重合度普遍低于 0.02。取 0.03 只拦截几乎完全不沾边的极端捏造，避免误伤正常复述。
-- 校验不通过时在 `quiz_provider.py` 中抛出 `RuntimeError`，附带重合度数值，交由现有的重试/拒绝逻辑处理，不新增额外的重试策略。
+- `check_question_faithfulness` 返回 `pass`、`warning` 或 `fail`：当前 `MIN_OVERLAP_RATIO=0.03` 是充分词面支持参考线，`HARD_FAIL_OVERLAP_RATIO=0.01` 以下才阻断；中间区间写入 `validation_warnings`，题目仍可进入人工抽查或正常试卷。
+- 词面分级只判断“是否可能完全脱离来源”，不替代语义判断。`quote_speaker` 仍必须与可信角色元数据一致，`quote_context`/`quote_meaning` 可以自然改写台词情境；所有来源 ID 都必须存在且属于候选资料。
+- 失败时在 `quiz_provider.py` 中抛出 `RuntimeError`，附带重合度数值，交由现有的重试/人工介入逻辑处理；warning 会保存在题目事实签名和出题任务草稿中。
 - 来源为空（例如 `model_knowledge` 模式或题目未引用任何原文）时直接放行，规则校验只对引用了具体原文片段却答案脱节的场景生效。
 
 ## 5. CSV 台词格式兼容说明
@@ -95,4 +95,4 @@ PDF 场景（`parse_pdf_document`）同理，按页码窗口分组生成摘要�
 - 不引入独立知识库底座、向量数据库或搜索引擎（ES/Milvus 等），现有数据规模不需要。
 - 不引入知识图谱抽取和维护，复杂度过高，收益不明确。
 - 摘要生成不设人工审核环节。
-- 不对已有 `_validate_questions` 的 ID 存在性和逐字匹配校验做任何放松。
+- 不放松 `_validate_questions` 的 ID 存在性、来源范围、说话人归属和精确出处问题校验；仅取消“题干必须逐字包含台词”的机械要求。
