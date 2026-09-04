@@ -86,8 +86,21 @@ def resolve_source_mode(
         .where(ContentChunk.book_id == book_id, PdfDocument.parse_status == "completed")
         .limit(1)
     )
+    confirmed_quote = db.scalar(
+        select(QuoteEntry.id)
+        .where(
+            QuoteEntry.book_id == book_id,
+            QuoteEntry.review_status == "confirmed",
+            QuoteEntry.enabled_for_generation.is_(True),
+        )
+        .limit(1)
+    )
+    if completed_chunk and confirmed_quote:
+        return "combined"
     if completed_chunk:
         return "pdf"
+    if confirmed_quote:
+        return "material"
 
     has_pdf = db.scalar(select(PdfDocument.id).where(PdfDocument.book_id == book_id).limit(1))
     if has_pdf:
@@ -180,7 +193,7 @@ def validate_generation_request(
     }:
         raise ValueError("该书正在后台预生成测试，请等待本次任务完成")
     source_mode = resolve_source_mode(db, book_id, payload)
-    if source_mode == "model_knowledge" and (payload.page_start or payload.page_end):
+    if source_mode in {"material", "model_knowledge"} and (payload.page_start or payload.page_end):
         raise ValueError("没有 PDF 时不能指定页码范围")
     return book
 
@@ -417,6 +430,19 @@ def _background_context_for_chunks(
         if isinstance(chunk, TrustedQuoteSource) and chunk.episode_number is not None
     }
     return get_understanding_context(db, book_id, episode_numbers=episode_numbers or None)
+
+
+def _combined_sources(
+    db: Session,
+    book_id: str,
+    page_start: int | None = None,
+    page_end: int | None = None,
+) -> tuple[list[ContentChunk | TrustedQuoteSource], dict[str, str]]:
+    pdf_chunks = _get_chunks(db, book_id, page_start, page_end)
+    quote_sources = _get_all_confirmed_quote_sources(db, book_id)
+    if not pdf_chunks and not quote_sources:
+        return [], {}
+    return [*pdf_chunks, *quote_sources], _chunk_file_names(db, pdf_chunks)
 
 
 def _theme_requirements(generation_theme: str, theme_config: dict[str, Any]) -> str:
@@ -967,7 +993,11 @@ def run_generation_task(task_id: str) -> None:
             else (
                 "正在准备可信台词"
                 if task.source_mode == "material"
-                else "正在准备资源信息"
+                else (
+                    "正在准备 PDF 与可信台词"
+                    if task.source_mode == "combined"
+                    else "正在准备资源信息"
+                )
             )
         )
         db.commit()
@@ -978,11 +1008,24 @@ def run_generation_task(task_id: str) -> None:
                 raise RuntimeError("未找到这本书")
             theme_config = dict(task.theme_config or {})
             if task.source_mode == "material":
-                chunks = _get_quote_sources(db, task.book_id, theme_config)
+                chunks = (
+                    _get_all_confirmed_quote_sources(db, task.book_id)
+                    if task.generation_theme == "general"
+                    else _get_quote_sources(db, task.book_id, theme_config)
+                )
                 if len(chunks) < task.total_questions:
                     raise RuntimeError("符合专题范围的可信台词数量不足")
                 file_names = {}
                 recent_chunk_ids = _recent_quote_ids(db, task.book_id)
+            elif task.source_mode == "combined":
+                chunks, file_names = _combined_sources(
+                    db, task.book_id, task.page_start, task.page_end
+                )
+                if not chunks:
+                    raise RuntimeError("没有可用于综合出题的可信 PDF 或台词资料")
+                recent_chunk_ids = _recent_chunk_ids(db, task.book_id) | _recent_quote_ids(
+                    db, task.book_id
+                )
             else:
                 chunks = _get_chunks(db, task.book_id, task.page_start, task.page_end)
                 if task.source_mode == "pdf" and not chunks:

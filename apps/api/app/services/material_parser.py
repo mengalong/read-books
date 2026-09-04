@@ -38,6 +38,7 @@ class ParsedSegment:
     speaker: str | None = None
     speaker_origin: str = "unknown"
     context: str | None = None
+    is_dialogue: bool = True
 
 
 def normalized_quote_text(value: str) -> str:
@@ -263,6 +264,9 @@ FIELD_ALIASES = {
     "page": ("页码", "page", "page_number"),
 }
 
+DIALOGUE_ROW_TYPES = {"台词", "对白", "dialogue", "quote"}
+ROW_TYPE_FIELD_NAMES = {alias.casefold() for alias in FIELD_ALIASES["row_type"]}
+
 
 def _row_value(row: dict[str, Any], field: str) -> Any:
     lowered = {str(key).strip().lower(): value for key, value in row.items() if key is not None}
@@ -282,15 +286,16 @@ def _rows_to_segments(material: ResourceMaterial, rows: list[dict[str, Any]]) ->
         )
         speaker = str(_row_value(row, "speaker") or "").strip()
         row_type = str(_row_value(row, "row_type") or "").strip()
+        has_row_type_column = any(
+            str(key).strip().casefold() in ROW_TYPE_FIELD_NAMES
+            for key in row
+            if key is not None
+        )
         if not quote:
             continue
-        if not speaker and not row_type:
+        if not speaker and not has_row_type_column:
             raise ValueError(f"台词表第 {position} 行缺少台词或角色")
-        # 带类型列的台词表中环境描写、旁白等非对白行天然没有角色；类型为台词
-        # 但角色为空的行（画外音、群众对话等无明确说话人）与字幕/PDF场景一致，
-        # 不应阻断整份文件解析，保留speaker=None、speaker_origin=unknown，
-        # 交由资料校对流程标记为待校对。仅没有类型列的传统两列台词表
-        # （只有台词,角色）才要求角色必填。
+        is_dialogue = not has_row_type_column or row_type.casefold() in DIALOGUE_ROW_TYPES
         records.append(
             ParsedSegment(
                 content=quote,
@@ -304,6 +309,7 @@ def _rows_to_segments(material: ResourceMaterial, rows: list[dict[str, Any]]) ->
                 speaker=speaker or None,
                 speaker_origin="provided" if speaker else "unknown",
                 context=str(_row_value(row, "context") or "").strip() or None,
+                is_dialogue=is_dialogue,
             )
         )
     return records
@@ -402,7 +408,7 @@ def parse_material_document(material_id: str) -> None:
                 )
                 db.add(segment)
                 db.flush()
-                if not _is_quote_candidate(record.content):
+                if not record.is_dialogue or not _is_quote_candidate(record.content):
                     continue
                 confirmed = record.speaker_origin == "provided"
                 quote = QuoteEntry(

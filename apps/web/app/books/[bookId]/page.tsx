@@ -293,7 +293,7 @@ export default function BookDetailPage() {
 
       {!isActive && <div className="shelf-status-banner"><Archive size={18} /><div><strong>这个资源已下架</strong><span>PDF、试卷和复习记录均已保留。恢复上架后才能继续管理资料或开始新的复习。</span></div></div>}
 
-      {book.model_knowledge_message && <div className={`shelf-status-banner${book.model_knowledge_supported === false ? " warning" : ""}`}><AlertCircle size={18} /><div><strong>{book.model_knowledge_supported === true ? "模型真实内容检查通过" : book.model_knowledge_supported === false ? "模型真实内容检查未通过" : "模型真实内容检查未执行"}</strong><span>{book.model_knowledge_message}</span></div></div>}
+      {book.model_knowledge_message && !hasPdfSource && !hasTrustedQuotes && <div className={`shelf-status-banner${book.model_knowledge_supported === false ? " warning" : ""}`}><AlertCircle size={18} /><div><strong>{book.model_knowledge_supported === true ? "模型真实内容检查通过" : book.model_knowledge_supported === false ? "模型真实内容检查未通过" : "模型真实内容检查未执行"}</strong><span>{book.model_knowledge_message}</span></div></div>}
 
       {isActive && !hasPdfSource && !hasTrustedQuotes && canUseModelKnowledge && !generating && <SourceModeNotice sourceMode="model_knowledge" />}
 
@@ -350,7 +350,7 @@ export default function BookDetailPage() {
             <div className="quiz-library-main">
               <strong>{quiz.title}</strong>
               <span>难度：{difficultyLabels[quiz.difficulty] || quiz.difficulty} · {quiz.question_count} 道题 · {quiz.duration_minutes} 分钟 · 创建于 {formatDateTime(quiz.created_at)}</span>
-              <span>出题依据：{quiz.source_mode === "model_knowledge" ? "模型知识（无逐句依据）" : quiz.source_mode === "material" ? "可信台词资料" : "已解析 PDF 原文"} · {generationThemeLabel(quiz.generation_theme)}</span>
+              <span>出题依据：{quiz.source_mode === "model_knowledge" ? "模型知识（无逐句依据）" : quiz.source_mode === "material" ? "可信台词资料" : quiz.source_mode === "combined" ? "PDF 原文 + 可信台词" : "已解析 PDF 原文"} · {generationThemeLabel(quiz.generation_theme)}</span>
               <span>题目构成：单选 {quiz.single_count} · 多选 {quiz.multiple_count} · 问答 {quiz.short_count}</span>
             </div>
             <div className="quiz-library-stats"><span>已复习 {quiz.review_count} 次</span><strong>{latestPercent === null ? "暂无成绩" : `最近得分率 ${latestPercent}%`}</strong></div>

@@ -5147,6 +5147,12 @@ p {
   color: var(--green);
 }
 
+.source-mode-warning.combined-source {
+  background: #eef6f4;
+  border-color: #bfd6ca;
+  color: var(--green);
+}
+
 .trusted-material-panel {
   margin-bottom: 25px;
 }

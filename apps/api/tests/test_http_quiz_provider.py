@@ -289,6 +289,55 @@ def test_http_provider_validates_trusted_quote_and_rebuilds_evidence(monkeypatch
     assert "可信台词资料" in requests[0]["json"]["messages"][0]["content"]
 
 
+def test_http_provider_combined_mode_accepts_pdf_and_quote_sources(monkeypatch):
+    pdf_source = make_chunks()[0]
+    quote_source = make_trusted_quote()
+    payload = generated_payload([pdf_source.id, pdf_source.id, pdf_source.id])
+    payload["questions"] = [payload["questions"][0]]
+    payload["questions"][0].update(
+        {
+            "prompt": "根据可信台词“会议现在开始”，该句的核心事实是什么？",
+            "options": [
+                {"id": "A", "text": "反复浏览"},
+                {"id": "B", "text": "会议现在开始"},
+                {"id": "C", "text": "抄写全文"},
+                {"id": "D", "text": "跳过困难内容"},
+            ],
+            "correct_answers": ["B"],
+            "explanation": "可信台词明确记录“会议现在开始”。",
+            "knowledge_point": "会议通知",
+            "quote_entry_ids": [quote_source.id],
+        }
+    )
+    requests = install_chat_responses(
+        monkeypatch, [json.dumps(payload, ensure_ascii=False)]
+    )
+    provider = HttpQuizAiProvider(make_configuration())
+
+    questions = provider.generate_questions(
+        chunks=[pdf_source, quote_source],
+        file_names={"pdf-1": "复习材料.pdf"},
+        single_count=1,
+        multiple_count=0,
+        short_count=0,
+        difficulty="medium",
+        generation_number=0,
+        recent_chunk_ids=set(),
+        book_title="潜伏",
+        resource_type="tv_series",
+        source_mode="combined",
+    )
+
+    assert questions[0].source_chunk_ids == [pdf_source.id]
+    assert questions[0].quote_entry_ids == [quote_source.id]
+    assert {item["chunk_id"] for item in questions[0].source_evidence} == {
+        pdf_source.id,
+        quote_source.id,
+    }
+    assert "combined" in requests[0]["json"]["messages"][1]["content"]
+    assert "quote-1" in requests[0]["json"]["messages"][1]["content"]
+
+
 def test_precise_episode_questions_are_rejected(monkeypatch):
     source = make_trusted_quote()
     payload = generated_quote_payload()

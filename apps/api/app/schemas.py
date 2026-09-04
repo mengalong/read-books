@@ -4,7 +4,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-SourceMode = Literal["pdf", "material", "model_knowledge"]
+SourceMode = Literal["pdf", "material", "combined", "model_knowledge"]
 GenerationTheme = Literal["general", "classic_quotes", "character"]
 
 

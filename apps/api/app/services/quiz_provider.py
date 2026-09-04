@@ -241,7 +241,7 @@ class MockQuizAiProvider:
         total = single_count + multiple_count + short_count
         chosen = [pool[index % len(pool)] for index in range(total)]
 
-        if source_mode == "material":
+        if source_mode == "material" and generation_theme != "general":
             material_sources = [
                 source for source in chosen if isinstance(source, TrustedQuoteSource)
             ]
@@ -265,20 +265,109 @@ class MockQuizAiProvider:
         for index in range(single_count):
             chunk = chosen[cursor]
             cursor += 1
-            questions.append(
-                self._single_question(chunk, pool, file_names, index + generation_number)
-            )
+            questions.append(self._single_question_for_source(chunk, pool, file_names, index + generation_number))
         for index in range(multiple_count):
             chunk = chosen[cursor]
             cursor += 1
-            questions.append(
-                self._multiple_question(chunk, pool, file_names, index + generation_number)
-            )
+            questions.append(self._multiple_question_for_source(chunk, pool, file_names, index + generation_number))
         for _ in range(short_count):
             chunk = chosen[cursor]
             cursor += 1
-            questions.append(self._short_question(chunk, file_names))
+            questions.append(self._short_question_for_source(chunk, file_names))
         return questions
+
+    def _single_question_for_source(
+        self,
+        source: ContentChunk | TrustedQuoteSource,
+        pool: list[ContentChunk | TrustedQuoteSource],
+        file_names: dict[str, str],
+        offset: int,
+    ) -> GeneratedQuestion:
+        if isinstance(source, TrustedQuoteSource):
+            correct = compact_text(source.content, 88)
+            distractors = [
+                compact_text(item.content, 88)
+                for item in pool
+                if isinstance(item, TrustedQuoteSource) and item.id != source.id
+            ][:3]
+            distractors.extend(["原文未提及的内容一", "原文未提及的内容二", "原文未提及的内容三"])
+            options = [
+                {"id": option_id, "text": text}
+                for option_id, text in zip(("A", "B", "C", "D"), [correct, *distractors[:3]], strict=True)
+            ]
+            return GeneratedQuestion(
+                question_type="single",
+                prompt=f'根据可信资料中的台词“{source.content}”，下列哪项表述直接有资料依据？',
+                options=options,
+                correct_answers=["A"],
+                explanation="正确选项来自已确认的可信台词资料，其余选项没有对应资料依据。",
+                knowledge_point="可信台词内容",
+                estimated_seconds=45,
+                reference_answer=None,
+                grading_rubric=[],
+                source_chunk_ids=[],
+                quote_entry_ids=[source.id],
+                source_segment_ids=list(source.source_segment_ids),
+                source_evidence=self._material_evidence(source),
+                max_score=6,
+            )
+        return self._single_question(source, [item for item in pool if isinstance(item, ContentChunk)], file_names, offset)
+
+    def _multiple_question_for_source(
+        self,
+        source: ContentChunk | TrustedQuoteSource,
+        pool: list[ContentChunk | TrustedQuoteSource],
+        file_names: dict[str, str],
+        offset: int,
+    ) -> GeneratedQuestion:
+        if isinstance(source, TrustedQuoteSource):
+            correct = compact_text(source.content, 88)
+            options = [
+                {"id": "A", "text": correct},
+                {"id": "B", "text": source.context or "资料记录了这句台词的上下文"},
+                {"id": "C", "text": "资料中没有这句台词"},
+                {"id": "D", "text": "该内容仅来自模型记忆"},
+            ]
+            return GeneratedQuestion(
+                question_type="multiple",
+                prompt=f'关于可信资料中的台词“{source.content}”，以下哪些表述有直接资料依据？',
+                options=options,
+                correct_answers=["A", "B"],
+                explanation="前两项可以从已确认的台词及其上下文中核验。",
+                knowledge_point="可信台词内容",
+                estimated_seconds=90,
+                reference_answer=None,
+                grading_rubric=[],
+                source_chunk_ids=[],
+                quote_entry_ids=[source.id],
+                source_segment_ids=list(source.source_segment_ids),
+                source_evidence=self._material_evidence(source),
+                max_score=10,
+            )
+        return self._multiple_question(source, [item for item in pool if isinstance(item, ContentChunk)], file_names, offset)
+
+    def _short_question_for_source(
+        self, source: ContentChunk | TrustedQuoteSource, file_names: dict[str, str]
+    ) -> GeneratedQuestion:
+        if isinstance(source, TrustedQuoteSource):
+            reference = source.context or source.content
+            return GeneratedQuestion(
+                question_type="short",
+                prompt=f'请结合可信台词“{source.content}”及其上下文，概括这段内容反映的情境或含义。',
+                options=[],
+                correct_answers=[],
+                explanation="评分只关注回答是否能被已确认的台词及上下文直接支持。",
+                knowledge_point="可信台词语境",
+                estimated_seconds=180,
+                reference_answer=reference,
+                grading_rubric=rubric_from_text(reference, 20),
+                source_chunk_ids=[],
+                quote_entry_ids=[source.id],
+                source_segment_ids=list(source.source_segment_ids),
+                source_evidence=self._material_evidence(source),
+                max_score=20,
+            )
+        return self._short_question(source, file_names)
 
     def _material_evidence(self, source: TrustedQuoteSource) -> list[dict[str, Any]]:
         return [
@@ -938,6 +1027,33 @@ class HttpQuizAiProvider:
                 for source in candidates
                 if isinstance(source, TrustedQuoteSource)
             ]
+        elif source_mode == "combined":
+            source_material = [
+                {
+                    "source_kind": "pdf",
+                    "source_chunk_id": chunk.id,
+                    "page_number": chunk.page_number,
+                    "content": compact_text(chunk.content, 1_800),
+                }
+                for chunk in candidates
+                if isinstance(chunk, ContentChunk)
+            ] + [
+                {
+                    "source_kind": "trusted_material",
+                    "quote_entry_id": source.id,
+                    "source_segment_ids": list(source.source_segment_ids),
+                    "quote": source.content,
+                    "speaker": source.speaker,
+                    "context": source.context,
+                    "season_number": source.season_number,
+                    "episode_number": source.episode_number,
+                    "start_ms": source.start_ms,
+                    "end_ms": source.end_ms,
+                    "page_number": source.page_number,
+                }
+                for source in candidates
+                if isinstance(source, TrustedQuoteSource)
+            ]
         else:
             source_material = [
                 {
@@ -960,6 +1076,8 @@ class HttpQuizAiProvider:
                     "material（必须基于用户上传并确认的可信台词资料）"
                     if source_mode == "material"
                     else "model_knowledge（仅使用模型对该资源的内化知识，不提供 PDF 原文依据）"
+                    if source_mode == "model_knowledge"
+                    else "combined（必须只依据提供的 PDF 原文和已确认可信台词资料）"
                 )
             ),
             "difficulty": difficulty,
@@ -1036,6 +1154,7 @@ class HttpQuizAiProvider:
         source_mode: str,
         book_title: str,
         resource_type: str,
+        generation_theme: str = "general",
         allowed_question_subtypes: list[str] | None = None,
     ) -> list[GeneratedQuestion]:
         raw_questions = payload.get("questions")
@@ -1070,10 +1189,14 @@ class HttpQuizAiProvider:
                 raise RuntimeError(f"真实模型第 {position} 道题缺少原文片段来源")
             if source_mode == "material" and not unique_quote_ids:
                 raise RuntimeError(f"真实模型第 {position} 道题缺少可信台词来源")
+            if source_mode == "combined" and not (unique_source_ids or unique_quote_ids):
+                raise RuntimeError(f"真实模型第 {position} 道题缺少可信来源")
             if source_mode != "pdf" and unique_source_ids:
-                raise RuntimeError(f"真实模型第 {position} 道题不应包含 PDF 原文片段来源")
+                if source_mode not in {"combined"}:
+                    raise RuntimeError(f"真实模型第 {position} 道题不应包含 PDF 原文片段来源")
             if source_mode != "material" and unique_quote_ids:
-                raise RuntimeError(f"真实模型第 {position} 道题不应包含可信台词来源")
+                if source_mode not in {"combined"}:
+                    raise RuntimeError(f"真实模型第 {position} 道题不应包含可信台词来源")
             if any(source_id not in chunks_by_id for source_id in unique_source_ids):
                 raise RuntimeError(f"真实模型第 {position} 道题引用了未提供的原文片段")
             if any(quote_id not in chunks_by_id for quote_id in unique_quote_ids):
@@ -1101,23 +1224,24 @@ class HttpQuizAiProvider:
                 or not all(isinstance(value, str) for value in raw_answer_signature)
             ):
                 raise RuntimeError(f"真实模型第 {position} 道题的答案事实格式不正确")
-            if source_mode == "material":
+            if source_mode in {"material", "combined"}:
                 allowed = set(allowed_question_subtypes or [])
-                if question_subtype not in allowed:
+                if source_mode == "material" and generation_theme != "general" and question_subtype not in allowed:
                     raise RuntimeError(f"真实模型第 {position} 道题超出所选考察角度")
                 quote_sources = [
                     chunks_by_id[quote_id]
                     for quote_id in unique_quote_ids
                     if isinstance(chunks_by_id[quote_id], TrustedQuoteSource)
                 ]
-                if not quote_sources:
+                if source_mode == "material" and not quote_sources:
                     raise RuntimeError(f"真实模型第 {position} 道题没有有效台词来源")
-                normalized_prompt = normalized_quote_text(prompt)
-                if not any(
-                    normalized_quote_text(source.content) in normalized_prompt
-                    for source in quote_sources
-                ):
-                    raise RuntimeError(f"真实模型第 {position} 道题没有逐字使用可信台词")
+                if quote_sources:
+                    normalized_prompt = normalized_quote_text(prompt)
+                    if not any(
+                        normalized_quote_text(source.content) in normalized_prompt
+                        for source in quote_sources
+                    ):
+                        raise RuntimeError(f"真实模型第 {position} 道题没有逐字使用可信台词")
             else:
                 quote_sources = []
                 if question_subtype != "general":
@@ -1199,12 +1323,12 @@ class HttpQuizAiProvider:
             evidence = (
                 [
                     self._source_evidence(chunks_by_id[source_id], file_names, focus_text)
-                    for source_id in (unique_source_ids or unique_quote_ids)
+                    for source_id in [*unique_source_ids, *unique_quote_ids]
                 ]
-                if source_mode in {"pdf", "material"}
+                if source_mode in {"pdf", "material", "combined"}
                 else []
             )
-            if source_mode in {"pdf", "material"}:
+            if source_mode in {"pdf", "material", "combined"}:
                 faithfulness = check_question_faithfulness(
                     explanation=explanation,
                     correct_answers_text=correct_option_text,
@@ -1212,7 +1336,9 @@ class HttpQuizAiProvider:
                     if isinstance(raw_answer_signature, list)
                     else [],
                     source_text=source_text_for_question(
-                        raw, chunks_by_id, unique_source_ids or unique_quote_ids
+                        raw,
+                        chunks_by_id,
+                        [*unique_source_ids, *unique_quote_ids],
                     ),
                 )
                 if not faithfulness.passed:
@@ -1393,7 +1519,13 @@ class HttpQuizAiProvider:
                 "每道题必须返回 question_subtype、quote_entry_ids，并将 source_chunk_ids 设为空数组。"
                 f"\n专题约束：{theme_requirements}"
                 if source_mode == "material"
-                else rendered_system_prompt
+                else (
+                    rendered_system_prompt
+                    + "\n\n系统来源边界：本次只能使用 SOURCE_MATERIAL 中提供的 PDF 原文和已确认可信台词资料。"
+                    "每道题至少引用一个真实 source_chunk_id 或 quote_entry_id；不得使用模型记忆补写场景、人物关系或台词。"
+                    if source_mode == "combined"
+                    else rendered_system_prompt
+                )
             )
         )
         messages = [
@@ -1427,6 +1559,7 @@ class HttpQuizAiProvider:
                 source_mode,
                 book_title,
                 resource_type,
+                generation_theme,
                 allowed_question_subtypes,
             )
         except RuntimeError as first_error:
@@ -1445,6 +1578,7 @@ class HttpQuizAiProvider:
                     source_mode,
                     book_title,
                     resource_type,
+                    generation_theme,
                     allowed_question_subtypes,
                 )
             except RuntimeError as repair_error:
@@ -1457,7 +1591,9 @@ class HttpQuizAiProvider:
             return GradeResult(0, False, "本题未作答。", [], points)
         rubric = json.dumps(question.grading_rubric, ensure_ascii=False)
         evidence = json.dumps(question.source_evidence, ensure_ascii=False)
-        source_mode = getattr(getattr(question, "quiz", None), "source_mode", "pdf")
+        source_mode = getattr(question, "source_mode", None) or getattr(
+            getattr(question, "quiz", None), "source_mode", "pdf"
+        )
         grading_values = {
             "source_mode": (
                 "pdf（基于已解析 PDF 原文）"
@@ -1465,7 +1601,11 @@ class HttpQuizAiProvider:
                 else (
                     "material（基于用户上传并确认的可信资料）"
                     if source_mode == "material"
-                    else "model_knowledge（无 PDF 原文依据）"
+                    else (
+                        "combined（基于已解析 PDF 原文和用户上传并确认的可信资料）"
+                        if source_mode == "combined"
+                        else "model_knowledge（无 PDF 原文依据）"
+                    )
                 )
             ),
             "question": question.prompt,

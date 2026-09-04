@@ -8,8 +8,10 @@ import pytest
 from openpyxl import Workbook
 
 from app.database import SessionLocal
-from app.models import ExamShare, ResourceMaterial
+from app.models import ContentChunk, ExamShare, PdfDocument, ResourceMaterial
+from app.schemas import QuizGenerateRequest
 from app.services.material_parser import parse_material_document, parse_material_file
+from app.services.quiz_generation import resolve_source_mode
 
 
 def create_resource(client, title: str = "潜伏") -> dict:
@@ -323,6 +325,49 @@ def test_qianfu_style_episode_page_csv_is_parsed(tmp_path):
         record for record in no_speaker_records if record.content == "爸爸……爸爸……"
     )
     assert no_speaker_dialogue.speaker_origin == "unknown"
+    assert no_speaker_dialogue.is_dialogue is True
+    assert next(
+        record for record in records if record.content == "1. 空镜山城重庆 日外"
+    ).is_dialogue is False
+    assert next(
+        record for record in records if record.content.startswith("甲（OS）")
+    ).is_dialogue is False
+
+
+def test_typed_quote_sheet_only_sends_dialogue_rows_to_review(client, monkeypatch):
+    book = create_resource(client, "潜伏分类校对测试")
+    payload = (
+        "集数,页码,类型,角色,内容\n"
+        "1,17,环境描写,,空镜山城重庆 日外\n"
+        "1,17,旁白,,抗战胜利在即，许多人面临新的抉择。\n"
+        "1,17,台词,林怀复,他们才造谣。\n"
+        "1,18,台词,余则成,张名义，出什么事了？\n"
+        "1,18,台词,,爸爸……爸爸……\n"
+    ).encode("utf-8")
+    material = upload_without_background_parse(
+        client,
+        monkeypatch,
+        book["id"],
+        name="typed-dialogues.csv",
+        content=payload,
+        material_type="quote_sheet",
+    )
+
+    parse_material_document(material["id"])
+
+    stored_material = client.get(f"/api/books/{book['id']}/materials").json()[0]
+    assert stored_material["parse_status"] == "needs_review"
+    assert stored_material["segment_count"] == 5
+    assert stored_material["quote_count"] == 3
+    quotes = client.get(f"/api/books/{book['id']}/quotes").json()
+    assert quotes["total"] == 3
+    assert quotes["pending_count"] == 1
+    assert quotes["confirmed_count"] == 2
+    assert {item["quote_text"] for item in quotes["items"]} == {
+        "他们才造谣。",
+        "张名义，出什么事了？",
+        "爸爸……爸爸……",
+    }
 
 
 def test_classic_quote_quiz_uses_material_and_preserves_snapshot(client, monkeypatch):
@@ -398,6 +443,95 @@ def test_classic_quote_quiz_uses_material_and_preserves_snapshot(client, monkeyp
         assert share.quiz_snapshot["generation_theme"] == "classic_quotes"
         assert share.quiz_snapshot["theme_config"]["material_ids"] == [material["id"]]
         assert all(question["quote_entry_ids"] for question in share.quiz_snapshot["questions"])
+
+
+def test_general_quiz_without_pdf_uses_confirmed_quotes_as_sources(client, monkeypatch):
+    book = create_resource(client, "潜伏综合台词来源")
+    payload = (
+        "台词,角色,集,上下文\n"
+        "会议现在开始,吴站长,1,站内会议\n"
+        "这件事要谨慎,余则成,2,秘密交谈\n"
+    ).encode("utf-8")
+    material = upload_without_background_parse(
+        client,
+        monkeypatch,
+        book["id"],
+        name="general-quotes.csv",
+        content=payload,
+        material_type="quote_sheet",
+    )
+    parse_material_document(material["id"])
+
+    generated = client.post(
+        f"/api/books/{book['id']}/quizzes",
+        json={"single_count": 1, "multiple_count": 0, "short_count": 0},
+    )
+    assert generated.status_code == 202
+    task = wait_for_generation(client, generated.json()["id"])
+    assert task["source_mode"] == "material"
+
+    quiz = client.get(f"/api/quizzes/{task['quiz_id']}")
+    assert quiz.status_code == 200
+    body = quiz.json()
+    assert body["source_mode"] == "material"
+    assert body["questions"][0]["quote_entry_ids"]
+    assert body["questions"][0]["source_evidence"][0]["material_id"] == material["id"]
+
+
+def test_general_source_mode_uses_combined_sources_when_pdf_and_quotes_exist(client, monkeypatch):
+    book = create_resource(client, "潜伏综合来源判定")
+    payload = "台词,角色,集,上下文\n会议现在开始,吴站长,1,站内会议\n".encode("utf-8")
+    material = upload_without_background_parse(
+        client,
+        monkeypatch,
+        book["id"],
+        name="combined-quotes.csv",
+        content=payload,
+        material_type="quote_sheet",
+    )
+    parse_material_document(material["id"])
+
+    with SessionLocal() as db:
+        pdf = PdfDocument(
+            book_id=book["id"],
+            file_name="source.pdf",
+            file_path="demo://source",
+            file_size=1,
+            page_count=1,
+            chunk_count=1,
+            parse_status="completed",
+        )
+        db.add(pdf)
+        db.flush()
+        db.add(
+            ContentChunk(
+                book_id=book["id"],
+                pdf_id=pdf.id,
+                page_number=1,
+                sequence=1,
+                content="余则成在站内接到新的任务。",
+                char_count=14,
+            )
+        )
+        db.commit()
+        assert resolve_source_mode(
+            db,
+            book["id"],
+            QuizGenerateRequest(single_count=1, multiple_count=0, short_count=0),
+        ) == "combined"
+
+    generated = client.post(
+        f"/api/books/{book['id']}/quizzes",
+        json={"single_count": 1, "multiple_count": 0, "short_count": 0},
+    )
+    assert generated.status_code == 202
+    task = wait_for_generation(client, generated.json()["id"])
+    assert task["source_mode"] == "combined"
+    quiz = client.get(f"/api/quizzes/{task['quiz_id']}")
+    assert quiz.status_code == 200
+    question = quiz.json()["questions"][0]
+    assert question["quote_entry_ids"] or question["source_evidence"]
+    assert question["source_evidence"]
 
 
 def test_topic_generation_validates_material_count_and_character(client, monkeypatch):

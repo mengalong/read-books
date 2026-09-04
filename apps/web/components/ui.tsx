@@ -63,6 +63,13 @@ export function BookCard({ book, href }: { book: BookSummary; href?: string }) {
 }
 
 export function SourceModeNotice({ sourceMode, compact = false }: { sourceMode: SourceMode; compact?: boolean }) {
+  if (sourceMode === "combined") return <div className={`source-mode-warning combined-source${compact ? " compact" : ""}`}>
+    <FileText size={17} />
+    <div>
+      <strong>本次综合使用 PDF 与可信台词</strong>
+      <span>题目只能依据已解析 PDF 原文和用户确认的台词资料生成，系统会保留实际引用来源用于校验。</span>
+    </div>
+  </div>;
   if (sourceMode === "material") return <div className={`source-mode-warning material-source${compact ? " compact" : ""}`}>
     <FileText size={17} />
     <div>
@@ -82,7 +89,7 @@ export function SourceModeNotice({ sourceMode, compact = false }: { sourceMode: 
 
 export function EvidenceList({ evidence, open = false, sourceMode = "pdf" }: { evidence: SourceEvidence[]; open?: boolean; sourceMode?: SourceMode }) {
   function evidenceLocation(item: SourceEvidence) {
-    if (sourceMode === "material") {
+    if (sourceMode === "material" || (sourceMode === "combined" && item.material_id)) {
       const parts = [
         item.speaker || null,
         item.season_number ? `第 ${item.season_number} 季` : null,
@@ -109,7 +116,7 @@ export function EvidenceList({ evidence, open = false, sourceMode = "pdf" }: { e
 
   return (
     <details className="evidence" open={open}>
-      <summary>{sourceMode === "material" ? "可信资料依据" : "原文依据"}（{evidence.length} 处，答题时默认折叠）</summary>
+      <summary>{sourceMode === "material" ? "可信资料依据" : sourceMode === "combined" ? "综合可信来源依据" : "原文依据"}（{evidence.length} 处，答题时默认折叠）</summary>
       <div className="evidence-body">
         {evidence.map((item) => (
           <div key={item.chunk_id} style={{ marginBottom: 14 }}>

@@ -7,11 +7,11 @@
 出题时的“捏造事实”问题主要来自两类原因：
 
 - 使用模型内化知识出题（`model_knowledge` 来源模式）时，模型可能记错细节或混淆版本。
-- 使用用户上传的可信资料出题（`material`/`pdf` 来源模式）时，召回逐条台词或原文片段时缺乏对整本书/整部剧上下文的理解，容易断章取义或答案缺乏依据。
+- 使用用户上传的可信资料出题（`material`/`pdf`/`combined` 来源模式）时，召回逐条台词或原文片段时缺乏对整本书/整部剧上下文的理解，容易断章取义或答案缺乏依据。
 
 本设计只解决第二类问题：**在忠实原文的前提下，让系统对已上传资料有更完整的理解，出题时既能精确引用原文，又能利用整体上下文避免断章取义**。
 
-核心原则不变：摘要、向量检索都只是"理解与召回"的辅助手段，绝不能成为可引用的事实来源。最终题目仍然只能引用 `MaterialSegment` / `QuoteEntry` / `ContentChunk` 的原文 ID，`_validate_questions` 的 ID 存在性校验和台词逐字匹配校验保持不变、不放松。
+核心原则不变：摘要、向量检索都只是"理解与召回"的辅助手段，绝不能成为可引用的事实来源。最终题目仍然只能引用 `MaterialSegment` / `QuoteEntry` / `ContentChunk` 的原文 ID，`_validate_questions` 的 ID 存在性校验和台词逐字匹配校验保持不变、不放松。综合内容模式在 PDF 与可信台词同时存在时使用 `combined`，两类来源进入同一候选池；只有两类资料都不存在时才允许真实模型使用 `model_knowledge` 兜底。
 
 ## 2. 技术选型（已确认，不再讨论新增知识图谱/ES）
 
@@ -78,7 +78,7 @@ PDF 场景（`parse_pdf_document`）同理，按页码窗口分组生成摘要�
 
 ### 4.4 规则版忠实性校验（已完成，`app/services/faithfulness_check.py`）
 
-`_validate_questions` 通过之后，对 `source_mode` 为 `pdf`/`material` 的题目新增一轮规则校验，作为已有 ID 存在性校验和台词逐字匹配校验之外的额外保护层（不替代、不放松原有校验）：
+`_validate_questions` 通过之后，对 `source_mode` 为 `pdf`/`material`/`combined` 的题目新增一轮规则校验，作为已有 ID 存在性校验和台词逐字匹配校验之外的额外保护层（不替代、不放松原有校验）：
 
 - `source_text_for_question` 拼接题目引用的每一个已验证来源（`ContentChunk.content` / `MaterialSegment.content` / `TrustedQuoteSource.content`）的正文，说话人题（`quote_speaker` 等子类型）额外拼接 `speaker`、`context` 元数据字段，因为说话人姓名和场景说明本身不在 `content` 正文里，只存在于这些元数据字段中，若不纳入会造成误判。
 - `check_question_faithfulness` 复用 `question_dedup.token_similarity`，计算 `explanation + correct_answers_text + answer_signature` 拼接文本与来源文本的 2/3 字 n-gram Jaccard 相似度，低于 `MIN_OVERLAP_RATIO`（当前 0.03）判定为不通过。
@@ -88,7 +88,7 @@ PDF 场景（`parse_pdf_document`）同理，按页码窗口分组生成摘要�
 
 ## 5. CSV 台词格式兼容说明
 
-用户提供的《潜伏》台词 CSV 采用“集数,页码,类型,角色,内容”表头，其中`类型`为`环境描写/旁白/台词`等，环境描写和旁白行没有角色。`material_parser.py` 已扩展 `FIELD_ALIASES` 支持 `内容`→`content`、`类型`→`row_type`、`页码`→`page`、`集数`→`episode` 别名。带`类型`列的台词表中，任何角色为空的行（不论 `row_type` 是环境描写、旁白，还是台词但确实没有明确说话人，例如画外音、群众对白）都会正常写入 `MaterialSegment`，保留 `speaker=None`、`speaker_origin="unknown"`，不会因为个别行缺角色而整份文件解析失败；只有 `content` 满足可引用长度阈值时才会同时生成 `QuoteEntry`（`review_status="pending"`），进入资料校对流程等待人工补充角色，与字幕/PDF 场景的“无角色台词待校对”策略一致。只有完全没有`类型`列的传统两列台词表（仅“台词,角色”）才要求每行角色必填，因为这种格式的每一行都被视为可直接出题的确定台词。已用完整版《潜伏》台词 CSV（14408 行，30 集，含 60 行无角色台词）验证解析、集数分组均正确，`tests/test_trusted_materials.py::test_qianfu_style_episode_page_csv_is_parsed` 覆盖该格式的回归测试。
+用户提供的《潜伏》台词 CSV 采用“集数,页码,类型,角色,内容”表头，其中`类型`为`环境描写/旁白/台词`等。`material_parser.py` 已扩展 `FIELD_ALIASES` 支持 `内容`→`content`、`类型`→`row_type`、`页码`→`page`、`集数`→`episode` 别名。所有有效行都会写入 `MaterialSegment`，因此环境描写和旁白仍可参与分集摘要和剧情背景理解；只有类型为`台词/对白`的行才会生成 `QuoteEntry`。台词有角色时自动确认，台词无角色时保留 `speaker=None`、`speaker_origin="unknown"` 并进入待校对，环境描写和旁白不会污染台词校对列表。只有完全没有`类型`列的传统两列台词表（仅“台词,角色”）才要求每行角色必填。相关行为由 `tests/test_trusted_materials.py::test_qianfu_style_episode_page_csv_is_parsed` 和 `test_typed_quote_sheet_only_sends_dialogue_rows_to_review` 覆盖。
 
 ## 6. 不做的事情
 

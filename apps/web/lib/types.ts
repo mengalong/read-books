@@ -234,7 +234,7 @@ export type PreGenerationResponse = {
 };
 
 export type QuestionType = "single" | "multiple" | "short";
-export type SourceMode = "pdf" | "material" | "model_knowledge";
+export type SourceMode = "pdf" | "material" | "combined" | "model_knowledge";
 export type GenerationTheme = "general" | "classic_quotes" | "character";
 export type QuestionSubtype =
   | "general"

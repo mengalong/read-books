@@ -149,14 +149,17 @@ export default function NewQuizPage() {
 
   const hasPdfSource = book.stats.completed_pdf_count > 0;
   const canUseModelKnowledge = Boolean(book.model_knowledge_supported === true || (book.resource_type === "book" && book.model_knowledge_supported !== false));
-  const generalReady = hasPdfSource || canUseModelKnowledge;
+  const hasTrustedQuotes = Boolean(book.stats.confirmed_quote_count);
+  const generalReady = hasPdfSource || hasTrustedQuotes || canUseModelKnowledge;
   const themedReady = selectedMaterialIds.length > 0
     && selectedSubtypes.length > 0
     && (theme !== "character" || selectedCharacters.length > 0)
     && availableQuotes.length >= totalQuestions
     && !(selectedSubtypes.length === 1 && selectedSubtypes[0] === "quote_speaker" && (counts.multiple_count > 0 || counts.short_count > 0));
   const canGenerate = totalQuestions > 0 && (theme === "general" ? generalReady : themedReady);
-  const sourceMode = theme === "general" ? (hasPdfSource ? "pdf" : "model_knowledge") : "material";
+  const sourceMode = theme === "general"
+    ? (hasPdfSource && hasTrustedQuotes ? "combined" : hasPdfSource ? "pdf" : hasTrustedQuotes ? "material" : "model_knowledge")
+    : "material";
 
   return (
     <div className="page-wrap">
@@ -165,7 +168,7 @@ export default function NewQuizPage() {
         <div><h1 className="page-title">生成一套复习测试</h1><p className="page-description">{resourceTypeLabel(book.resource_type)} · {book.title}</p></div>
       </header>
       {error && <div className="toast-error">{error}</div>}
-      {book.model_knowledge_message && theme === "general" && <div className={`shelf-status-banner${book.model_knowledge_supported === false ? " warning" : ""}`}><AlertCircle size={18} /><div><strong>{book.model_knowledge_supported === true ? "模型真实内容检查通过" : book.model_knowledge_supported === false ? "模型真实内容检查未通过" : "模型真实内容检查未执行"}</strong><span>{book.model_knowledge_message}</span></div></div>}
+      {book.model_knowledge_message && sourceMode === "model_knowledge" && <div className={`shelf-status-banner${book.model_knowledge_supported === false ? " warning" : ""}`}><AlertCircle size={18} /><div><strong>{book.model_knowledge_supported === true ? "模型真实内容检查通过" : book.model_knowledge_supported === false ? "模型真实内容检查未通过" : "模型真实内容检查未执行"}</strong><span>{book.model_knowledge_message}</span></div></div>}
       {(canGenerate || sourceMode === "material") && <SourceModeNotice sourceMode={sourceMode} />}
 
       {generationTask && <section className={`generation-progress ${generationTask.status}`}>
@@ -202,7 +205,15 @@ export default function NewQuizPage() {
         <aside className="quiz-settings-summary">
           <MessageSquareQuote size={18} />
           <strong>{totalQuestions} 道题</strong>
-          <p>{theme === "general" ? (hasPdfSource ? "基于已解析 PDF 原文生成，并保留页码依据。" : "基于模型知识生成，不提供逐句原文依据。") : `基于 ${availableQuotes.length} 条已确认台词生成，题目会保留可信资料定位。`}</p>
+          <p>{theme === "general"
+            ? sourceMode === "combined"
+              ? "综合已解析 PDF 原文和已确认台词，题目必须保留真实来源依据。"
+              : sourceMode === "pdf"
+                ? "基于已解析 PDF 原文生成，并保留页码依据。"
+                : sourceMode === "material"
+                  ? `基于 ${book.stats.confirmed_quote_count} 条已确认台词生成，题目会保留可信资料定位。`
+                  : "基于模型知识生成，不提供逐句原文依据。"
+            : `基于 ${availableQuotes.length} 条已确认台词生成，题目会保留可信资料定位。`}</p>
           <dl><div><dt>主题</dt><dd>{themes.find((item) => item.value === theme)?.label}</dd></div><div><dt>目标时长</dt><dd>{duration} 分钟</dd></div><div><dt>预计用时</dt><dd>{estimatedMinutes} 分钟</dd></div><div><dt>评分方式</dt><dd>自动评分</dd></div></dl>
         </aside>
       </div>

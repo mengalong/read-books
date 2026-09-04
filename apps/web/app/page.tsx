@@ -43,7 +43,7 @@ export default function BookshelfPage() {
   }
 
   const metrics = useMemo(() => {
-    const readyResources = books.filter((book) => book.stats.completed_pdf_count > 0 || book.model_knowledge_supported === true).length;
+    const readyResources = books.filter((book) => book.stats.completed_pdf_count > 0 || book.stats.confirmed_quote_count > 0 || book.model_knowledge_supported === true).length;
     const tested = books.filter((book) => book.stats.quiz_count > 0);
     const average = tested.length
       ? Math.round(tested.reduce((sum, book) => sum + (book.stats.average_score || 0), 0) / tested.length)
