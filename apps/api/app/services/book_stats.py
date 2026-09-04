@@ -69,7 +69,9 @@ def to_book_summary(db: Session, book: Book) -> BookSummary:
         select(QuizGenerationTask)
         .where(
             QuizGenerationTask.book_id == book.id,
-            QuizGenerationTask.status.in_(["pending", "processing"]),
+            QuizGenerationTask.status.in_(
+                ["pending", "processing", "awaiting_intervention"]
+            ),
         )
         .order_by(QuizGenerationTask.created_at.desc())
     )

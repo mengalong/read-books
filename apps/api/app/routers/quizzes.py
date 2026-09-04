@@ -12,6 +12,7 @@ from app.services.auth import AuthIdentity
 from app.models import (
     Book,
     ExamShare,
+    ModelUsageRecord,
     Question,
     Quiz,
     QuizGenerationTask,
@@ -23,6 +24,11 @@ from app.schemas import (
     QuestionResponse,
     QuizGenerateRequest,
     QuizGenerationTaskResponse,
+    QuizGenerationCallResponse,
+    QuizGenerationDebugResponse,
+    QuizGenerationInterventionRequest,
+    QuizGenerationTaskDebugResponse,
+    QuizQuestionGenerationTrace,
     QuizResponse,
     QuizSummary,
     ReviewTaskResponse,
@@ -35,7 +41,11 @@ from app.services.model_usage import new_usage_context
 from app.services.book_stats import to_quiz_summary
 from app.services.prompt_config import get_effective_prompt_templates
 from app.services.question_dedup import refresh_question_signature
-from app.services.quiz_generation import regenerate_quiz_question, start_generation_task
+from app.services.quiz_generation import (
+    apply_generation_intervention,
+    regenerate_quiz_question,
+    start_generation_task,
+)
 from app.services.quiz_provider import GradeResult, get_quiz_provider, key_sentence
 
 router = APIRouter(tags=["quizzes"])
@@ -187,6 +197,7 @@ def to_generation_response(task: QuizGenerationTask) -> QuizGenerationTaskRespon
         short_count=task.short_count,
         quiz_id=task.quiz_id,
         error_message=task.error_message,
+        question_states=list(task.question_states or []),
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
@@ -310,6 +321,90 @@ def get_generation_task(
     return to_generation_response(task)
 
 
+@router.post(
+    "/quiz-generation-tasks/{task_id}/questions/{position}/intervene",
+    response_model=QuizGenerationTaskResponse,
+)
+def intervene_generation_task(
+    task_id: str,
+    position: int,
+    payload: QuizGenerationInterventionRequest,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> QuizGenerationTaskResponse:
+    task = db.scalar(
+        select(QuizGenerationTask)
+        .join(QuizGenerationTask.book)
+        .where(
+            QuizGenerationTask.id == task_id,
+            Book.workspace_id == identity.workspace.id,
+        )
+    )
+    if task is None:
+        raise HTTPException(status_code=404, detail="未找到这次出题任务")
+    try:
+        updated = apply_generation_intervention(
+            db,
+            task.id,
+            position,
+            action=payload.action,
+            question_payload=payload.question,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return to_generation_response(updated)
+
+
+@router.get(
+    "/quiz-generation-tasks/{task_id}/debug",
+    response_model=QuizGenerationTaskDebugResponse,
+)
+def get_generation_task_debug(
+    task_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> QuizGenerationTaskDebugResponse:
+    task = db.scalar(
+        select(QuizGenerationTask)
+        .join(QuizGenerationTask.book)
+        .where(
+            QuizGenerationTask.id == task_id,
+            Book.workspace_id == identity.workspace.id,
+        )
+    )
+    if task is None:
+        raise HTTPException(status_code=404, detail="未找到这次出题任务")
+    records = list(
+        db.scalars(
+            select(ModelUsageRecord)
+            .where(ModelUsageRecord.task_id == task.id)
+            .order_by(ModelUsageRecord.created_at, ModelUsageRecord.call_number)
+        ).all()
+    )
+    return QuizGenerationTaskDebugResponse(
+        task_id=task.id,
+        calls=[
+            QuizGenerationCallResponse(
+                id=record.id,
+                question_position=record.question_position,
+                phase=record.phase,
+                call_number=record.call_number,
+                model_name=record.model_name,
+                request_messages=list(record.request_messages or []),
+                model_response=record.model_response,
+                input_tokens=record.input_tokens,
+                output_tokens=record.output_tokens,
+                total_tokens=record.total_tokens,
+                status=record.status,
+                error_message=record.error_message,
+                latency_ms=record.latency_ms,
+                created_at=record.created_at,
+            )
+            for record in records
+        ],
+    )
+
+
 @router.get("/quizzes/{quiz_id}", response_model=QuizResponse)
 def get_quiz(
     quiz_id: str,
@@ -317,6 +412,88 @@ def get_quiz(
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> QuizResponse:
     return to_quiz_response(get_quiz_or_404(db, quiz_id, identity))
+
+
+@router.get(
+    "/quizzes/{quiz_id}/generation-debug", response_model=QuizGenerationDebugResponse
+)
+def get_quiz_generation_debug(
+    quiz_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> QuizGenerationDebugResponse:
+    quiz = get_quiz_or_404(db, quiz_id, identity)
+    record_filter = [ModelUsageRecord.quiz_id == quiz.id]
+    if quiz.generation_task_id:
+        record_filter = [
+            or_(
+                ModelUsageRecord.quiz_id == quiz.id,
+                ModelUsageRecord.task_id == quiz.generation_task_id,
+            )
+        ]
+    records = list(
+        db.scalars(
+            select(ModelUsageRecord)
+            .where(*record_filter)
+            .order_by(ModelUsageRecord.question_position, ModelUsageRecord.created_at)
+        ).all()
+    )
+    calls_by_position: dict[int, list[ModelUsageRecord]] = {}
+    unassigned: list[ModelUsageRecord] = []
+    for record in records:
+        if record.question_position is None:
+            unassigned.append(record)
+        else:
+            calls_by_position.setdefault(record.question_position, []).append(record)
+
+    def call_response(record: ModelUsageRecord) -> QuizGenerationCallResponse:
+        return QuizGenerationCallResponse(
+            id=record.id,
+            question_position=record.question_position,
+            phase=record.phase,
+            call_number=record.call_number,
+            model_name=record.model_name,
+            request_messages=list(record.request_messages or []),
+            model_response=record.model_response,
+            input_tokens=record.input_tokens,
+            output_tokens=record.output_tokens,
+            total_tokens=record.total_tokens,
+            status=record.status,
+            error_message=record.error_message,
+            latency_ms=record.latency_ms,
+            created_at=record.created_at,
+        )
+
+    traces: list[QuizQuestionGenerationTrace] = []
+    for question in quiz.questions:
+        question_calls = [call_response(record) for record in calls_by_position.get(question.position, [])]
+        traces.append(
+            QuizQuestionGenerationTrace(
+                question_id=question.id,
+                position=question.position,
+                prompt=question.prompt,
+                calls=question_calls,
+                input_tokens=sum(call.input_tokens or 0 for call in question_calls),
+                output_tokens=sum(call.output_tokens or 0 for call in question_calls),
+                total_tokens=sum(call.total_tokens or 0 for call in question_calls),
+                unreported_calls=sum(call.total_tokens is None for call in question_calls),
+            )
+        )
+    task = db.get(QuizGenerationTask, quiz.generation_task_id) if quiz.generation_task_id else None
+    return QuizGenerationDebugResponse(
+        quiz_id=quiz.id,
+        book_id=quiz.book_id,
+        quiz_title=quiz.title,
+        generation_task_id=quiz.generation_task_id,
+        task_type=task.task_type if task else None,
+        task_status=task.status if task else None,
+        model_name=next((record.model_name for record in records if record.model_name), None),
+        questions=traces,
+        unassigned_calls=[call_response(record) for record in unassigned],
+        input_tokens=sum(record.input_tokens or 0 for record in records),
+        output_tokens=sum(record.output_tokens or 0 for record in records),
+        total_tokens=sum(record.total_tokens or 0 for record in records),
+    )
 
 
 @router.get("/quizzes/{quiz_id}/editable", response_model=QuizResponse)

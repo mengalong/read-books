@@ -10,9 +10,11 @@ from app.models import (
     Book,
     ContentChunk,
     ModelConfiguration,
+    ModelUsageRecord,
     PdfDocument,
     Question,
     Quiz,
+    QuizGenerationTask,
     QuoteEntry,
     ResourceMaterial,
     User,
@@ -155,6 +157,160 @@ def test_token_usage_report_groups_calls_by_task(client):
     ]
 
 
+def test_quiz_generation_debug_returns_calls_grouped_by_question(client):
+    book_id, _ = create_source_book(client, "出题过程调试测试书")
+    with SessionLocal() as db:
+        task = QuizGenerationTask(
+            book_id=book_id,
+            task_type="manual_quiz_generation",
+            status="completed",
+            total_questions=1,
+            completed_questions=1,
+            question_states=[
+                {
+                    "position": 1,
+                    "question_type": "single",
+                    "status": "ready",
+                    "attempts": 1,
+                    "question": {"prompt": "模型生成题目"},
+                }
+            ],
+        )
+        db.add(task)
+        db.flush()
+        quiz = Quiz(
+            book_id=book_id,
+            title="调试试卷",
+            status="ready",
+            source_mode="pdf",
+            max_score=100,
+            generation_task_id=task.id,
+        )
+        db.add(quiz)
+        db.flush()
+        db.add(
+            Question(
+                quiz_id=quiz.id,
+                position=1,
+                question_type="single",
+                prompt="模型生成题目",
+                explanation="模型解析",
+                knowledge_point="测试知识点",
+                estimated_seconds=45,
+                max_score=100,
+            )
+        )
+        db.add(
+            ModelUsageRecord(
+                task_id=task.id,
+                task_type="manual_quiz_generation",
+                task_label="生成调试试卷",
+                phase="quiz_generation",
+                call_number=1,
+                model_name="debug-model",
+                input_tokens=120,
+                output_tokens=30,
+                total_tokens=150,
+                status="success",
+                latency_ms=240,
+                book_id=book_id,
+                quiz_id=quiz.id,
+                question_position=1,
+                request_messages=[
+                    {"role": "system", "content": "系统提示"},
+                    {"role": "user", "content": "用户提示"},
+                ],
+                model_response='{"questions": []}',
+            )
+        )
+        db.commit()
+        quiz_id = quiz.id
+
+    response = client.get(f"/api/quizzes/{quiz_id}/generation-debug")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["quiz_id"] == quiz_id
+    assert body["total_tokens"] == 150
+    assert body["questions"][0]["total_tokens"] == 150
+    assert body["questions"][0]["calls"][0]["request_messages"][1]["content"] == "用户提示"
+    assert body["questions"][0]["calls"][0]["model_response"] == '{"questions": []}'
+    task_debug = client.get(f"/api/quiz-generation-tasks/{task.id}/debug")
+    assert task_debug.status_code == 200
+    assert task_debug.json()["calls"][0]["question_position"] == 1
+
+
+def test_generation_intervention_confirms_draft_and_resumes_task(client, monkeypatch):
+    book_id, _ = create_source_book(client, "人工介入测试书")
+    draft = {
+        "question_type": "single",
+        "prompt": "当前草稿题目",
+        "options": [
+            {"id": "A", "text": "正确选项"},
+            {"id": "B", "text": "错误选项"},
+        ],
+        "correct_answers": ["A"],
+        "explanation": "当前草稿解析",
+        "knowledge_point": "人工确认",
+        "estimated_seconds": 45,
+        "reference_answer": None,
+        "grading_rubric": [],
+        "source_chunk_ids": [],
+        "source_evidence": [],
+        "max_score": 100,
+    }
+    with SessionLocal() as db:
+        task = QuizGenerationTask(
+            book_id=book_id,
+            task_type="manual_quiz_generation",
+            status="awaiting_intervention",
+            source_mode="pdf",
+            total_questions=1,
+            completed_questions=0,
+            single_count=1,
+            current_question_position=1,
+            current_phase="第 1 道题需要人工处理",
+            error_message="题目与历史事实重复",
+            question_states=[
+                {
+                    "position": 1,
+                    "question_type": "single",
+                    "status": "awaiting_intervention",
+                    "attempts": 3,
+                    "error_message": "题目与历史事实重复",
+                    "question": draft,
+                }
+            ],
+        )
+        db.add(task)
+        db.commit()
+        task_id = task.id
+
+    started: list[tuple[str, ...]] = []
+
+    class FakeThread:
+        def __init__(self, *, target, args, daemon):
+            self.args = args
+
+        def start(self):
+            started.append(self.args)
+
+    monkeypatch.setattr("app.services.quiz_generation.threading.Thread", FakeThread)
+    response = client.post(
+        f"/api/quiz-generation-tasks/{task_id}/questions/1/intervene",
+        json={"action": "accept"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "pending"
+    assert body["completed_questions"] == 1
+    assert body["question_states"][0]["status"] == "confirmed"
+    assert started == [(task_id,)]
+
+    book = client.get(f"/api/books/{book_id}").json()
+    assert book["active_generation_task_id"] == task_id
+    assert book["active_generation_status"] == "pending"
+
+
 def test_health_and_book_crud(client):
     health = client.get("/api/health")
     assert health.status_code == 200
@@ -184,6 +340,11 @@ def test_unanswered_review_questions_score_zero(client):
     )
     assert generated.status_code == 202
     task = wait_for_generation(client, generated.json()["id"])
+    assert [state["status"] for state in task["question_states"]] == [
+        "ready",
+        "ready",
+        "ready",
+    ]
     review = client.post(f"/api/quizzes/{task['quiz_id']}/reviews")
     assert review.status_code == 200
 

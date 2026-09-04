@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, BarChart3, CalendarDays, Check, ChevronLeft, ChevronRight, CircleX, Copy, Download, Eye, LoaderCircle, Monitor, PencilLine, RefreshCw, RotateCcw, Search, ShieldAlert, Smartphone, Tablet, UserRound, X } from "lucide-react";
+import { ArrowLeft, BarChart3, CalendarDays, Check, ChevronLeft, ChevronRight, CircleX, Copy, Download, Eye, LoaderCircle, Monitor, PencilLine, RefreshCw, RotateCcw, Search, ShieldAlert, Smartphone, Tablet, TrendingUp, UserRound, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -20,6 +20,7 @@ const MIN_PARTICIPATION_YEAR = 2026;
 type AttemptPageSize = (typeof ATTEMPTS_PAGE_SIZES)[number];
 type AttemptStatusFilter = "" | ExamAttemptStatus;
 type AttemptSort = "latest" | "score_desc" | "score_asc";
+type ParticipationView = "calendar" | "trend";
 
 function isAttemptStatus(value: string): value is ExamAttemptStatus {
   return ["in_progress", "grading", "completed", "grading_failed"].includes(value);
@@ -354,6 +355,7 @@ function deviceIcon(deviceType: ExamDeviceType | null) {
 }
 
 function ExamAnalyticsPanel({ distribution, gradedCount, aboveThresholdCount, aboveThresholdRate, participationGranularity, participationYear, participationMonth, participationPeriods, onGranularityChange, onYearChange, onMonthChange }: { distribution: { label: string; min_score: number; max_score: number; count: number; percentage: number }[]; gradedCount: number; aboveThresholdCount: number; aboveThresholdRate: number | null; participationGranularity: ExamParticipationGranularity; participationYear: number; participationMonth: number; participationPeriods: ExamParticipationPeriod[]; onGranularityChange: (value: ExamParticipationGranularity) => void; onYearChange: (value: number) => void; onMonthChange: (value: number) => void }) {
+  const [participationView, setParticipationView] = useState<ParticipationView>("calendar");
   const participationTotals = participationPeriods.reduce(
     (totals, period) => ({
       participants: totals.participants + period.participant_count,
@@ -365,12 +367,13 @@ function ExamAnalyticsPanel({ distribution, gradedCount, aboveThresholdCount, ab
   return (
     <div className="exam-analytics-grid">
       <section className="content-panel exam-analytics-card participation-analytics-card">
-        <div className="section-title"><div><h2><CalendarDays size={17} />参与考试人数</h2><span>{participationGranularity === "month" ? `${participationYear} 年 ${participationMonth} 月` : `${participationYear} 年`}</span></div><div className="analytics-filters"><label>统计方式<select aria-label="参与人数统计方式" onChange={(event) => onGranularityChange(event.target.value as ExamParticipationGranularity)} value={participationGranularity}><option value="month">按月</option><option value="year">按年</option></select></label><label>年份<select aria-label="参与人数统计年份" onChange={(event) => onYearChange(Number(event.target.value))} value={participationYear}>{participationYearOptions(participationYear).map((year) => <option key={year} value={year}>{year}</option>)}</select></label>{participationGranularity === "month" && <label>月份<select aria-label="参与人数统计月份" onChange={(event) => onMonthChange(Number(event.target.value))} value={participationMonth}>{Array.from({ length: 12 }, (_, index) => index + 1).map((month) => <option key={month} value={month}>{month} 月</option>)}</select></label>}</div></div>
-        <div className={`participation-calendar participation-calendar-${participationGranularity}`} aria-label={`${participationYear} 年${participationGranularity === "month" ? ` ${participationMonth} 月` : ""}参与考试统计`}>
+        <div className="section-title"><div><h2><CalendarDays size={17} />参与考试人数</h2><span>{participationGranularity === "month" ? `${participationYear} 年 ${participationMonth} 月` : `${participationYear} 年`}</span></div><div className="analytics-filters"><div className="participation-view-switch" aria-label="参与统计视图" role="group"><button aria-pressed={participationView === "calendar"} className={participationView === "calendar" ? "is-active" : ""} onClick={() => setParticipationView("calendar")} type="button"><CalendarDays size={13} />日历</button><button aria-pressed={participationView === "trend"} className={participationView === "trend" ? "is-active" : ""} onClick={() => setParticipationView("trend")} type="button"><TrendingUp size={13} />折线图</button></div><label>统计方式<select aria-label="参与人数统计方式" onChange={(event) => onGranularityChange(event.target.value as ExamParticipationGranularity)} value={participationGranularity}><option value="month">按月</option><option value="year">按年</option></select></label><label>年份<select aria-label="参与人数统计年份" onChange={(event) => onYearChange(Number(event.target.value))} value={participationYear}>{participationYearOptions(participationYear).map((year) => <option key={year} value={year}>{year}</option>)}</select></label>{participationGranularity === "month" && <label>月份<select aria-label="参与人数统计月份" onChange={(event) => onMonthChange(Number(event.target.value))} value={participationMonth}>{Array.from({ length: 12 }, (_, index) => index + 1).map((month) => <option key={month} value={month}>{month} 月</option>)}</select></label>}</div></div>
+        {participationView === "calendar" && <div className={`participation-calendar participation-calendar-${participationGranularity}`} aria-label={`${participationYear} 年${participationGranularity === "month" ? ` ${participationMonth} 月` : ""}参与考试统计`}>
           {participationGranularity === "month" && <div className="participation-calendar-weekdays">{["一", "二", "三", "四", "五", "六", "日"].map((weekday) => <span key={weekday}>{weekday}</span>)}</div>}
           <div className="participation-calendar-grid">{calendarCells.map((cell, index) => cell ? <div className="participation-calendar-cell" key={cell.period.period_key}><strong>{cell.label}</strong><div className="participation-stat participation-stat-participants"><span>参与</span><strong>{cell.period.participant_count}</strong></div><div className="participation-stat participation-stat-completed"><span>完成</span><strong>{cell.period.completed_count}</strong></div></div> : <div className="participation-calendar-cell is-empty" key={`empty-${index}`} aria-hidden="true" />)}</div>
-        </div>
+        </div>}
         <div className="participation-calendar-total"><span>合计参与 {participationTotals.participants} 人次</span><span>完成 {participationTotals.completed} 人次</span></div>
+        {participationView === "trend" && <ParticipationLineChart periods={participationPeriods} granularity={participationGranularity} />}
       </section>
       <section className="content-panel exam-analytics-card score-analytics-card">
         <div className="section-title"><div><h2><BarChart3 size={17} />成绩分布</h2><span>按得分区间统计已完成评分的答卷</span></div></div>
@@ -406,6 +409,49 @@ function buildParticipationCalendar(granularity: ExamParticipationGranularity, y
   }
   while (cells.length % 7 !== 0) cells.push(null);
   return cells;
+}
+
+function ParticipationLineChart({ periods, granularity }: { periods: ExamParticipationPeriod[]; granularity: ExamParticipationGranularity }) {
+  const width = 720;
+  const height = 252;
+  const padding = { top: 24, right: 18, bottom: 34, left: 38 };
+  const innerWidth = width - padding.left - padding.right;
+  const innerHeight = height - padding.top - padding.bottom;
+  const maxValue = Math.max(1, ...periods.flatMap((period) => [period.participant_count, period.completed_count]));
+  const points = periods.map((period, index) => {
+    const x = periods.length <= 1 ? padding.left + innerWidth / 2 : padding.left + index / (periods.length - 1) * innerWidth;
+    const participantY = padding.top + innerHeight - period.participant_count / maxValue * innerHeight;
+    const completedY = padding.top + innerHeight - period.completed_count / maxValue * innerHeight;
+    return { period, x, participantY, completedY, label: chartPointLabel(period, index, periods.length, granularity) };
+  });
+  const chartLabels = periods.length > 12
+    ? points.filter((_, index) => index === 0 || index === points.length - 1 || index % 5 === 0)
+    : points;
+  const gridValues = [maxValue, Math.ceil(maxValue / 2), 0].filter((value, index, values) => values.indexOf(value) === index);
+  return (
+    <div className="participation-trend">
+      <div className="participation-trend-heading"><h3><TrendingUp size={15} />参与趋势</h3><div className="participation-trend-legend"><span><i className="participation-legend-dot participants" />参与人数</span><span><i className="participation-legend-dot completed" />完成人数</span></div></div>
+      <div className="participation-trend-chart-wrap">
+        <svg className="participation-line-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="参与人数和完成人数趋势图">
+          <title>参与人数和完成人数趋势图</title>
+          {gridValues.map((value) => {
+            const y = padding.top + innerHeight - value / maxValue * innerHeight;
+            return <g key={value}><line className="participation-chart-grid" x1={padding.left} x2={width - padding.right} y1={y} y2={y} /><text className="participation-chart-axis-label" x={padding.left - 8} y={y + 3} textAnchor="end">{value}</text></g>;
+          })}
+          {chartLabels.map((point) => <text className="participation-chart-x-label" key={point.period.period_key} x={point.x} y={height - 10} textAnchor="middle">{point.label}</text>)}
+          <polyline className="participation-chart-line participants" fill="none" points={points.map((point) => `${point.x},${point.participantY}`).join(" ")} />
+          <polyline className="participation-chart-line completed" fill="none" points={points.map((point) => `${point.x},${point.completedY}`).join(" ")} />
+          {points.map((point) => <g key={`${point.period.period_key}-points`}><circle className="participation-chart-point participants" cx={point.x} cy={point.participantY} r="2.7"><title>{`${point.period.period_label}：参与 ${point.period.participant_count}`}</title></circle><circle className="participation-chart-point completed" cx={point.x} cy={point.completedY} r="2.7"><title>{`${point.period.period_label}：完成 ${point.period.completed_count}`}</title></circle></g>)}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function chartPointLabel(period: ExamParticipationPeriod, index: number, length: number, granularity: ExamParticipationGranularity) {
+  if (granularity === "year") return period.period_label.slice(-2).replace(/^0/, "") + "月";
+  if (index === 0 || index === length - 1) return period.period_label.slice(-2).replace(/^0/, "") + "日";
+  return period.period_label.slice(-2).replace(/^0/, "");
 }
 
 function AttemptQuestion({ question, answer, index, sourceMode }: { question: ExamQuestion; answer: ExamAttempt["answers"][number] | undefined; index: number; sourceMode: ExamAttempt["source_mode"] }) {

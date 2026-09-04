@@ -267,7 +267,7 @@ class QuizGenerationTaskResponse(BaseModel):
     id: str
     book_id: str
     task_type: str
-    status: Literal["pending", "processing", "completed", "failed"]
+    status: Literal["pending", "processing", "completed", "failed", "awaiting_intervention"]
     source_mode: SourceMode
     generation_theme: GenerationTheme = "general"
     theme_config: dict[str, Any] = Field(default_factory=dict)
@@ -282,8 +282,77 @@ class QuizGenerationTaskResponse(BaseModel):
     short_count: int
     quiz_id: str | None
     error_message: str | None
+    question_states: list["QuizGenerationQuestionState"] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+
+class QuizGenerationQuestionState(BaseModel):
+    position: int
+    question_type: Literal["single", "multiple", "short"]
+    status: Literal["pending", "generating", "ready", "awaiting_intervention", "confirmed"]
+    attempts: int = 0
+    error_message: str | None = None
+    question: dict[str, Any] | None = None
+    updated_at: datetime | None = None
+
+
+class QuizGenerationInterventionRequest(BaseModel):
+    action: Literal["retry", "accept", "replace", "edit"]
+    question: dict[str, Any] | None = None
+
+
+class GenerationPromptMessage(BaseModel):
+    role: str
+    content: str
+
+
+class QuizGenerationCallResponse(ApiModel):
+    id: str
+    question_position: int | None = None
+    phase: str
+    call_number: int
+    model_name: str
+    request_messages: list[GenerationPromptMessage] = Field(default_factory=list)
+    model_response: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    status: Literal["success", "failed"]
+    error_message: str | None = None
+    latency_ms: int
+    created_at: datetime
+
+
+class QuizQuestionGenerationTrace(BaseModel):
+    question_id: str
+    position: int
+    prompt: str
+    calls: list[QuizGenerationCallResponse] = Field(default_factory=list)
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    unreported_calls: int = 0
+
+
+class QuizGenerationDebugResponse(BaseModel):
+    quiz_id: str
+    book_id: str
+    quiz_title: str
+    generation_task_id: str | None = None
+    task_type: str | None = None
+    task_status: str | None = None
+    model_name: str | None = None
+    questions: list[QuizQuestionGenerationTrace] = Field(default_factory=list)
+    unassigned_calls: list[QuizGenerationCallResponse] = Field(default_factory=list)
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+
+
+class QuizGenerationTaskDebugResponse(BaseModel):
+    task_id: str
+    calls: list[QuizGenerationCallResponse] = Field(default_factory=list)
 
 
 class QuestionResponse(ApiModel):

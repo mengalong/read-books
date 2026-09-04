@@ -521,6 +521,7 @@ class QuizGenerationTask(TimestampMixin, Base):
     page_end: Mapped[int | None] = mapped_column(Integer)
     quiz_id: Mapped[str | None] = mapped_column(String(36), index=True)
     error_message: Mapped[str | None] = mapped_column(Text)
+    question_states: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
 
     book: Mapped[Book] = relationship(back_populates="generation_tasks")
     created_by_user: Mapped[User | None] = relationship(
@@ -842,6 +843,9 @@ class ModelUsageRecord(Base):
     quiz_id: Mapped[str | None] = mapped_column(String(36), index=True)
     exam_share_id: Mapped[str | None] = mapped_column(String(36), index=True)
     exam_attempt_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    question_position: Mapped[int | None] = mapped_column(Integer, index=True)
+    request_messages: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    model_response: Mapped[str | None] = mapped_column(Text)
     workspace_id: Mapped[str | None] = mapped_column(
         ForeignKey("workspaces.id", ondelete="SET NULL"), index=True
     )

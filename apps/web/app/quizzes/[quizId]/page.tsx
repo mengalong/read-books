@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, CheckCircle2, Clock3, FileQuestion, Play } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Clock3, Code2, FileQuestion, Play } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -68,7 +68,7 @@ export default function QuizOverviewPage() {
       <SourceModeNotice sourceMode={quiz.source_mode} />
       <header className="page-header">
         <div><div className="eyebrow">Review paper</div><h1 className="page-title">{quiz.title}</h1><p className="page-description">先查看这套试卷的概览，确认后再开始答题。只有点击开始按钮后才会创建复习记录。</p></div>
-        <button className="button button-primary" disabled={starting} onClick={() => void handleStart()} type="button"><Play size={15} />{starting ? "正在进入……" : "开始答题"}</button>
+        <div className="quiz-overview-actions"><Link className="button button-secondary" href={`/quizzes/${quiz.id}/generation-debug`}><Code2 size={15} />查看出题过程</Link><button className="button button-primary" disabled={starting} onClick={() => void handleStart()} type="button"><Play size={15} />{starting ? "正在进入……" : "开始答题"}</button></div>
       </header>
 
       <div className="quiz-choice-layout">

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import random
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from time import perf_counter
 from typing import Any, Callable, Protocol
 
@@ -86,6 +86,8 @@ class GradeResult:
 
 
 class QuizAiProvider(Protocol):
+    def set_question_position(self, question_position: int | None) -> None: ...
+
     def verify_resource_content(
         self,
         resource_type: str,
@@ -195,6 +197,9 @@ def rubric_from_text(text: str, max_score: float) -> list[dict[str, Any]]:
 
 
 class MockQuizAiProvider:
+    def set_question_position(self, question_position: int | None) -> None:
+        return None
+
     def verify_resource_content(
         self,
         resource_type: str,
@@ -723,6 +728,18 @@ def extract_message_text(message: Any) -> str | None:
     return None
 
 
+def extract_response_text(body: Any) -> str | None:
+    if not isinstance(body, dict):
+        return None
+    choices = body.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return None
+    first_choice = choices[0]
+    if not isinstance(first_choice, dict):
+        return None
+    return extract_message_text(first_choice.get("message"))
+
+
 class HttpQuizAiProvider:
     TYPE_SETTINGS = {
         "single": {"estimated_seconds": 45, "max_score": 6.0},
@@ -811,6 +828,12 @@ class HttpQuizAiProvider:
         normalized = base_url.rstrip("/")
         return normalized if normalized.endswith("/chat/completions") else f"{normalized}/chat/completions"
 
+    def set_question_position(self, question_position: int | None) -> None:
+        if self.usage_context is not None:
+            self.usage_context = replace(
+                self.usage_context, question_position=question_position
+            )
+
     def _record_usage(
         self,
         phase: str,
@@ -819,6 +842,7 @@ class HttpQuizAiProvider:
         status: str,
         body: Any = None,
         error_message: str | None = None,
+        request_messages: list[dict[str, str]] | None = None,
     ) -> None:
         if self.usage_context is None:
             return
@@ -834,6 +858,9 @@ class HttpQuizAiProvider:
             status=status,
             error_message=error_message[:500] if error_message else None,
             latency_ms=round((perf_counter() - started_at) * 1_000),
+            question_position=self.usage_context.question_position,
+            request_messages=list(request_messages or []),
+            model_response=extract_response_text(body),
         )
         try:
             self.usage_recorder(event)
@@ -870,18 +897,27 @@ class HttpQuizAiProvider:
             message = (
                 f"真实模型接口读取超时：模型在 {timeout_seconds} 秒内未完成响应，请在模型设置中提高请求超时。"
             )
-            self._record_usage(phase, call_number, started_at, "failed", error_message=message)
+            self._record_usage(
+                phase, call_number, started_at, "failed", error_message=message,
+                request_messages=messages,
+            )
             raise RuntimeError(message) from exc
         except httpx.TimeoutException as exc:
             timeout_seconds = round(self.configuration.timeout_ms / 1_000)
             message = (
                 f"真实模型接口请求超时：当前超时为 {timeout_seconds} 秒，请在模型设置中提高请求超时。"
             )
-            self._record_usage(phase, call_number, started_at, "failed", error_message=message)
+            self._record_usage(
+                phase, call_number, started_at, "failed", error_message=message,
+                request_messages=messages,
+            )
             raise RuntimeError(message) from exc
         except httpx.RequestError as exc:
             message = f"真实模型接口连接失败：{exc}"
-            self._record_usage(phase, call_number, started_at, "failed", error_message=message)
+            self._record_usage(
+                phase, call_number, started_at, "failed", error_message=message,
+                request_messages=messages,
+            )
             raise RuntimeError(message) from exc
 
         if not response.is_success:
@@ -899,7 +935,13 @@ class HttpQuizAiProvider:
             detail = detail[:300] or f"HTTP {response.status_code}"
             error_message = f"真实模型接口返回 {response.status_code}：{detail}"
             self._record_usage(
-                phase, call_number, started_at, "failed", body, error_message
+                phase,
+                call_number,
+                started_at,
+                "failed",
+                body,
+                error_message,
+                request_messages=messages,
             )
             raise RuntimeError(error_message)
 
@@ -908,7 +950,12 @@ class HttpQuizAiProvider:
         except ValueError as exc:
             error_message = "真实模型接口未返回有效 JSON"
             self._record_usage(
-                phase, call_number, started_at, "failed", error_message=error_message
+                phase,
+                call_number,
+                started_at,
+                "failed",
+                error_message=error_message,
+                request_messages=messages,
             )
             raise RuntimeError(error_message) from exc
         choices = body.get("choices") if isinstance(body, dict) else None
@@ -927,10 +974,23 @@ class HttpQuizAiProvider:
             else:
                 error_message = "真实模型响应中没有可用的文本内容"
             self._record_usage(
-                phase, call_number, started_at, "failed", body, error_message
+                phase,
+                call_number,
+                started_at,
+                "failed",
+                body,
+                error_message,
+                request_messages=messages,
             )
             raise RuntimeError(error_message)
-        self._record_usage(phase, call_number, started_at, "success", body)
+        self._record_usage(
+            phase,
+            call_number,
+            started_at,
+            "success",
+            body,
+            request_messages=messages,
+        )
         return content
 
     def _candidate_chunks(

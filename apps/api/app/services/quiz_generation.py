@@ -3,6 +3,8 @@ from __future__ import annotations
 import copy
 import re
 import threading
+from dataclasses import asdict
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Iterable
 
@@ -44,6 +46,10 @@ from app.services.score_allocation import (
     allocate_question_scores,
     normalize_rubric_scores,
 )
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 settings = get_settings()
 
@@ -227,6 +233,7 @@ def create_generation_task(
         page_start=payload.page_start,
         page_end=payload.page_end,
     )
+    task.question_states = _initial_question_states(task)
     db.add(task)
     db.commit()
     db.refresh(task)
@@ -249,6 +256,90 @@ def start_generation_task(
         created_by_user_id=created_by_user_id,
     )
     threading.Thread(target=run_generation_task, args=(task.id,), daemon=True).start()
+    return task
+
+
+def resume_generation_task(db: Session, task_id: str) -> QuizGenerationTask:
+    task = db.get(QuizGenerationTask, task_id)
+    if task is None:
+        raise ValueError("未找到这次出题任务")
+    if task.status not in {"awaiting_intervention", "failed"}:
+        raise ValueError("当前出题任务不需要人工恢复")
+    task.status = "pending"
+    task.error_message = None
+    task.current_phase = "等待继续出题"
+    db.commit()
+    threading.Thread(target=run_generation_task, args=(task.id,), daemon=True).start()
+    db.refresh(task)
+    return task
+
+
+def apply_generation_intervention(
+    db: Session,
+    task_id: str,
+    position: int,
+    *,
+    action: str,
+    question_payload: dict[str, Any] | None = None,
+) -> QuizGenerationTask:
+    task = db.get(QuizGenerationTask, task_id)
+    if task is None:
+        raise ValueError("未找到这次出题任务")
+    if task.status not in {"awaiting_intervention", "failed"}:
+        raise ValueError("当前出题任务不需要人工介入")
+    states = copy.deepcopy(task.question_states or _initial_question_states(task))
+    if position < 1 or position > len(states):
+        raise ValueError("未找到需要处理的题目")
+    state = states[position - 1]
+    if action == "accept":
+        if not isinstance(state.get("question"), dict):
+            raise ValueError("当前题目没有可确认的草稿，请先人工编辑或重新出题")
+        state["status"] = "confirmed"
+    elif action in {"retry", "replace"}:
+        state["status"] = "pending"
+        state["error_message"] = None
+        if action == "replace" and isinstance(state.get("question"), dict):
+            state.setdefault("rejected_questions", []).append(state["question"])
+            state["question"] = None
+    elif action == "edit":
+        if not question_payload:
+            raise ValueError("人工调整需要提供题目内容")
+        current = dict(state.get("question") or {})
+        current.update(question_payload)
+        current["question_type"] = state.get("question_type")
+        if not str(current.get("prompt") or "").strip():
+            raise ValueError("题干不能为空")
+        current.setdefault("options", [])
+        current.setdefault("correct_answers", [])
+        current.setdefault("explanation", "")
+        current.setdefault("knowledge_point", "人工调整")
+        current.setdefault("estimated_seconds", 45)
+        current.setdefault("reference_answer", None)
+        current.setdefault("grading_rubric", [])
+        current.setdefault("source_chunk_ids", [])
+        current.setdefault("source_evidence", [])
+        current.setdefault("quote_entry_ids", [])
+        current.setdefault("source_segment_ids", [])
+        current.setdefault("fact_key", "")
+        current.setdefault("fact_claim", current["prompt"])
+        current.setdefault("semantic_signature", {})
+        current.setdefault("max_score", 0)
+        state["question"] = current
+        state["status"] = "confirmed"
+    else:
+        raise ValueError("不支持的人工介入动作")
+    state["error_message"] = None
+    state["updated_at"] = utc_now().isoformat()
+    task.question_states = states
+    task.completed_questions = sum(
+        _finalized_state_status(current.get("status")) for current in states
+    )
+    task.status = "pending"
+    task.error_message = None
+    task.current_phase = f"等待继续处理第 {position} 道题"
+    db.commit()
+    threading.Thread(target=run_generation_task, args=(task.id,), daemon=True).start()
+    db.refresh(task)
     return task
 
 
@@ -702,6 +793,7 @@ def regenerate_quiz_question(
             quiz_id=quiz.id,
             user_id=user_id,
             workspace_id=quiz.book.workspace_id,
+            question_position=question.position,
         ),
     )
     question_exclusions = [
@@ -874,6 +966,7 @@ def regenerate_snapshot_question(
             user_id=user_id,
             workspace_id=workspace_id,
             exam_share_id=exam_share_id,
+            question_position=current.position,
         ),
     )
     question_exclusions = [
@@ -963,6 +1056,53 @@ def _question_types(task: QuizGenerationTask) -> Iterable[str]:
         yield from (question_type for _ in range(count))
 
 
+def _initial_question_states(task: QuizGenerationTask) -> list[dict[str, Any]]:
+    return [
+        {
+            "position": position,
+            "question_type": question_type,
+            "status": "pending",
+            "attempts": 0,
+            "error_message": None,
+            "question": None,
+            "updated_at": utc_now().isoformat(),
+        }
+        for position, question_type in enumerate(_question_types(task), start=1)
+    ]
+
+
+def _generated_question_from_state(value: dict[str, Any]) -> GeneratedQuestion:
+    fields = {
+        "question_type": str(value.get("question_type") or "single"),
+        "prompt": str(value.get("prompt") or ""),
+        "options": list(value.get("options") or []),
+        "correct_answers": list(value.get("correct_answers") or []),
+        "explanation": str(value.get("explanation") or ""),
+        "knowledge_point": str(value.get("knowledge_point") or ""),
+        "estimated_seconds": int(value.get("estimated_seconds") or 0),
+        "reference_answer": value.get("reference_answer"),
+        "grading_rubric": list(value.get("grading_rubric") or []),
+        "source_chunk_ids": list(value.get("source_chunk_ids") or []),
+        "source_evidence": list(value.get("source_evidence") or []),
+        "max_score": float(value.get("max_score") or 0),
+        "question_subtype": str(value.get("question_subtype") or "general"),
+        "quote_entry_ids": list(value.get("quote_entry_ids") or []),
+        "source_segment_ids": list(value.get("source_segment_ids") or []),
+        "fact_key": str(value.get("fact_key") or ""),
+        "fact_claim": str(value.get("fact_claim") or ""),
+        "semantic_signature": dict(value.get("semantic_signature") or {}),
+    }
+    return GeneratedQuestion(**fields)
+
+
+def _state_question_payload(question: GeneratedQuestion) -> dict[str, Any]:
+    return asdict(question)
+
+
+def _finalized_state_status(value: str | None) -> bool:
+    return value in {"ready", "confirmed"}
+
+
 def _set_task_failure(db: Session, task_id: str, error: Exception) -> None:
     db.rollback()
     task = db.get(QuizGenerationTask, task_id)
@@ -1043,6 +1183,7 @@ def run_generation_task(task_id: str) -> None:
                 book_id=book.id,
                 user_id=task.created_by_user_id,
                 workspace_id=book.workspace_id,
+                task_id=task.id,
             )
             provider = get_quiz_provider(
                 settings,
@@ -1050,56 +1191,100 @@ def run_generation_task(task_id: str) -> None:
                 get_effective_prompt_templates(db),
                 usage_context,
             )
+            question_states = copy.deepcopy(
+                task.question_states or _initial_question_states(task)
+            )
+            if len(question_states) != task.total_questions:
+                question_states = _initial_question_states(task)
+            task.question_states = question_states
+            db.commit()
             historical_questions = _historical_questions(db, task.book_id)
             historical_exclusions = _historical_question_exclusions(historical_questions)
             background_context = _background_context_for_chunks(db, task.book_id, chunks)
-            generated: list[GeneratedQuestion] = []
-            rejected_candidates: list[GeneratedQuestion] = []
+            generated = [
+                _generated_question_from_state(state["question"])
+                for state in question_states
+                if _finalized_state_status(state.get("status")) and state.get("question")
+            ]
+            rejected_candidates = [
+                _generated_question_from_state(rejected)
+                for state in question_states
+                for rejected in state.get("rejected_questions", [])
+                if isinstance(rejected, dict)
+            ]
             for position, question_type in enumerate(_question_types(task), start=1):
+                state = question_states[position - 1]
+                if _finalized_state_status(state.get("status")) and state.get("question"):
+                    continue
                 task.current_question_position = position
                 task.current_phase = f"正在生成第 {position} / {task.total_questions} 道{question_type_label(question_type)}"
+                state["status"] = "generating"
+                state["error_message"] = None
+                state["updated_at"] = utc_now().isoformat()
+                task.question_states = copy.deepcopy(question_states)
                 db.commit()
                 item: GeneratedQuestion | None = None
+                last_candidate: GeneratedQuestion | None = None
                 for attempt in range(3):
-                    result = provider.generate_questions(
-                        chunks=chunks,
-                        file_names=file_names,
-                        single_count=1 if question_type == "single" else 0,
-                        multiple_count=1 if question_type == "multiple" else 0,
-                        short_count=1 if question_type == "short" else 0,
-                        difficulty=task.difficulty,
-                        generation_number=generation_number + position - 1 + attempt,
-                        recent_chunk_ids=recent_chunk_ids,
-                        duration_minutes=task.duration_minutes,
-                        book_title=book.title,
-                        author=book.author,
-                        resource_type=book.resource_type,
-                        source_mode=task.source_mode,
-                        question_exclusions=[
-                            *historical_exclusions,
-                            *(_question_exclusion_payload(item) for item in generated),
-                            *(
-                                _generated_question_exclusion_payload(item)
-                                for item in rejected_candidates
-                            ),
-                        ],
-                        regeneration_guidance=(
-                            f"本次是第 {position} 道题，必须考察一个尚未出现的独立事实。"
-                            "仅更换题干措辞、题型或选项顺序不算新事实。"
-                            + (f"这是第 {attempt + 1} 次尝试，请避开已列出的事实。" if attempt else "")
-                        ),
-                        generation_theme=task.generation_theme,
-                        theme_requirements=_theme_requirements(
-                            task.generation_theme, theme_config
-                        ),
-                        allowed_question_subtypes=list(
-                            theme_config.get("question_subtypes", [])
-                        ),
-                        background_context=background_context,
+                    provider.set_question_position(position)
+                    state["attempts"] = int(state.get("attempts") or 0) + 1
+                    task.question_states = copy.deepcopy(question_states)
+                    task.current_phase = (
+                        f"正在调用模型生成第 {position} / {task.total_questions} 道题"
+                        f"（第 {state['attempts']} 次）"
                     )
-                    if len(result) != 1:
-                        raise RuntimeError(f"第 {position} 道题生成结果数量不正确")
-                    candidate = _prepare_generated_question(result[0])
+                    db.commit()
+                    try:
+                        result = provider.generate_questions(
+                            chunks=chunks,
+                            file_names=file_names,
+                            single_count=1 if question_type == "single" else 0,
+                            multiple_count=1 if question_type == "multiple" else 0,
+                            short_count=1 if question_type == "short" else 0,
+                            difficulty=task.difficulty,
+                            generation_number=generation_number + position - 1 + attempt,
+                            recent_chunk_ids=recent_chunk_ids,
+                            duration_minutes=task.duration_minutes,
+                            book_title=book.title,
+                            author=book.author,
+                            resource_type=book.resource_type,
+                            source_mode=task.source_mode,
+                            question_exclusions=[
+                                *historical_exclusions,
+                                *(_question_exclusion_payload(item) for item in generated),
+                                *(
+                                    _generated_question_exclusion_payload(item)
+                                    for item in rejected_candidates
+                                ),
+                            ],
+                            regeneration_guidance=(
+                                f"本次是第 {position} 道题，必须考察一个尚未出现的独立事实。"
+                                "仅更换题干措辞、题型或选项顺序不算新事实。"
+                                + (f"这是第 {attempt + 1} 次尝试，请避开已列出的事实。" if attempt else "")
+                            ),
+                            generation_theme=task.generation_theme,
+                            theme_requirements=_theme_requirements(
+                                task.generation_theme, theme_config
+                            ),
+                            allowed_question_subtypes=list(
+                                theme_config.get("question_subtypes", [])
+                            ),
+                            background_context=background_context,
+                        )
+                        if len(result) != 1:
+                            raise RuntimeError(f"第 {position} 道题生成结果数量不正确")
+                        candidate = _prepare_generated_question(result[0])
+                    except Exception as exc:
+                        state["status"] = "awaiting_intervention"
+                        state["error_message"] = str(exc)[:1_000]
+                        state["updated_at"] = utc_now().isoformat()
+                        task.status = "awaiting_intervention"
+                        task.current_phase = f"第 {position} 道题需要人工处理"
+                        task.error_message = state["error_message"]
+                        task.question_states = copy.deepcopy(question_states)
+                        db.commit()
+                        return
+                    last_candidate = candidate
                     if _is_duplicate_question(
                         candidate,
                         generated,
@@ -1108,19 +1293,40 @@ def run_generation_task(task_id: str) -> None:
                     ):
                         rejected_candidates.append(candidate)
                         task.current_phase = f"第 {position} 道题与已有事实重复，正在重新生成"
+                        task.question_states = copy.deepcopy(question_states)
                         db.commit()
                         continue
                     item = candidate
                     break
                 if item is None:
-                    raise RuntimeError(
-                        f"第 {position} 道题连续重复当前或历史试卷中的已有事实，当前资料中可区分的独立事实不足；请降低题量或扩大出题范围"
+                    state["status"] = "awaiting_intervention"
+                    state["question"] = (
+                        _state_question_payload(last_candidate) if last_candidate else None
                     )
+                    state["error_message"] = (
+                        f"第 {position} 道题连续重复当前或历史试卷中的已有事实，"
+                        "当前资料中可区分的独立事实不足；可以重试、替换或人工调整。"
+                    )
+                    state["updated_at"] = utc_now().isoformat()
+                    task.status = "awaiting_intervention"
+                    task.current_phase = f"第 {position} 道题需要人工处理"
+                    task.error_message = state["error_message"]
+                    task.question_states = copy.deepcopy(question_states)
+                    db.commit()
+                    return
                 generated.append(item)
+                state["status"] = "ready"
+                state["question"] = _state_question_payload(item)
+                state["error_message"] = None
+                state["updated_at"] = utc_now().isoformat()
                 recent_chunk_ids.update(item.source_chunk_ids)
                 recent_chunk_ids.update(item.quote_entry_ids)
-                task.completed_questions = position
+                task.completed_questions = sum(
+                    _finalized_state_status(current.get("status"))
+                    for current in question_states
+                )
                 task.current_phase = f"已完成第 {position} / {task.total_questions} 道题"
+                task.question_states = copy.deepcopy(question_states)
                 db.commit()
 
             allocated_scores = allocate_question_scores(

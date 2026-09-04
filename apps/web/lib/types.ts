@@ -285,7 +285,7 @@ export type BookSummary = {
   pre_generation_error: string | null;
   pre_generation_quiz_id: string | null;
   active_generation_task_id: string | null;
-  active_generation_status: "pending" | "processing" | null;
+  active_generation_status: "pending" | "processing" | "awaiting_intervention" | null;
   active_generation_completed_questions: number;
   active_generation_total_questions: number;
   active_generation_phase: string | null;
@@ -461,7 +461,7 @@ export type QuizGenerationTask = {
   id: string;
   book_id: string;
   task_type: string;
-  status: "pending" | "processing" | "completed" | "failed";
+  status: "pending" | "processing" | "completed" | "failed" | "awaiting_intervention";
   source_mode: SourceMode;
   generation_theme: GenerationTheme;
   theme_config: QuizThemeConfig;
@@ -476,8 +476,69 @@ export type QuizGenerationTask = {
   short_count: number;
   quiz_id: string | null;
   error_message: string | null;
+  question_states: QuizGenerationQuestionState[];
   created_at: string;
   updated_at: string;
+};
+
+export type QuizGenerationQuestionState = {
+  position: number;
+  question_type: QuestionType;
+  status: "pending" | "generating" | "ready" | "awaiting_intervention" | "confirmed";
+  attempts: number;
+  error_message: string | null;
+  question: Partial<Question> | null;
+  updated_at: string | null;
+};
+
+export type GenerationPromptMessage = { role: string; content: string };
+
+export type QuizGenerationCall = {
+  id: string;
+  question_position: number | null;
+  phase: string;
+  call_number: number;
+  model_name: string;
+  request_messages: GenerationPromptMessage[];
+  model_response: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  status: "success" | "failed";
+  error_message: string | null;
+  latency_ms: number;
+  created_at: string;
+};
+
+export type QuizQuestionGenerationTrace = {
+  question_id: string;
+  position: number;
+  prompt: string;
+  calls: QuizGenerationCall[];
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  unreported_calls: number;
+};
+
+export type QuizGenerationDebug = {
+  quiz_id: string;
+  book_id: string;
+  quiz_title: string;
+  generation_task_id: string | null;
+  task_type: string | null;
+  task_status: string | null;
+  model_name: string | null;
+  questions: QuizQuestionGenerationTrace[];
+  unassigned_calls: QuizGenerationCall[];
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+};
+
+export type QuizGenerationTaskDebug = {
+  task_id: string;
+  calls: QuizGenerationCall[];
 };
 
 export type AnswerResult = {

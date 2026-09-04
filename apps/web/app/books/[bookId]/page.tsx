@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Archive, ArchiveRestore, ArrowLeft, BookOpen, Check, CheckCircle2, Copy, FileText, History, LoaderCircle, MessageSquareQuote, PencilLine, Play, RefreshCcw, Share2, Sparkles, Trash2, UploadCloud, X } from "lucide-react";
+import { AlertCircle, Archive, ArchiveRestore, ArrowLeft, BookOpen, Check, CheckCircle2, Code2, Copy, FileText, History, LoaderCircle, MessageSquareQuote, PencilLine, Play, RefreshCcw, Share2, Sparkles, Trash2, UploadCloud, X } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -68,7 +68,8 @@ export default function BookDetailPage() {
 
   useEffect(() => {
     const parsingMaterial = materials.some((material) => ["pending", "processing"].includes(material.parse_status));
-    if (!book?.pdfs.some((pdf) => pdf.parse_status === "pending" || pdf.parse_status === "processing") && !book?.active_generation_task_id && !parsingMaterial) return;
+    const activeGeneration = ["pending", "processing"].includes(book?.active_generation_status || "");
+    if (!book?.pdfs.some((pdf) => pdf.parse_status === "pending" || pdf.parse_status === "processing") && !activeGeneration && !parsingMaterial) return;
     const timer = window.setInterval(() => { void refresh(); }, 2200);
     return () => window.clearInterval(timer);
   }, [book, materials]);
@@ -297,10 +298,11 @@ export default function BookDetailPage() {
 
       {isActive && !hasPdfSource && !hasTrustedQuotes && canUseModelKnowledge && !generating && <SourceModeNotice sourceMode="model_knowledge" />}
 
-      {book.active_generation_task_id && <div className="generation-progress processing">
-        <div className="generation-progress-heading"><div><span className="eyebrow">出题任务</span><strong>{book.active_generation_phase || "正在后台生成题目"}</strong></div><LoaderCircle className="spin" size={21} /></div>
+      {book.active_generation_task_id && <div className={`generation-progress ${book.active_generation_status || "processing"}`}>
+        <div className="generation-progress-heading"><div><span className="eyebrow">出题任务</span><strong>{book.active_generation_status === "awaiting_intervention" ? "本次出题需要人工处理" : book.active_generation_phase || "正在后台生成题目"}</strong></div>{book.active_generation_status === "awaiting_intervention" ? <AlertCircle size={21} /> : <LoaderCircle className="spin" size={21} />}</div>
         <div className="progress-track"><div className="progress-fill" style={{ width: `${book.active_generation_total_questions ? book.active_generation_completed_questions / book.active_generation_total_questions * 100 : 0}%` }} /></div>
-        <div className="generation-progress-meta"><span>{book.active_generation_completed_questions} / {book.active_generation_total_questions} 道题</span><span>可以离开此页，任务会继续执行</span></div>
+        <div className="generation-progress-meta"><span>{book.active_generation_completed_questions} / {book.active_generation_total_questions} 道题</span><span>{book.active_generation_status === "awaiting_intervention" ? "已保留中间结果，请进入出题过程处理" : "可以离开此页，任务会继续执行"}</span></div>
+        {book.active_generation_status === "awaiting_intervention" && <div className="generation-progress-actions"><Link className="button button-secondary" href={`/books/${book.id}/quiz/new`}><AlertCircle size={15} />查看并处理出题任务</Link></div>}
       </div>}
 
       {book.pre_generation_status !== "disabled" && !book.active_generation_task_id && <div className={`pre-generation-banner ${book.pre_generation_status}`}>
@@ -357,6 +359,7 @@ export default function BookDetailPage() {
             <div className="quiz-library-actions">
               {isActive && <Link className="button button-secondary" href={`/quizzes/${quiz.id}`}><Play size={15} />选择这套</Link>}
               {isActive && <button className="button button-quiet" onClick={() => openShare(quiz)} title="分享考试" type="button"><Share2 size={16} /></button>}
+              {isActive && <Link aria-label={`查看${quiz.title}的出题过程`} className="button button-quiet" href={`/quizzes/${quiz.id}/generation-debug`} title="查看出题过程"><Code2 size={16} /></Link>}
               {isActive && <Link aria-label={`编辑${quiz.title}`} className="button button-quiet" href={`/quizzes/${quiz.id}/edit`} title="编辑试卷"><PencilLine size={16} /></Link>}
               <button
                 aria-label={`删除${quiz.title}`}

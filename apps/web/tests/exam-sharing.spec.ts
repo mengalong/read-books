@@ -526,6 +526,14 @@ test("考试详情展示成绩分布、风控信息和个人学习方向", async
   const juneCell = page.locator(".participation-calendar-month .participation-calendar-cell").filter({ hasText: "6" }).first();
   await expect(juneCell.locator(".participation-stat-participants strong")).toHaveText("1");
   await expect(juneCell.locator(".participation-stat-completed strong")).toHaveText("1");
+  await expect(page.locator(".participation-calendar-month")).toBeVisible();
+  await expect(page.locator(".participation-line-chart")).toHaveCount(0);
+  await page.getByRole("button", { name: "折线图" }).click();
+  await expect(page.locator(".participation-calendar-month")).toHaveCount(0);
+  await expect(page.locator(".participation-line-chart")).toBeVisible();
+  await expect(page.locator(".participation-chart-line")).toHaveCount(2);
+  await page.getByRole("button", { name: "日历" }).click();
+  await expect(page.locator(".participation-calendar-month")).toBeVisible();
   await expect(page.getByRole("heading", { name: "成绩分布" })).toBeVisible();
   const attemptRow = page.locator(".attempt-table tbody tr").first();
   await expect(attemptRow.locator("td").nth(3)).toContainText("已完成");

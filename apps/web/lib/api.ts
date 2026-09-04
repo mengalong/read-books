@@ -14,6 +14,8 @@ import type {
   PromptType,
   Quiz,
   QuizGenerationTask,
+  QuizGenerationDebug,
+  QuizGenerationTaskDebug,
   QuizSummary,
   QuizResult,
   QuestionUpdatePayload,
@@ -328,6 +330,25 @@ export function generateQuiz(
 
 export function getGenerationTask(taskId: string) {
   return apiFetch<QuizGenerationTask>(`/quiz-generation-tasks/${taskId}`);
+}
+
+export function interveneGenerationTask(
+  taskId: string,
+  position: number,
+  payload: { action: "retry" | "accept" | "replace" | "edit"; question?: Record<string, unknown> },
+) {
+  return apiFetch<QuizGenerationTask>(
+    `/quiz-generation-tasks/${taskId}/questions/${position}/intervene`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export function getQuizGenerationDebug(quizId: string) {
+  return apiFetch<QuizGenerationDebug>(`/quizzes/${quizId}/generation-debug`);
+}
+
+export function getGenerationTaskDebug(taskId: string) {
+  return apiFetch<QuizGenerationTaskDebug>(`/quiz-generation-tasks/${taskId}/debug`);
 }
 
 export function getQuiz(quizId: string) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Clock3, FileQuestion } from "lucide-react";
+import { ArrowLeft, Clock3, Code2, FileQuestion } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -62,7 +62,7 @@ export default function QuizEditPage() {
           <h1 className="page-title">{quiz.title}</h1>
           <p className="page-description">这里用于调整试卷题目内容，不会进入答题流程。</p>
         </div>
-        <div className="quiz-editor-summary">
+        <div className="quiz-editor-summary"><Link className="button button-secondary" href={`/quizzes/${quiz.id}/generation-debug`}><Code2 size={15} />查看出题过程</Link>
           <div><Clock3 size={16} />{quiz.duration_minutes} 分钟</div>
           <div><FileQuestion size={16} />{quiz.questions.length} 道题</div>
         </div>

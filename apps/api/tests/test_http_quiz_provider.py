@@ -434,6 +434,7 @@ def test_http_provider_reports_usage_for_each_model_call(monkeypatch):
         usage_context=new_usage_context("manual_quiz_generation", "生成测试"),
         usage_recorder=events.append,
     )
+    provider.set_question_position(2)
 
     provider.generate_questions(
         chunks=chunks,
@@ -450,6 +451,9 @@ def test_http_provider_reports_usage_for_each_model_call(monkeypatch):
     assert events[0].phase == "quiz_generation"
     assert events[0].call_number == 1
     assert events[0].status == "success"
+    assert events[0].question_position == 2
+    assert [message["role"] for message in events[0].request_messages] == ["system", "user"]
+    assert events[0].model_response == json.dumps(payload, ensure_ascii=False)
 
 
 def test_http_provider_rejects_unknown_source(monkeypatch):

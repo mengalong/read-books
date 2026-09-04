@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
@@ -23,6 +23,7 @@ class ModelUsageContext:
     workspace_id: str | None = None
     exam_share_id: str | None = None
     exam_attempt_id: str | None = None
+    question_position: int | None = None
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,9 @@ class ModelUsageEvent:
     status: str
     error_message: str | None
     latency_ms: int
+    question_position: int | None = None
+    request_messages: list[dict[str, str]] = field(default_factory=list)
+    model_response: str | None = None
 
 
 @dataclass(frozen=True)
@@ -96,9 +100,11 @@ def new_usage_context(
     workspace_id: str | None = None,
     exam_share_id: str | None = None,
     exam_attempt_id: str | None = None,
+    question_position: int | None = None,
+    task_id: str | None = None,
 ) -> ModelUsageContext:
     return ModelUsageContext(
-        task_id=str(uuid4()),
+        task_id=task_id or str(uuid4()),
         task_type=task_type,
         task_label=task_label,
         book_id=book_id,
@@ -107,6 +113,7 @@ def new_usage_context(
         workspace_id=workspace_id,
         exam_share_id=exam_share_id,
         exam_attempt_id=exam_attempt_id,
+        question_position=question_position,
     )
 
 
@@ -156,6 +163,13 @@ def record_model_usage(event: ModelUsageEvent) -> None:
                 workspace_id=event.context.workspace_id,
                 exam_share_id=event.context.exam_share_id,
                 exam_attempt_id=event.context.exam_attempt_id,
+                question_position=(
+                    event.question_position
+                    if event.question_position is not None
+                    else event.context.question_position
+                ),
+                request_messages=list(event.request_messages or []),
+                model_response=event.model_response,
             )
         )
         db.commit()
