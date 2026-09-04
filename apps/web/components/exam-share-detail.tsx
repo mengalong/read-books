@@ -16,6 +16,7 @@ import type { ExamAttempt, ExamAttemptStatus, ExamAttemptSummary, ExamDeviceType
 
 const ATTEMPTS_PAGE_SIZE = 20;
 const ATTEMPTS_PAGE_SIZES = [20, 50, 100, 200] as const;
+const MIN_PARTICIPATION_YEAR = 2026;
 type AttemptPageSize = (typeof ATTEMPTS_PAGE_SIZES)[number];
 type AttemptStatusFilter = "" | ExamAttemptStatus;
 type AttemptSort = "latest" | "score_desc" | "score_asc";
@@ -73,7 +74,7 @@ export function ExamShareDetailView({ shareId, admin = false }: { shareId: strin
   const initialGranularityParam = searchParams.get("granularity") || "month";
   const initialGranularity: ExamParticipationGranularity = isParticipationGranularity(initialGranularityParam) ? initialGranularityParam : "month";
   const initialYearParam = Number(searchParams.get("participation_year"));
-  const initialYear = Number.isInteger(initialYearParam) && initialYearParam >= 1 ? initialYearParam : currentCalendarDate.getFullYear();
+  const initialYear = Number.isInteger(initialYearParam) && initialYearParam >= MIN_PARTICIPATION_YEAR ? initialYearParam : Math.max(MIN_PARTICIPATION_YEAR, currentCalendarDate.getFullYear());
   const initialMonthParam = Number(searchParams.get("participation_month"));
   const initialMonth = Number.isInteger(initialMonthParam) && initialMonthParam >= 1 && initialMonthParam <= 12 ? initialMonthParam : currentCalendarDate.getMonth() + 1;
   const [share, setShare] = useState<ExamShare | null>(null);
@@ -109,7 +110,7 @@ export function ExamShareDetailView({ shareId, admin = false }: { shareId: strin
     const nextGranularityParam = searchParams.get("granularity") || "month";
     const nextGranularity: ExamParticipationGranularity = isParticipationGranularity(nextGranularityParam) ? nextGranularityParam : "month";
     const nextYearParam = Number(searchParams.get("participation_year"));
-    const nextYear = Number.isInteger(nextYearParam) && nextYearParam >= 1 ? nextYearParam : new Date().getFullYear();
+    const nextYear = Number.isInteger(nextYearParam) && nextYearParam >= MIN_PARTICIPATION_YEAR ? nextYearParam : Math.max(MIN_PARTICIPATION_YEAR, new Date().getFullYear());
     const nextMonthParam = Number(searchParams.get("participation_month"));
     const nextMonth = Number.isInteger(nextMonthParam) && nextMonthParam >= 1 && nextMonthParam <= 12 ? nextMonthParam : new Date().getMonth() + 1;
     setAttemptPage(nextPage);
@@ -367,7 +368,7 @@ function ExamAnalyticsPanel({ distribution, gradedCount, aboveThresholdCount, ab
         <div className="section-title"><div><h2><CalendarDays size={17} />参与考试人数</h2><span>{participationGranularity === "month" ? `${participationYear} 年 ${participationMonth} 月` : `${participationYear} 年`}</span></div><div className="analytics-filters"><label>统计方式<select aria-label="参与人数统计方式" onChange={(event) => onGranularityChange(event.target.value as ExamParticipationGranularity)} value={participationGranularity}><option value="month">按月</option><option value="year">按年</option></select></label><label>年份<select aria-label="参与人数统计年份" onChange={(event) => onYearChange(Number(event.target.value))} value={participationYear}>{participationYearOptions(participationYear).map((year) => <option key={year} value={year}>{year}</option>)}</select></label>{participationGranularity === "month" && <label>月份<select aria-label="参与人数统计月份" onChange={(event) => onMonthChange(Number(event.target.value))} value={participationMonth}>{Array.from({ length: 12 }, (_, index) => index + 1).map((month) => <option key={month} value={month}>{month} 月</option>)}</select></label>}</div></div>
         <div className={`participation-calendar participation-calendar-${participationGranularity}`} aria-label={`${participationYear} 年${participationGranularity === "month" ? ` ${participationMonth} 月` : ""}参与考试统计`}>
           {participationGranularity === "month" && <div className="participation-calendar-weekdays">{["一", "二", "三", "四", "五", "六", "日"].map((weekday) => <span key={weekday}>{weekday}</span>)}</div>}
-          <div className="participation-calendar-grid">{calendarCells.map((cell, index) => cell ? <div className="participation-calendar-cell" key={cell.period.period_key}><strong>{cell.label}</strong><span>参与 {cell.period.participant_count}</span><span>完成 {cell.period.completed_count}</span></div> : <div className="participation-calendar-cell is-empty" key={`empty-${index}`} aria-hidden="true" />)}</div>
+          <div className="participation-calendar-grid">{calendarCells.map((cell, index) => cell ? <div className="participation-calendar-cell" key={cell.period.period_key}><strong>{cell.label}</strong><div className="participation-stat participation-stat-participants"><span>参与</span><strong>{cell.period.participant_count}</strong></div><div className="participation-stat participation-stat-completed"><span>完成</span><strong>{cell.period.completed_count}</strong></div></div> : <div className="participation-calendar-cell is-empty" key={`empty-${index}`} aria-hidden="true" />)}</div>
         </div>
         <div className="participation-calendar-total"><span>合计参与 {participationTotals.participants} 人次</span><span>完成 {participationTotals.completed} 人次</span></div>
       </section>
@@ -382,7 +383,7 @@ function ExamAnalyticsPanel({ distribution, gradedCount, aboveThresholdCount, ab
 function participationYearOptions(selectedYear: number) {
   const currentYear = new Date().getFullYear();
   const latestYear = Math.max(currentYear, selectedYear);
-  const firstYear = Math.min(currentYear - 9, selectedYear);
+  const firstYear = MIN_PARTICIPATION_YEAR;
   return Array.from({ length: latestYear - firstYear + 1 }, (_, index) => latestYear - index);
 }
 

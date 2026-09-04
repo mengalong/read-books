@@ -3981,17 +3981,35 @@ p {
   padding: 8px 7px;
 }
 
-.participation-calendar-cell strong {
+.participation-calendar-cell > strong {
   color: var(--ink);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
-.participation-calendar-cell span {
+.participation-stat {
+  align-items: baseline;
+  display: flex;
+  gap: 5px;
+  justify-content: space-between;
+  line-height: 1.2;
+}
+
+.participation-stat > span {
   color: var(--muted);
   font-size: 10px;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+}
+
+.participation-stat > strong {
+  color: #111815;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+}
+
+.participation-stat-completed > strong {
+  color: #c24132;
 }
 
 .participation-calendar-cell.is-empty {
