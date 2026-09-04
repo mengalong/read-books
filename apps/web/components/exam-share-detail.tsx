@@ -213,8 +213,8 @@ export function ExamShareDetailView({ shareId, admin = false }: { shareId: strin
         <div className="metric"><div className="metric-label">已经交卷</div><div className="metric-value">{share.submitted_count}<span className="metric-detail">份</span></div></div>
         <div className="metric"><div className="metric-label">完成率</div><div className="metric-value">{share.completion_rate}<span className="metric-detail">%</span></div></div>
         <div className="metric"><div className="metric-label">已完成评分</div><div className="metric-value">{share.graded_count ?? 0}<span className="metric-detail">份</span></div></div>
-        <div className="metric"><div className="metric-label">平均得分率</div><div className="metric-value">{share.average_score === null ? "—" : `${share.average_score}%`}</div></div>
-        <div className="metric"><div className="metric-label">中位数得分率</div><div className="metric-value">{share.median_score === null || share.median_score === undefined ? "—" : `${share.median_score}%`}</div></div>
+        <div className="metric"><div className="metric-label">平均分</div><div className="metric-value">{share.average_points === null || share.average_points === undefined ? "—" : formatScore(share.average_points)}<span className="metric-detail">/ {formatScore(share.max_score)} 分</span></div></div>
+        <div className="metric"><div className="metric-label">中位数分数</div><div className="metric-value">{share.median_points === null || share.median_points === undefined ? "—" : formatScore(share.median_points)}<span className="metric-detail">/ {formatScore(share.max_score)} 分</span></div></div>
       </div>
 
       <ExamScoreDistribution distribution={share.score_distribution || []} gradedCount={share.graded_count || 0} aboveThresholdCount={share.above_threshold_count || 0} aboveThresholdRate={share.above_threshold_rate ?? null} />

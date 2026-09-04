@@ -685,6 +685,8 @@ export type ExamShare = {
   attempts_page?: number;
   attempts_page_size?: number;
   graded_count?: number;
+  average_points?: number | null;
+  median_points?: number | null;
   median_score?: number | null;
   above_threshold_count?: number;
   above_threshold_rate?: number | null;

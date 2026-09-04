@@ -219,6 +219,8 @@ def test_exam_share_detail_paginates_attempts_and_aggregates_scores(client):
     assert first_body["attempts_page_size"] == 20
     assert len(first_body["attempts"]) == 20
     assert first_body["graded_count"] == 30
+    assert first_body["average_points"] == 43.5
+    assert first_body["median_points"] == 43.5
     assert first_body["median_score"] == 43.5
     assert first_body["above_threshold_count"] == 10
     assert first_body["above_threshold_rate"] == 33.3

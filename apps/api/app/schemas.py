@@ -553,6 +553,8 @@ class ExamShareDetail(ExamShareSummary):
     attempts_page: int = 1
     attempts_page_size: int = 20
     graded_count: int = 0
+    average_points: float | None = None
+    median_points: float | None = None
     median_score: float | None = None
     above_threshold_count: int = 0
     above_threshold_rate: float | None = None

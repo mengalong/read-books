@@ -362,8 +362,9 @@ def _share_overview_summary(
             ExamAttempt.max_score > 0,
         )
     ).all()
+    points = [float(score) for score, _ in score_rows]
     percentages = [
-        round(float(score) / float(max_score) * 100, 1)
+        round(score / float(max_score) * 100, 1)
         for score, max_score in score_rows
     ]
     question_count, single_count, multiple_count, short_count = question_counts(share)
@@ -412,6 +413,8 @@ def _share_overview_summary(
     above_threshold_count = sum(percentage >= 60 for percentage in percentages)
     analytics = {
         "graded_count": len(percentages),
+        "average_points": round(sum(points) / len(points), 1) if points else None,
+        "median_points": round(float(median(points)), 1) if points else None,
         "median_score": round(float(median(percentages)), 1) if percentages else None,
         "above_threshold_count": above_threshold_count,
         "above_threshold_rate": (

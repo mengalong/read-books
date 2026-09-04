@@ -79,6 +79,8 @@ const examShare = {
   attempts_page: 1,
   attempts_page_size: 20,
   graded_count: 1,
+  average_points: 42.5,
+  median_points: 42.5,
   median_score: 42.5,
   above_threshold_count: 0,
   above_threshold_rate: 0,
