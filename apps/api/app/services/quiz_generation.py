@@ -64,7 +64,11 @@ THEME_SUBTYPES = {
     ],
 }
 
-HISTORICAL_FACT_PROMPT_LIMIT = 30
+# The complete historical set is still loaded for the server-side duplicate guard. Only a
+# small, relevant fact summary is sent to the model so prompt size does not grow with every
+# quiz ever generated for a book.
+HISTORICAL_FACT_PROMPT_LIMIT = 10
+HISTORICAL_FACT_PROMPT_CHAR_BUDGET = 6_000
 
 
 def _normalized_theme_config(payload: QuizGenerateRequest) -> dict[str, Any]:
@@ -544,11 +548,12 @@ def _theme_requirements(generation_theme: str, theme_config: dict[str, Any]) -> 
     if generation_theme == "classic_quotes":
         return (
             f"仅围绕可信资料中的经典台词出题；角色范围：{characters}；"
-            f"允许的考察角度：{subtypes}。逐字台词必须原样出现在题干中；对话场景只考察语境、人物处境和事件背景，不考精确集数、时间点或出处位置。"
+            f"允许的考察角度：{subtypes}。题目可以逐字引用台词，也可以自然转述或描述台词所表达的情境；"
+            "quote_entry_ids 只用于来源追溯。对话场景只考察语境、人物处境和事件背景，不考精确集数、时间点或出处位置。"
         )
     return (
         f"仅围绕角色 {characters} 出题；允许的考察角度：{subtypes}。"
-        "涉及逐字台词时必须原样引用可信资料；不考精确集数、时间点或出处位置。"
+        "涉及台词时可以逐字引用、自然转述或概括含义；必须能从对应可信资料推出，不考精确集数、时间点或出处位置。"
     )
 
 
@@ -589,20 +594,72 @@ def _historical_questions(db: Session, book_id: str) -> list[Question]:
     return questions
 
 
-def _historical_question_exclusions(questions: list[Question]) -> list[dict[str, object]]:
-    exclusions: list[dict[str, object]] = []
+def _exclusion_relevance_text(chunks: Iterable[Any], *, limit: int = 24) -> str:
+    """Build a bounded keyword context for selecting model-side history."""
+    parts: list[str] = []
+    for chunk in list(chunks)[:limit]:
+        parts.extend(
+            str(value)
+            for value in (
+                getattr(chunk, "content", ""),
+                getattr(chunk, "speaker", ""),
+                getattr(chunk, "context", ""),
+            )
+            if value
+        )
+    return compact_text(" ".join(parts), 8_000)
+
+
+def _compact_exclusions(
+    questions: Iterable[Any],
+    *,
+    role: str | None = None,
+    relevance_text: str = "",
+    limit: int = HISTORICAL_FACT_PROMPT_LIMIT,
+    char_budget: int = HISTORICAL_FACT_PROMPT_CHAR_BUDGET,
+) -> list[dict[str, object]]:
+    """Return compact, relevant fact summaries for the model prompt.
+
+    This is intentionally separate from `_is_duplicate_question`, which continues to
+    compare against the complete historical question set in the API process.
+    """
+    entries: list[tuple[int, int, dict[str, object]]] = []
     seen_fact_keys: set[str] = set()
-    for question in questions:
+    relevance_tokens = question_keywords(relevance_text)
+    for index, question in enumerate(questions):
         signature = signature_for_question(question)
         fact_key = str(signature["fact_key"])
         if fact_key and fact_key in seen_fact_keys:
             continue
         if fact_key:
             seen_fact_keys.add(fact_key)
-        exclusions.append(_question_exclusion_payload(question, role="historical_question"))
-        if len(exclusions) >= HISTORICAL_FACT_PROMPT_LIMIT:
+        payload = _question_exclusion_payload(question, role=role or "historical_question")
+        payload_tokens = question_keywords(
+            payload.get("fact_claim"),
+            payload.get("fact_subject"),
+            payload.get("fact_relation"),
+            payload.get("fact_context"),
+            payload.get("answer_signature"),
+        )
+        entries.append((len(relevance_tokens & payload_tokens), index, payload))
+    entries.sort(key=lambda item: (-item[0], item[1]))
+    exclusions: list[dict[str, object]] = []
+    used_chars = 2
+    for _score, _order, payload in entries:
+        if len(exclusions) >= limit:
             break
+        serialized_size = len(str(payload))
+        if exclusions and used_chars + serialized_size > char_budget:
+            continue
+        exclusions.append(payload)
+        used_chars += serialized_size
     return exclusions
+
+
+def _historical_question_exclusions(
+    questions: list[Question], relevance_text: str = ""
+) -> list[dict[str, object]]:
+    return _compact_exclusions(questions, relevance_text=relevance_text)
 
 
 def _normalize_question_text(value: str | None) -> str:
@@ -618,41 +675,25 @@ def _question_exclusion_payload(
     question: Any, role: str = "same_type_reference"
 ) -> dict[str, object]:
     semantic_signature = signature_for_question(question)
-    payload: dict[str, object] = {
+    return {
         "role": role,
         "position": getattr(question, "position", None),
         "question_type": getattr(question, "question_type", ""),
-        "prompt": compact_text(question.prompt, 140),
-        "knowledge_point": compact_text(question.knowledge_point, 60),
-        "source_chunk_ids": list(getattr(question, "source_chunk_ids", None) or []),
-        "quote_entry_ids": list(getattr(question, "quote_entry_ids", None) or []),
         "question_subtype": str(getattr(question, "question_subtype", "general")),
-        "semantic_signature": semantic_signature,
-        "fact_key": semantic_signature["fact_key"],
-        "fact_claim": semantic_signature["fact_claim"],
+        "fact_claim": compact_text(str(semantic_signature.get("fact_claim", "")), 180),
+        "fact_subject": compact_text(str(semantic_signature.get("fact_subject", "")), 80),
+        "fact_relation": compact_text(str(semantic_signature.get("fact_relation", "")), 80),
+        "fact_context": compact_text(str(semantic_signature.get("fact_context", "")), 120),
+        "answer_signature": [
+            compact_text(str(value), 60)
+            for value in list(semantic_signature.get("answer_signature") or [])[:4]
+        ],
     }
-    if question.question_type == "short" and question.reference_answer:
-        payload["reference_answer"] = compact_text(question.reference_answer, 120)
-    return payload
 
 
 def _generated_question_exclusion_payload(question: GeneratedQuestion) -> dict[str, object]:
     _prepare_generated_question(question)
-    payload: dict[str, object] = {
-        "role": "rejected_candidate",
-        "question_type": question.question_type,
-        "prompt": compact_text(question.prompt, 140),
-        "knowledge_point": compact_text(question.knowledge_point, 60),
-        "source_chunk_ids": list(question.source_chunk_ids or []),
-        "quote_entry_ids": list(question.quote_entry_ids or []),
-        "question_subtype": question.question_subtype,
-        "semantic_signature": question.semantic_signature,
-        "fact_key": question.fact_key,
-        "fact_claim": question.fact_claim,
-    }
-    if question.question_type == "short" and question.reference_answer:
-        payload["reference_answer"] = compact_text(question.reference_answer, 120)
-    return payload
+    return _question_exclusion_payload(question, role="rejected_candidate")
 
 
 def _build_regeneration_guidance(quiz: Quiz, question: Question, attempt: int) -> str:
@@ -1091,6 +1132,7 @@ def _generated_question_from_state(value: dict[str, Any]) -> GeneratedQuestion:
         "fact_key": str(value.get("fact_key") or ""),
         "fact_claim": str(value.get("fact_claim") or ""),
         "semantic_signature": dict(value.get("semantic_signature") or {}),
+        "validation_warnings": list(value.get("validation_warnings") or []),
     }
     return GeneratedQuestion(**fields)
 
@@ -1199,7 +1241,16 @@ def run_generation_task(task_id: str) -> None:
             task.question_states = question_states
             db.commit()
             historical_questions = _historical_questions(db, task.book_id)
-            historical_exclusions = _historical_question_exclusions(historical_questions)
+            historical_exclusions = _historical_question_exclusions(
+                historical_questions,
+                " ".join(
+                    [
+                        _exclusion_relevance_text(chunks),
+                        task.generation_theme,
+                        " ".join(_question_types(task)),
+                    ]
+                ),
+            )
             background_context = _background_context_for_chunks(db, task.book_id, chunks)
             generated = [
                 _generated_question_from_state(state["question"])

@@ -328,6 +328,8 @@ class QuizQuestionGenerationTrace(BaseModel):
     question_id: str
     position: int
     prompt: str
+    source_chunk_ids: list[str] = Field(default_factory=list)
+    quote_entry_ids: list[str] = Field(default_factory=list)
     calls: list[QuizGenerationCallResponse] = Field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0

@@ -519,6 +519,8 @@ def get_quiz_generation_debug(
                 question_id=question.id,
                 position=question.position,
                 prompt=question.prompt,
+                source_chunk_ids=list(question.source_chunk_ids or []),
+                quote_entry_ids=list(question.quote_entry_ids or []),
                 calls=question_calls,
                 input_tokens=sum(call.input_tokens or 0 for call in question_calls),
                 output_tokens=sum(call.output_tokens or 0 for call in question_calls),

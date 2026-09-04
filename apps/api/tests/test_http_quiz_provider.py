@@ -289,6 +289,64 @@ def test_http_provider_validates_trusted_quote_and_rebuilds_evidence(monkeypatch
     assert "可信台词资料" in requests[0]["json"]["messages"][0]["content"]
 
 
+def test_http_provider_accepts_paraphrased_trusted_quote_prompt(monkeypatch):
+    source = TrustedQuoteSource(
+        id="quote-paraphrase",
+        material_id="material-1",
+        file_name="潜伏台词.csv",
+        material_type="quote_sheet",
+        content="什么任务，不就是嫌我脏吗？",
+        source_segment_ids=["segment-1"],
+        speaker="翠平",
+        context="茅房里有热水壶、有盆，把脚也洗一洗。",
+    )
+    payload = generated_quote_payload(quote_id=source.id)
+    question = payload["questions"][0]
+    question.update(
+        {
+            "question_subtype": "quote_context",
+            "prompt": "翠平面对让她洗脚的要求时，流露出怎样的情绪？",
+            "options": [
+                {"id": "A", "text": "觉得被嫌弃并表达不满"},
+                {"id": "B", "text": "感到惊喜"},
+                {"id": "C", "text": "完全没有情绪"},
+                {"id": "D", "text": "主动提出任务"},
+            ],
+            "correct_answers": ["A"],
+            "explanation": "她把对方的要求理解为嫌弃自己，因此用反问表达不满。",
+            "knowledge_point": "翠平面对生活要求时的情绪",
+            "fact_claim": "翠平因被要求洗脚而觉得受到嫌弃",
+            "fact_subject": "翠平",
+            "fact_relation": "情绪",
+            "fact_context": "被要求洗脚时",
+            "answer_signature": ["觉得被嫌弃", "表达不满"],
+        }
+    )
+    requests = install_chat_responses(monkeypatch, [json.dumps(payload, ensure_ascii=False)])
+    provider = HttpQuizAiProvider(make_configuration())
+
+    questions = provider.generate_questions(
+        chunks=[source],
+        file_names={},
+        single_count=1,
+        multiple_count=0,
+        short_count=0,
+        difficulty="medium",
+        generation_number=0,
+        recent_chunk_ids=set(),
+        book_title="潜伏",
+        resource_type="tv_series",
+        source_mode="material",
+        generation_theme="classic_quotes",
+        theme_requirements="仅围绕可信台词出题",
+        allowed_question_subtypes=["quote_context"],
+    )
+
+    assert questions[0].prompt.startswith("翠平面对")
+    assert questions[0].validation_warnings
+    assert "没有逐字使用可信台词" not in requests[0]["json"]["messages"][0]["content"]
+
+
 def test_http_provider_combined_mode_accepts_pdf_and_quote_sources(monkeypatch):
     pdf_source = make_chunks()[0]
     quote_source = make_trusted_quote()

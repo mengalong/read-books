@@ -39,6 +39,20 @@ def test_fabricated_answer_is_rejected():
     )
 
     assert result.passed is False
+    assert result.severity == "fail"
+
+
+def test_low_lexical_overlap_paraphrase_is_a_warning_not_a_failure():
+    result = check_question_faithfulness(
+        explanation="她把对方的要求理解为嫌弃自己，因此用反问表达不满。",
+        correct_answers_text="觉得被嫌弃",
+        answer_signature=["表达不满"],
+        source_text="什么任务，不就是嫌我脏吗？\n翠平\n茅房里有热水壶、有盆，把脚也洗一洗。",
+    )
+
+    assert result.passed is True
+    assert result.severity == "warning"
+    assert result.is_warning is True
 
 
 def test_empty_source_text_always_passes():

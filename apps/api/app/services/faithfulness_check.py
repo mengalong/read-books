@@ -1,17 +1,10 @@
-"""Rule-based faithfulness check for generated questions.
+"""Lightweight source-support signal for generated questions.
 
-This is a lightweight guard against fabricated facts that runs *after* the existing
-ID-existence and quote-verbatim checks in `quiz_provider._validate_questions`. It never
-replaces those checks; it only adds an extra layer that flags questions whose answer-bearing
-fields (explanation, correct answer text, answer_signature) look almost entirely disconnected
-from the source text the question claims to be based on.
-
-Approach: reuse the same bigram/trigram overlap strategy as `question_dedup.token_similarity`
-(proven for this codebase's Chinese text) to measure how much of the answer text's vocabulary
-also appears in the cited source. Explanations are expected to paraphrase rather than quote
-verbatim, so this only flags a very low overlap ratio (near-zero shared vocabulary), which is
-a strong signal that the answer references content absent from the cited source. This
-intentionally avoids a second model call, per the confirmed lightweight design.
+Lexical overlap is useful for spotting answers that are completely unrelated to a cited
+source, but it is not a semantic truth oracle. In particular, a good explanation may
+naturally paraphrase a line of dialogue and therefore share few characters with it. The
+result deliberately distinguishes a hard failure from a review warning so that traceability
+and attribution checks remain strict without rejecting reasonable paraphrases.
 """
 
 from __future__ import annotations
@@ -20,18 +13,22 @@ from dataclasses import dataclass
 
 from app.services.question_dedup import token_similarity
 
-# 说明：正常题目的 explanation/答案是对原文的复述而非逐字摘录，其与原文的
-# bigram/trigram Jaccard 重合度通常在 0.05~0.15 区间（例如"原文强调合上书本后
-# 主动提取"复述"合上书本，用自己的语言从记忆中提取核心内容"约为 0.07~0.09）；
-# 而完全捏造、与原文毫无关系的内容重合度普遍低于 0.02。阈值设为 0.03，
-# 只拦截“几乎完全不沾边”的极端捏造，避免误伤正常的合理复述。
+# 0.03 仍然是“词面支持充分”的参考线；0.01 以下才视为几乎完全无关。
+# 中间区间保留为 warning，交给来源/说话人/事实去重等更强约束共同判断。
 MIN_OVERLAP_RATIO = 0.03
+HARD_FAIL_OVERLAP_RATIO = 0.01
 
 
 @dataclass(frozen=True)
 class FaithfulnessResult:
     passed: bool
     overlap_ratio: float
+    severity: str = "pass"
+    reason: str | None = None
+
+    @property
+    def is_warning(self) -> bool:
+        return self.severity == "warning"
 
 
 def check_question_faithfulness(
@@ -58,7 +55,21 @@ def check_question_faithfulness(
     if not answer_text:
         return FaithfulnessResult(passed=True, overlap_ratio=1.0)
     ratio = token_similarity(answer_text, source_text)
-    return FaithfulnessResult(passed=ratio >= MIN_OVERLAP_RATIO, overlap_ratio=ratio)
+    if ratio < HARD_FAIL_OVERLAP_RATIO:
+        return FaithfulnessResult(
+            passed=False,
+            overlap_ratio=ratio,
+            severity="fail",
+            reason="答案与引用来源几乎没有词面或事实线索重合",
+        )
+    if ratio < MIN_OVERLAP_RATIO:
+        return FaithfulnessResult(
+            passed=True,
+            overlap_ratio=ratio,
+            severity="warning",
+            reason="答案可能是对引用来源的语义转述，词面重合较低，请人工抽查",
+        )
+    return FaithfulnessResult(passed=True, overlap_ratio=ratio)
 
 
 def source_text_for_question(

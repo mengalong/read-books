@@ -50,6 +50,7 @@ class GeneratedQuestion:
     fact_key: str = ""
     fact_claim: str = ""
     semantic_signature: dict[str, Any] = field(default_factory=dict)
+    validation_warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -1147,7 +1148,7 @@ class HttpQuizAiProvider:
             "duration_minutes": str(duration_minutes),
             "source_material": json.dumps(source_material, ensure_ascii=False),
             "question_exclusions": json.dumps(
-                question_exclusions or [], ensure_ascii=False, indent=2
+                question_exclusions or [], ensure_ascii=False
             ),
             "regeneration_guidance": regeneration_guidance.strip(),
             "generation_theme": generation_theme,
@@ -1295,13 +1296,8 @@ class HttpQuizAiProvider:
                 ]
                 if source_mode == "material" and not quote_sources:
                     raise RuntimeError(f"真实模型第 {position} 道题没有有效台词来源")
-                if quote_sources:
-                    normalized_prompt = normalized_quote_text(prompt)
-                    if not any(
-                        normalized_quote_text(source.content) in normalized_prompt
-                        for source in quote_sources
-                    ):
-                        raise RuntimeError(f"真实模型第 {position} 道题没有逐字使用可信台词")
+                # quote_entry_ids are the authoritative traceability link. The prompt may
+                # quote the line verbatim or describe it in natural language.
             else:
                 quote_sources = []
                 if question_subtype != "general":
@@ -1388,6 +1384,7 @@ class HttpQuizAiProvider:
                 if source_mode in {"pdf", "material", "combined"}
                 else []
             )
+            validation_warnings: list[str] = []
             if source_mode in {"pdf", "material", "combined"}:
                 faithfulness = check_question_faithfulness(
                     explanation=explanation,
@@ -1405,6 +1402,11 @@ class HttpQuizAiProvider:
                     raise RuntimeError(
                         f"真实模型第 {position} 道题的解析或答案与引用的原文片段几乎没有内容重合"
                         f"（重合度 {faithfulness.overlap_ratio:.2f}），可能包含原文中不存在的内容"
+                    )
+                if faithfulness.is_warning:
+                    validation_warnings.append(
+                        f"来源词面重合度较低（{faithfulness.overlap_ratio:.2f}）："
+                        f"{faithfulness.reason or '请人工抽查语义是否确实由来源支持'}"
                     )
             source_segment_ids = list(
                 dict.fromkeys(
@@ -1444,6 +1446,8 @@ class HttpQuizAiProvider:
                 semantic_signature["fact_key"] = "|".join(
                     part for part in key_parts if part
                 )[:1_000]
+            if validation_warnings:
+                semantic_signature["validation_warnings"] = validation_warnings
             generated.append(
                 GeneratedQuestion(
                     question_type=question_type,
@@ -1464,6 +1468,7 @@ class HttpQuizAiProvider:
                     fact_key=str(semantic_signature.get("fact_key", "")),
                     fact_claim=str(semantic_signature.get("fact_claim", "")),
                     semantic_signature=semantic_signature,
+                    validation_warnings=validation_warnings,
                 )
             )
         if actual_counts != expected_counts:
@@ -1475,10 +1480,37 @@ class HttpQuizAiProvider:
         original_messages: list[dict[str, str]],
         invalid_content: str,
         validation_error: str,
+        source_material: str = "",
     ) -> list[dict[str, str]]:
-        original_task = "\n\n".join(
-            f"[{message['role']}]\n{message['content']}" for message in original_messages
+        # A repair call only fixes the returned JSON. Repeating the complete source and
+        # historical exclusion list here used to double the largest prompt in the trace.
+        original_user = next(
+            (message["content"] for message in original_messages if message["role"] == "user"),
+            "",
         )
+        original_user = re.split(r"\n已考察事实参考（.*?）:\n", original_user, maxsplit=1)[0]
+        original_user = original_user.split("\nSOURCE_MATERIAL：", 1)[0].strip()
+        source_context = source_material.strip() or "无"
+        try:
+            source_rows = json.loads(source_context)
+        except (TypeError, json.JSONDecodeError):
+            source_rows = []
+        if isinstance(source_rows, list):
+            # Prefer records whose IDs occur in the invalid response. If the model omitted
+            # an ID entirely, a tiny prefix still gives it enough context to repair shape.
+            invalid_ids = set(re.findall(r"(?:chunk|quote)[-_][A-Za-z0-9-]+", invalid_content))
+            selected_rows = [
+                row
+                for row in source_rows
+                if isinstance(row, dict)
+                and any(
+                    str(row.get(key) or "") in invalid_ids
+                    for key in ("source_chunk_id", "quote_entry_id")
+                )
+            ]
+            source_context = json.dumps(
+                selected_rows or source_rows[:4], ensure_ascii=False
+            ) or "无"
         return [
             {
                 "role": "system",
@@ -1492,9 +1524,10 @@ class HttpQuizAiProvider:
             {
                 "role": "user",
                 "content": (
-                    f"原始任务：\n{original_task}\n\n"
+                    f"原始任务约束（已省略历史去重上下文）：\n{original_user}\n\n"
                     f"后端校验错误：\n{validation_error}\n\n"
                     f"模型原始返回：\n{invalid_content}\n\n"
+                    f"相关来源记录（只用于修复来源 ID 和事实，不得新增来源）：\n{source_context}\n\n"
                     "请修正格式并重新输出完整 JSON。"
                 ),
             },
@@ -1574,7 +1607,7 @@ class HttpQuizAiProvider:
             if source_mode == "model_knowledge"
             else (
                 rendered_system_prompt
-                + "\n\n系统来源边界：本次只能使用提供的可信台词资料。逐字台词必须原样出现在题干中，"
+                + "\n\n系统来源边界：本次只能使用提供的可信台词资料。题目可以逐字引用、自然转述或概括台词含义，"
                 "quote_entry_ids 必须来自 SOURCE_MATERIAL，角色、集数、时间和场景不得补写。"
                 "每道题必须返回 question_subtype、quote_entry_ids，并将 source_chunk_ids 设为空数组。"
                 f"\n专题约束：{theme_requirements}"
@@ -1624,7 +1657,12 @@ class HttpQuizAiProvider:
             )
         except RuntimeError as first_error:
             repaired_content = self._chat_completion(
-                self._repair_generation_messages(messages, content, str(first_error)),
+                self._repair_generation_messages(
+                    messages,
+                    content,
+                    str(first_error),
+                    source_material=generation_values["source_material"],
+                ),
                 phase="quiz_generation_repair",
             )
             try:
