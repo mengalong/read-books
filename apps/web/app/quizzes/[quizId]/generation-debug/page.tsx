@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 
 import { EmptyState, ErrorState } from "@/components/ui";
 import { ApiError, getQuizGenerationDebug } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
 import { formatDateTime } from "@/lib/format";
 import type { QuizGenerationCall, QuizGenerationDebug, QuizQuestionGenerationTrace } from "@/lib/types";
 
@@ -50,20 +51,67 @@ export default function QuizGenerationDebugPage() {
         <div className="metric"><div className="metric-label">总 token</div><div className="metric-value">{report.total_tokens.toLocaleString()}</div></div>
       </div>
 
-      {!report.questions.some((item) => item.calls.length) && !report.unassigned_calls.length ? <EmptyState title="没有保存的模型调用记录" detail="历史试卷或模拟模式生成的题目可能没有可回看的原始 prompt。" /> : <section className="generation-debug-list">{report.questions.map((question, index) => <QuestionTrace key={question.question_id} question={question} defaultOpen={index === 0} />)}{report.unassigned_calls.length > 0 && <section className="generation-debug-unassigned"><div className="section-title"><div><h2>未关联题目调用</h2><span>这些记录没有题目位置标记，通常来自旧版本任务。</span></div></div>{report.unassigned_calls.map((call) => <GenerationCall key={call.id} call={call} />)}</section>}</section>}
+      {!report.questions.some((item) => item.calls.length) && !report.unassigned_calls.length ? <EmptyState title="没有保存的模型调用记录" detail="历史试卷或模拟模式生成的题目可能没有可回看的原始 prompt。" /> : <section className="generation-debug-list">{report.questions.map((question, index) => <QuestionTrace key={question.question_id} question={question} quizTitle={report.quiz_title} defaultOpen={index === 0} />)}{report.unassigned_calls.length > 0 && <section className="generation-debug-unassigned"><div className="section-title"><div><h2>未关联题目调用</h2><span>这些记录没有题目位置标记，通常来自旧版本任务。</span></div></div>{report.unassigned_calls.map((call) => <GenerationCall key={call.id} call={call} />)}</section>}</section>}
     </div>
   );
 }
 
-function QuestionTrace({ question, defaultOpen }: { question: QuizQuestionGenerationTrace; defaultOpen: boolean }) {
-  return <article className="generation-debug-question"><div className="generation-debug-question-heading"><div><span className="question-number">第 {question.position} 题</span><h2>{question.prompt}</h2></div><div className="generation-debug-question-tokens"><span>{question.calls.length} 次调用</span><strong>{question.total_tokens.toLocaleString()} token</strong></div></div>{question.calls.length === 0 ? <div className="generation-debug-no-call"><FileText size={15} />这道题没有保存到模型调用记录，可能由旧版本任务生成。</div> : <div className="generation-debug-calls">{question.calls.map((call, index) => <GenerationCall call={call} defaultOpen={defaultOpen && index === 0} key={call.id} />)}</div>}</article>;
+function QuestionTrace({ question, quizTitle, defaultOpen }: { question: QuizQuestionGenerationTrace; quizTitle: string; defaultOpen: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState("");
+  async function copyQuestionTrace() {
+    setCopyError("");
+    try {
+      await copyText(formatQuestionTrace(quizTitle, question));
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch (reason: unknown) {
+      setCopyError(reason instanceof Error ? reason.message : "复制失败");
+    }
+  }
+
+  return <article className="generation-debug-question"><div className="generation-debug-question-heading"><div><span className="question-number">第 {question.position} 题</span><h2>{question.prompt}</h2></div><div className="generation-debug-question-tokens"><span>{question.calls.length} 次调用</span><strong>{question.total_tokens.toLocaleString()} token</strong><button aria-label={copied ? "本题调试信息已复制" : "复制本题调试信息"} className="button button-quiet" onClick={() => void copyQuestionTrace()} title="复制本题调试信息" type="button"><Copy size={13} />{copied ? "已复制" : "复制本题"}</button></div></div>{copyError && <div className="generation-debug-error">{copyError}</div>}{question.calls.length === 0 ? <div className="generation-debug-no-call"><FileText size={15} />这道题没有保存到模型调用记录，可能由旧版本任务生成。</div> : <div className="generation-debug-calls">{question.calls.map((call, index) => <GenerationCall call={call} defaultOpen={defaultOpen && index === 0} key={call.id} />)}</div>}</article>;
+}
+
+function formatQuestionTrace(quizTitle: string, question: QuizQuestionGenerationTrace): string {
+  const lines = [
+    `试卷：${quizTitle}`,
+    `第 ${question.position} 题`,
+    `题干：${question.prompt}`,
+    `source_chunk_ids：${question.source_chunk_ids.length ? question.source_chunk_ids.join(", ") : "无"}`,
+    `quote_entry_ids：${question.quote_entry_ids.length ? question.quote_entry_ids.join(", ") : "无"}`,
+    `调用次数：${question.calls.length}`,
+    `输入 token：${question.input_tokens.toLocaleString()}`,
+    `输出 token：${question.output_tokens.toLocaleString()}`,
+    `总 token：${question.total_tokens.toLocaleString()}`,
+  ];
+  question.calls.forEach((call, index) => {
+    lines.push(
+      "",
+      `===== 第 ${index + 1} 次模型调用 =====`,
+      `阶段：${call.phase}`,
+      `时间：${formatDateTime(call.created_at)}`,
+      `模型：${call.model_name || "未记录"}`,
+      `状态：${call.status === "success" ? "成功" : "失败"}`,
+      `延迟：${call.latency_ms.toLocaleString()} ms`,
+      `输入 token：${call.input_tokens === null ? "未返回" : call.input_tokens.toLocaleString()}`,
+      `输出 token：${call.output_tokens === null ? "未返回" : call.output_tokens.toLocaleString()}`,
+      `总 token：${call.total_tokens === null ? "未返回" : call.total_tokens.toLocaleString()}`,
+      "",
+      "--- 输入 Prompt ---",
+    );
+    call.request_messages.forEach((message) => lines.push(`[${message.role}]`, message.content));
+    lines.push("", "--- 模型回复 ---", call.model_response || "模型没有返回可用文本");
+    if (call.error_message) lines.push("", "--- 错误 ---", call.error_message);
+  });
+  return lines.join("\n");
 }
 
 function GenerationCall({ call, defaultOpen = false }: { call: QuizGenerationCall; defaultOpen?: boolean }) {
   const [copied, setCopied] = useState(false);
   async function copyResponse() {
     if (!call.model_response) return;
-    await navigator.clipboard.writeText(call.model_response);
+    await copyText(call.model_response);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   }

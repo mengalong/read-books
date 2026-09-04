@@ -514,6 +514,8 @@ export type QuizQuestionGenerationTrace = {
   question_id: string;
   position: number;
   prompt: string;
+  source_chunk_ids: string[];
+  quote_entry_ids: string[];
   calls: QuizGenerationCall[];
   input_tokens: number;
   output_tokens: number;
