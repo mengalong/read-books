@@ -263,8 +263,6 @@ FIELD_ALIASES = {
     "page": ("页码", "page", "page_number"),
 }
 
-NON_DIALOGUE_ROW_TYPES = {"环境描写", "旁白", "场景", "备注", "环境", "narration", "scene_description"}
-
 
 def _row_value(row: dict[str, Any], field: str) -> Any:
     lowered = {str(key).strip().lower(): value for key, value in row.items() if key is not None}
@@ -288,8 +286,11 @@ def _rows_to_segments(material: ResourceMaterial, rows: list[dict[str, Any]]) ->
             continue
         if not speaker and not row_type:
             raise ValueError(f"台词表第 {position} 行缺少台词或角色")
-        if not speaker and row_type not in NON_DIALOGUE_ROW_TYPES:
-            raise ValueError(f"台词表第 {position} 行缺少角色")
+        # 带类型列的台词表中环境描写、旁白等非对白行天然没有角色；类型为台词
+        # 但角色为空的行（画外音、群众对话等无明确说话人）与字幕/PDF场景一致，
+        # 不应阻断整份文件解析，保留speaker=None、speaker_origin=unknown，
+        # 交由资料校对流程标记为待校对。仅没有类型列的传统两列台词表
+        # （只有台词,角色）才要求角色必填。
         records.append(
             ParsedSegment(
                 content=quote,

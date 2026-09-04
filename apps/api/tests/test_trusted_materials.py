@@ -301,6 +301,7 @@ def test_qianfu_style_episode_page_csv_is_parsed(tmp_path):
                 "1,17,台词,林怀复,……据我所知，参加旧金山会议的代表。",
                 "1,17,旁白,,甲（OS）：是呀，前不久我外甥在津浦战役中率部起义。",
                 "1,18,台词,余则成,张名义，出什么事了？",
+                "1,18,台词,,爸爸……爸爸……",
             ]
         ),
         encoding="utf-8",
@@ -310,14 +311,18 @@ def test_qianfu_style_episode_page_csv_is_parsed(tmp_path):
         material_for(csv_path, file_format="csv", material_type="quote_sheet")
     )
 
-    assert len(records) == 4
+    assert len(records) == 5
     dialogue_records = [record for record in records if record.speaker]
     assert len(dialogue_records) == 2
     assert dialogue_records[0].speaker == "林怀复"
     assert dialogue_records[0].episode_number == 1
     assert dialogue_records[0].page_number == 17
-    non_dialogue_records = [record for record in records if not record.speaker]
-    assert len(non_dialogue_records) == 2
+    no_speaker_records = [record for record in records if not record.speaker]
+    assert len(no_speaker_records) == 3
+    no_speaker_dialogue = next(
+        record for record in no_speaker_records if record.content == "爸爸……爸爸……"
+    )
+    assert no_speaker_dialogue.speaker_origin == "unknown"
 
 
 def test_classic_quote_quiz_uses_material_and_preserves_snapshot(client, monkeypatch):

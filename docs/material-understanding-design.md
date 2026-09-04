@@ -88,7 +88,7 @@ PDF 场景（`parse_pdf_document`）同理，按页码窗口分组生成摘要�
 
 ## 5. CSV 台词格式兼容说明
 
-用户提供的《潜伏》台词 CSV 采用“集数,页码,类型,角色,内容”表头，其中`类型`为`环境描写/旁白/台词`等，环境描写和旁白行没有角色。`material_parser.py` 已扩展 `FIELD_ALIASES` 支持 `内容`→`content`、`类型`→`row_type`、`页码`→`page`、`集数`→`episode` 别名，并新增 `NON_DIALOGUE_ROW_TYPES` 白名单，允许这类无角色行通过解析（写入 `MaterialSegment` 但不生成 `QuoteEntry`，因为环境描写和旁白不是可引用的逐字台词）。这些行仍会进入资料理解层的摘要输入，有助于生成更完整的剧情背景摘要。已用完整版《潜伏》台词 CSV（14408 行，30 集）验证解析、集数分组均正确，`tests/test_trusted_materials.py::test_qianfu_style_episode_page_csv_is_parsed` 覆盖该格式的回归测试。
+用户提供的《潜伏》台词 CSV 采用“集数,页码,类型,角色,内容”表头，其中`类型`为`环境描写/旁白/台词`等，环境描写和旁白行没有角色。`material_parser.py` 已扩展 `FIELD_ALIASES` 支持 `内容`→`content`、`类型`→`row_type`、`页码`→`page`、`集数`→`episode` 别名。带`类型`列的台词表中，任何角色为空的行（不论 `row_type` 是环境描写、旁白，还是台词但确实没有明确说话人，例如画外音、群众对白）都会正常写入 `MaterialSegment`，保留 `speaker=None`、`speaker_origin="unknown"`，不会因为个别行缺角色而整份文件解析失败；只有 `content` 满足可引用长度阈值时才会同时生成 `QuoteEntry`（`review_status="pending"`），进入资料校对流程等待人工补充角色，与字幕/PDF 场景的“无角色台词待校对”策略一致。只有完全没有`类型`列的传统两列台词表（仅“台词,角色”）才要求每行角色必填，因为这种格式的每一行都被视为可直接出题的确定台词。已用完整版《潜伏》台词 CSV（14408 行，30 集，含 60 行无角色台词）验证解析、集数分组均正确，`tests/test_trusted_materials.py::test_qianfu_style_episode_page_csv_is_parsed` 覆盖该格式的回归测试。
 
 ## 6. 不做的事情
 
