@@ -347,6 +347,34 @@ def test_http_provider_accepts_paraphrased_trusted_quote_prompt(monkeypatch):
     assert "没有逐字使用可信台词" not in requests[0]["json"]["messages"][0]["content"]
 
 
+def test_repair_prompt_omits_history_and_keeps_referenced_source():
+    provider = HttpQuizAiProvider(make_configuration())
+    source_material = json.dumps(
+        [
+            {"quote_entry_id": "11111111-1111-1111-1111-111111111111", "quote": "相关台词"},
+            {"quote_entry_id": "22222222-2222-2222-2222-222222222222", "quote": "无关台词"},
+        ],
+        ensure_ascii=False,
+    )
+    messages = provider._repair_generation_messages(
+        [
+            {"role": "system", "content": "系统约束"},
+            {
+                "role": "user",
+                "content": "任务\n已考察事实参考（包含历史题目）：\n[{\"fact_claim\":\"旧事实\"}]\nSOURCE_MATERIAL：\n[...]",
+            },
+        ],
+        '{"quote_entry_ids":["11111111-1111-1111-1111-111111111111"]}',
+        "格式错误",
+        source_material=source_material,
+    )
+
+    content = messages[1]["content"]
+    assert "旧事实" not in content
+    assert "相关台词" in content
+    assert "无关台词" not in content
+
+
 def test_http_provider_combined_mode_accepts_pdf_and_quote_sources(monkeypatch):
     pdf_source = make_chunks()[0]
     quote_source = make_trusted_quote()

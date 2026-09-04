@@ -1488,7 +1488,7 @@ class HttpQuizAiProvider:
             (message["content"] for message in original_messages if message["role"] == "user"),
             "",
         )
-        original_user = re.split(r"\n已考察事实参考（.*?）:\n", original_user, maxsplit=1)[0]
+        original_user = re.split(r"\n已考察事实参考（.*?）[：:]\n", original_user, maxsplit=1)[0]
         original_user = original_user.split("\nSOURCE_MATERIAL：", 1)[0].strip()
         source_context = source_material.strip() or "无"
         try:
@@ -1498,13 +1498,12 @@ class HttpQuizAiProvider:
         if isinstance(source_rows, list):
             # Prefer records whose IDs occur in the invalid response. If the model omitted
             # an ID entirely, a tiny prefix still gives it enough context to repair shape.
-            invalid_ids = set(re.findall(r"(?:chunk|quote)[-_][A-Za-z0-9-]+", invalid_content))
             selected_rows = [
                 row
                 for row in source_rows
                 if isinstance(row, dict)
                 and any(
-                    str(row.get(key) or "") in invalid_ids
+                    str(row.get(key) or "") and str(row.get(key)) in invalid_content
                     for key in ("source_chunk_id", "quote_entry_id")
                 )
             ]
