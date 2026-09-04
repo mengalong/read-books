@@ -211,7 +211,9 @@ def test_exam_share_detail_paginates_attempts_and_aggregates_scores(client):
             )
         db.commit()
 
-    first_page = client.get(f"/api/exam-shares/{share['id']}")
+    first_page = client.get(
+        f"/api/exam-shares/{share['id']}?participation_year=2026&participation_month=1"
+    )
     assert first_page.status_code == 200
     first_body = first_page.json()
     assert first_body["attempts_total"] == 35
@@ -225,6 +227,11 @@ def test_exam_share_detail_paginates_attempts_and_aggregates_scores(client):
     assert first_body["above_threshold_count"] == 10
     assert first_body["above_threshold_rate"] == 33.3
     assert [bucket["count"] for bucket in first_body["score_distribution"]] == [20, 4, 3, 3, 0]
+    assert first_body["participation_granularity"] == "month"
+    assert len(first_body["participation_periods"]) == 31
+    assert first_body["participation_periods"][0]["period_key"] == "2026-01-01"
+    assert first_body["participation_periods"][0]["participant_count"] == 35
+    assert first_body["participation_periods"][0]["completed_count"] == 30
 
     second_page = client.get(
         f"/api/exam-shares/{share['id']}?attempt_page=2&attempt_page_size=10&attempt_sort=score_asc"
@@ -245,6 +252,94 @@ def test_exam_share_detail_paginates_attempts_and_aggregates_scores(client):
     assert filtered_body["attempts_total"] == 5
     assert len(filtered_body["attempts"]) == 5
     assert all(item["status"] == "in_progress" for item in filtered_body["attempts"])
+
+
+def test_exam_share_detail_searches_attempts_and_groups_participation(client):
+    _, quiz_id = create_shareable_quiz(client, "考试参与趋势测试书")
+    share = create_exam_share(client, quiz_id, "参与趋势考试")
+    with SessionLocal() as db:
+        base_time = datetime(2026, 1, 31, 16, 30, tzinfo=timezone.utc)
+        db.add_all(
+            [
+                ExamAttempt(
+                    exam_share_id=share["id"],
+                    participant_type="anonymous",
+                    participant_name="Alice",
+                    status="completed",
+                    total_score=80,
+                    max_score=100,
+                    started_at=base_time,
+                    completed_at=base_time + timedelta(hours=1),
+                    started_ip_address="203.0.113.10",
+                    submitted_ip_address="203.0.113.11",
+                ),
+                ExamAttempt(
+                    exam_share_id=share["id"],
+                    participant_type="anonymous",
+                    participant_name="Bob",
+                    status="grading",
+                    total_score=70,
+                    max_score=100,
+                    started_at=base_time + timedelta(days=1),
+                    submitted_at=base_time + timedelta(days=1, hours=1),
+                    started_ip_address="203.0.113.20",
+                    submitted_ip_address="203.0.113.20",
+                ),
+                ExamAttempt(
+                    exam_share_id=share["id"],
+                    participant_type="anonymous",
+                    participant_name="Carol",
+                    status="in_progress",
+                    total_score=None,
+                    max_score=100,
+                    started_at=base_time + timedelta(days=2),
+                    started_ip_address="198.51.100.9",
+                ),
+            ]
+        )
+        db.commit()
+
+    detail = client.get(
+        f"/api/exam-shares/{share['id']}?participation_year=2026&participation_month=2"
+    )
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["participation_granularity"] == "month"
+    assert len(body["participation_periods"]) == 28
+    periods = {item["period_key"]: item for item in body["participation_periods"]}
+    assert periods["2026-02-01"]["participant_count"] == 1
+    assert periods["2026-02-01"]["completed_count"] == 1
+    assert periods["2026-02-02"]["participant_count"] == 1
+    assert periods["2026-02-02"]["completed_count"] == 1
+    assert periods["2026-02-03"]["participant_count"] == 1
+    assert periods["2026-02-03"]["completed_count"] == 0
+
+    yearly = client.get(
+        f"/api/exam-shares/{share['id']}?participation_granularity=year&participation_year=2026&attempt_page_size=200"
+    )
+    assert yearly.status_code == 200
+    assert yearly.json()["attempts_page_size"] == 200
+    assert len(yearly.json()["participation_periods"]) == 12
+    assert yearly.json()["participation_periods"][1] == {
+        "period_key": "2026-02",
+        "period_label": "2026-02",
+        "participant_count": 3,
+        "completed_count": 2,
+    }
+
+    by_name = client.get(
+        f"/api/exam-shares/{share['id']}?attempt_search=Alice"
+    )
+    assert by_name.status_code == 200
+    assert by_name.json()["attempts_total"] == 1
+    assert by_name.json()["attempts"][0]["participant_name"] == "Alice"
+
+    by_ip = client.get(
+        f"/api/exam-shares/{share['id']}?attempt_search=198.51.100.9"
+    )
+    assert by_ip.status_code == 200
+    assert by_ip.json()["attempts_total"] == 1
+    assert by_ip.json()["attempts"][0]["participant_name"] == "Carol"
 
 
 def test_exam_share_edit_keeps_started_attempts_on_old_snapshot_and_deletes_history(client):

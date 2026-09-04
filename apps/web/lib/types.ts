@@ -691,6 +691,19 @@ export type ExamShare = {
   above_threshold_count?: number;
   above_threshold_rate?: number | null;
   score_distribution?: { label: string; min_score: number; max_score: number; count: number; percentage: number }[];
+  participation_granularity?: ExamParticipationGranularity;
+  participation_year?: number | null;
+  participation_month?: number | null;
+  participation_periods?: ExamParticipationPeriod[];
+};
+
+export type ExamParticipationGranularity = "month" | "year";
+
+export type ExamParticipationPeriod = {
+  period_key: string;
+  period_label: string;
+  participant_count: number;
+  completed_count: number;
 };
 
 export type ExamShareVersion = {

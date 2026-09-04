@@ -91,6 +91,12 @@ const examShare = {
     { label: "80–89", min_score: 80, max_score: 89, count: 0, percentage: 0 },
     { label: "90–100", min_score: 90, max_score: 100, count: 0, percentage: 0 },
   ],
+  participation_granularity: "month",
+  participation_year: 2026,
+  participation_month: 8,
+  participation_periods: [
+    { period_key: "2026-08-06", period_label: "2026-08-06", participant_count: 1, completed_count: 1 },
+  ],
 };
 
 test("未登录用户可以打开公开考试且移动端没有横向溢出", async ({ page }) => {
@@ -503,7 +509,7 @@ test("考试详情展示成绩分布、风控信息和个人学习方向", async
   await page.route("**/api/auth/me", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(currentUser) });
   });
-  await page.route("**/api/exam-shares/share-1", async (route) => {
+  await page.route("**/api/exam-shares/share-1**", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ...examShare, started_count: 1, submitted_count: 1, grading_count: 0, attempts: [attemptSummary] }) });
   });
   await page.route("**/api/exam-shares/share-1/attempts/attempt-completed", async (route) => {
@@ -514,8 +520,11 @@ test("考试详情展示成绩分布、风控信息和个人学习方向", async
   await page.getByRole("button", { name: "复制链接" }).click();
   await expect(page.getByRole("button", { name: "已复制" })).toBeVisible();
   expect(await readCopiedText(page)).toBe(`${new URL(page.url()).origin}/exams/public-code`);
-  await expect(page.getByRole("img", { name: /已评分 1 份/ })).toBeVisible();
-  await expect(page.locator(".score-distribution-bar").first()).toContainText("1");
+  await expect(page.getByRole("heading", { name: "参与考试人数" })).toBeVisible();
+  await expect(page.locator(".participation-calendar-weekdays")).toContainText("一");
+  await expect(page.locator(".participation-calendar-month .participation-calendar-cell")).toHaveCount(42);
+  await expect(page.locator(".participation-calendar-month .participation-calendar-cell").filter({ hasText: "6" }).first()).toContainText("参与 1");
+  await expect(page.getByRole("heading", { name: "成绩分布" })).toBeVisible();
   const attemptRow = page.locator(".attempt-table tbody tr").first();
   await expect(attemptRow.locator("td").nth(3)).toContainText("已完成");
   await expect(attemptRow.locator("td").nth(4)).toContainText("42.5 / 100");
@@ -526,6 +535,13 @@ test("考试详情展示成绩分布、风控信息和个人学习方向", async
   await expect(attemptRow.getByText("提交 IP 已变化")).toBeVisible();
   const actionCell = attemptRow.locator("td").last();
   expect(await actionCell.evaluate((element) => getComputedStyle(element).position)).toBe("sticky");
+  await page.getByLabel("搜索参与者名称或 IP").fill("203.0.113.10");
+  await page.getByRole("button", { name: "搜索答题记录" }).click();
+  await expect(page).toHaveURL(/search=203\.0\.113\.10/);
+  await page.getByLabel("每页显示记录数").selectOption("200");
+  await expect(page).toHaveURL(/page_size=200/);
+  await page.getByLabel("参与人数统计方式").selectOption("year");
+  await expect(page).toHaveURL(/granularity=year/);
   await expect(page.getByRole("button", { name: "查看林同学的答卷" })).toBeVisible();
   await expect(page.getByRole("button", { name: "下载林同学的答题报告" })).toBeVisible();
 

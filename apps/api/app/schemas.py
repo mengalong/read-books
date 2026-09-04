@@ -547,6 +547,13 @@ class ExamScoreDistribution(BaseModel):
     percentage: float
 
 
+class ExamParticipationPeriod(BaseModel):
+    period_key: str
+    period_label: str
+    participant_count: int
+    completed_count: int
+
+
 class ExamShareDetail(ExamShareSummary):
     attempts: list[ExamAttemptSummary] = Field(default_factory=list)
     attempts_total: int = 0
@@ -559,6 +566,10 @@ class ExamShareDetail(ExamShareSummary):
     above_threshold_count: int = 0
     above_threshold_rate: float | None = None
     score_distribution: list[ExamScoreDistribution] = Field(default_factory=list)
+    participation_granularity: Literal["month", "year"] = "month"
+    participation_year: int | None = None
+    participation_month: int | None = None
+    participation_periods: list[ExamParticipationPeriod] = Field(default_factory=list)
 
 
 class ExamShareVersionSummary(BaseModel):

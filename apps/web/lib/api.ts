@@ -398,13 +398,17 @@ export function getExamShares(filters: { search?: string; status?: ExamShareStat
 
 export function getExamShare(
   shareId: string,
-  options: { page?: number; pageSize?: number; status?: string; sort?: "latest" | "score_desc" | "score_asc" } = {},
+  options: { page?: number; pageSize?: number; status?: string; sort?: "latest" | "score_desc" | "score_asc"; search?: string; participationGranularity?: "month" | "year"; participationYear?: number; participationMonth?: number } = {},
 ) {
   const params = new URLSearchParams();
   if (options.page) params.set("attempt_page", String(options.page));
   if (options.pageSize) params.set("attempt_page_size", String(options.pageSize));
   if (options.status) params.set("attempt_status", options.status);
   if (options.sort) params.set("attempt_sort", options.sort);
+  if (options.search) params.set("attempt_search", options.search);
+  if (options.participationGranularity) params.set("participation_granularity", options.participationGranularity);
+  if (options.participationYear) params.set("participation_year", String(options.participationYear));
+  if (options.participationMonth) params.set("participation_month", String(options.participationMonth));
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<ExamShare>(`/exam-shares/${shareId}${suffix}`);
 }
@@ -470,13 +474,17 @@ export function getAdminExamShares(filters: { search?: string; ownerId?: string;
 
 export function getAdminExamShare(
   shareId: string,
-  options: { page?: number; pageSize?: number; status?: string; sort?: "latest" | "score_desc" | "score_asc" } = {},
+  options: { page?: number; pageSize?: number; status?: string; sort?: "latest" | "score_desc" | "score_asc"; search?: string; participationGranularity?: "month" | "year"; participationYear?: number; participationMonth?: number } = {},
 ) {
   const params = new URLSearchParams();
   if (options.page) params.set("attempt_page", String(options.page));
   if (options.pageSize) params.set("attempt_page_size", String(options.pageSize));
   if (options.status) params.set("attempt_status", options.status);
   if (options.sort) params.set("attempt_sort", options.sort);
+  if (options.search) params.set("attempt_search", options.search);
+  if (options.participationGranularity) params.set("participation_granularity", options.participationGranularity);
+  if (options.participationYear) params.set("participation_year", String(options.participationYear));
+  if (options.participationMonth) params.set("participation_month", String(options.participationMonth));
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<ExamShare>(`/admin/exam-shares/${shareId}${suffix}`);
 }

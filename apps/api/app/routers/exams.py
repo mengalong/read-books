@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import calendar
 import copy
 import hmac
 import secrets
+from collections import Counter
 from datetime import date, datetime, time, timedelta, timezone
 from statistics import median
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from sqlalchemy import func, or_, select
@@ -28,6 +31,7 @@ from app.schemas import (
     ExamAttemptCreate,
     ExamAttemptResponse,
     ExamAttemptSummary,
+    ExamParticipationPeriod,
     ExamQuestionResponse,
     ExamShareCreate,
     ExamShareDetail,
@@ -64,6 +68,8 @@ router = APIRouter(tags=["exam-shares"])
 admin_router = APIRouter(prefix="/admin/exam-shares", tags=["admin-exam-shares"])
 public_router = APIRouter(prefix="/public", tags=["public-exams"])
 settings = get_settings()
+BEIJING_TIMEZONE = ZoneInfo("Asia/Shanghai")
+ParticipationGranularity = Literal["month", "year"]
 
 
 def utc_now() -> datetime:
@@ -298,12 +304,25 @@ def to_share_detail(share: ExamShare) -> ExamShareDetail:
     )
 
 
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _attempt_filter_conditions(
-    share_id: str, attempt_status: str | None
+    share_id: str, attempt_status: str | None, attempt_search: str | None = None
 ) -> list[Any]:
     conditions: list[Any] = [ExamAttempt.exam_share_id == share_id]
     if attempt_status:
         conditions.append(ExamAttempt.status == attempt_status)
+    if attempt_search and attempt_search.strip():
+        keyword = f"%{_escape_like(attempt_search.strip())}%"
+        conditions.append(
+            or_(
+                ExamAttempt.participant_name.ilike(keyword, escape="\\"),
+                ExamAttempt.started_ip_address.ilike(keyword, escape="\\"),
+                ExamAttempt.submitted_ip_address.ilike(keyword, escape="\\"),
+            )
+        )
     return conditions
 
 
@@ -339,6 +358,92 @@ def _score_distribution(percentages: list[float]) -> list[dict[str, Any]]:
         }
         for (label, minimum, maximum, _), count in zip(buckets, counts, strict=True)
     ]
+
+
+def _participation_period_key(period_start: datetime, granularity: ParticipationGranularity) -> str:
+    if granularity == "month":
+        return period_start.strftime("%Y-%m-%d")
+    return period_start.strftime("%Y-%m")
+
+
+def _participation_periods(
+    db: Session,
+    share_id: str,
+    granularity: ParticipationGranularity,
+    *,
+    year: int,
+    month: int | None,
+) -> list[ExamParticipationPeriod]:
+    if granularity == "month":
+        if month is None:
+            raise ValueError("按月统计必须提供月份")
+        days_in_month = calendar.monthrange(year, month)[1]
+        period_starts = [
+            datetime(year, month, day, tzinfo=BEIJING_TIMEZONE)
+            for day in range(1, days_in_month + 1)
+        ]
+    else:
+        period_starts = [
+            datetime(year, current_month, 1, tzinfo=BEIJING_TIMEZONE)
+            for current_month in range(1, 13)
+        ]
+
+    rows = db.execute(
+        select(
+            ExamAttempt.started_at,
+            ExamAttempt.submitted_at,
+            ExamAttempt.completed_at,
+            ExamAttempt.status,
+        )
+        .where(ExamAttempt.exam_share_id == share_id)
+    ).all()
+
+    participant_counts: Counter[str] = Counter()
+    completed_counts: Counter[str] = Counter()
+    for started_at, submitted_at, completed_at, status in rows:
+        started_local = as_utc(started_at).astimezone(BEIJING_TIMEZONE)
+        started_period = (
+            datetime(started_local.year, started_local.month, started_local.day, tzinfo=BEIJING_TIMEZONE)
+            if granularity == "month"
+            else datetime(started_local.year, started_local.month, 1, tzinfo=BEIJING_TIMEZONE)
+        )
+        started_key = _participation_period_key(started_period, granularity)
+        participant_counts[started_key] += 1
+
+        if status in {"grading", "completed", "grading_failed"}:
+            completion_local = as_utc(completed_at or submitted_at or started_at).astimezone(
+                BEIJING_TIMEZONE
+            )
+            completion_period = (
+                datetime(
+                    completion_local.year,
+                    completion_local.month,
+                    completion_local.day,
+                    tzinfo=BEIJING_TIMEZONE,
+                )
+                if granularity == "month"
+                else datetime(
+                    completion_local.year,
+                    completion_local.month,
+                    1,
+                    tzinfo=BEIJING_TIMEZONE,
+                )
+            )
+            completion_key = _participation_period_key(completion_period, granularity)
+            completed_counts[completion_key] += 1
+
+    periods: list[ExamParticipationPeriod] = []
+    for period_start in period_starts:
+        key = _participation_period_key(period_start, granularity)
+        periods.append(
+            ExamParticipationPeriod(
+                period_key=key,
+                period_label=key,
+                participant_count=participant_counts.get(key, 0),
+                completed_count=completed_counts.get(key, 0),
+            )
+        )
+    return periods
 
 
 def _share_overview_summary(
@@ -434,9 +539,10 @@ def _share_attempt_page(
     page: int,
     page_size: int,
     attempt_status: str | None,
+    attempt_search: str | None,
     sort: str,
 ) -> tuple[list[ExamAttemptSummary], int]:
-    conditions = _attempt_filter_conditions(share_id, attempt_status)
+    conditions = _attempt_filter_conditions(share_id, attempt_status, attempt_search)
     total = int(db.scalar(select(func.count(ExamAttempt.id)).where(*conditions)) or 0)
     statement = select(ExamAttempt).where(*conditions)
     if sort == "score_desc":
@@ -462,7 +568,11 @@ def to_share_overview_detail(
     page: int,
     page_size: int,
     attempt_status: str | None,
+    attempt_search: str | None,
     sort: str,
+    participation_granularity: ParticipationGranularity,
+    participation_year: int,
+    participation_month: int | None,
 ) -> ExamShareDetail:
     summary, analytics = _share_overview_summary(db, share)
     attempts, total = _share_attempt_page(
@@ -471,6 +581,7 @@ def to_share_overview_detail(
         page=page,
         page_size=page_size,
         attempt_status=attempt_status,
+        attempt_search=attempt_search,
         sort=sort,
     )
     total_pages = max(1, (total + page_size - 1) // page_size)
@@ -482,6 +593,7 @@ def to_share_overview_detail(
             page=page,
             page_size=page_size,
             attempt_status=attempt_status,
+            attempt_search=attempt_search,
             sort=sort,
         )
     return ExamShareDetail(
@@ -490,6 +602,16 @@ def to_share_overview_detail(
         attempts_total=total,
         attempts_page=page,
         attempts_page_size=page_size,
+        participation_granularity=participation_granularity,
+        participation_year=participation_year,
+        participation_month=participation_month,
+        participation_periods=_participation_periods(
+            db,
+            share.id,
+            participation_granularity,
+            year=participation_year,
+            month=participation_month,
+        ),
         **analytics,
     )
 
@@ -790,21 +912,36 @@ def list_exam_shares(
 def get_exam_share(
     share_id: str,
     attempt_page: int = Query(default=1, ge=1),
-    attempt_page_size: int = Query(default=20, ge=1, le=100),
+    attempt_page_size: int = Query(default=20, ge=1, le=200),
     attempt_status: Literal["in_progress", "grading", "completed", "grading_failed"] | None = Query(
         default=None
     ),
     attempt_sort: Literal["latest", "score_desc", "score_asc"] = Query(default="latest"),
+    attempt_search: str | None = Query(default=None, max_length=120),
+    participation_granularity: ParticipationGranularity = Query(default="month"),
+    participation_year: int | None = Query(default=None, ge=1, le=9999),
+    participation_month: int | None = Query(default=None, ge=1, le=12),
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> ExamShareDetail:
+    current_local = utc_now().astimezone(BEIJING_TIMEZONE)
+    selected_year = participation_year or current_local.year
+    selected_month = (
+        participation_month or current_local.month
+        if participation_granularity == "month"
+        else None
+    )
     return to_share_overview_detail(
         db,
         get_owned_overview_share_or_404(db, share_id, identity),
         page=attempt_page,
         page_size=attempt_page_size,
         attempt_status=attempt_status,
+        attempt_search=attempt_search,
         sort=attempt_sort,
+        participation_granularity=participation_granularity,
+        participation_year=selected_year,
+        participation_month=selected_month,
     )
 
 
@@ -1529,14 +1666,25 @@ def get_admin_exam_share(
     share_id: str,
     request: Request,
     attempt_page: int = Query(default=1, ge=1),
-    attempt_page_size: int = Query(default=20, ge=1, le=100),
+    attempt_page_size: int = Query(default=20, ge=1, le=200),
     attempt_status: Literal["in_progress", "grading", "completed", "grading_failed"] | None = Query(
         default=None
     ),
     attempt_sort: Literal["latest", "score_desc", "score_asc"] = Query(default="latest"),
+    attempt_search: str | None = Query(default=None, max_length=120),
+    participation_granularity: ParticipationGranularity = Query(default="month"),
+    participation_year: int | None = Query(default=None, ge=1, le=9999),
+    participation_month: int | None = Query(default=None, ge=1, le=12),
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_admin),
 ) -> ExamShareDetail:
+    current_local = utc_now().astimezone(BEIJING_TIMEZONE)
+    selected_year = participation_year or current_local.year
+    selected_month = (
+        participation_month or current_local.month
+        if participation_granularity == "month"
+        else None
+    )
     share = get_admin_overview_share_or_404(db, share_id)
     add_audit_log(
         db,
@@ -1554,7 +1702,11 @@ def get_admin_exam_share(
         page=attempt_page,
         page_size=attempt_page_size,
         attempt_status=attempt_status,
+        attempt_search=attempt_search,
         sort=attempt_sort,
+        participation_granularity=participation_granularity,
+        participation_year=selected_year,
+        participation_month=selected_month,
     )
 
 
