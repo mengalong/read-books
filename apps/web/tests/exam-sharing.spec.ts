@@ -75,6 +75,20 @@ const examShare = {
   stopped_at: null,
   expires_at: null,
   last_attempt_at: "2026-08-06T09:00:00Z",
+  attempts_total: 4,
+  attempts_page: 1,
+  attempts_page_size: 20,
+  graded_count: 1,
+  median_score: 42.5,
+  above_threshold_count: 0,
+  above_threshold_rate: 0,
+  score_distribution: [
+    { label: "0–59", min_score: 0, max_score: 59, count: 1, percentage: 100 },
+    { label: "60–69", min_score: 60, max_score: 69, count: 0, percentage: 0 },
+    { label: "70–79", min_score: 70, max_score: 79, count: 0, percentage: 0 },
+    { label: "80–89", min_score: 80, max_score: 89, count: 0, percentage: 0 },
+    { label: "90–100", min_score: 90, max_score: 100, count: 0, percentage: 0 },
+  ],
 };
 
 test("未登录用户可以打开公开考试且移动端没有横向溢出", async ({ page }) => {
@@ -397,7 +411,7 @@ test("考试编辑页可以修改题目、重出单题并删除历史版本", as
   expect(deletedVersion).toBe(1);
 });
 
-test("考试详情展示成绩柱状图、风控信息和个人学习方向", async ({ page }) => {
+test("考试详情展示成绩分布、风控信息和个人学习方向", async ({ page }) => {
   await mockInsecureClipboard(page);
   const attemptSummary = {
     id: "attempt-completed",
@@ -498,8 +512,8 @@ test("考试详情展示成绩柱状图、风控信息和个人学习方向", as
   await page.getByRole("button", { name: "复制链接" }).click();
   await expect(page.getByRole("button", { name: "已复制" })).toBeVisible();
   expect(await readCopiedText(page)).toBe(`${new URL(page.url()).origin}/exams/public-code`);
-  await expect(page.getByRole("img", { name: "已完成参与者实际得分柱状图" })).toBeVisible();
-  await expect(page.locator(".score-bar")).toContainText("42.5");
+  await expect(page.getByRole("img", { name: /已评分 1 份/ })).toBeVisible();
+  await expect(page.locator(".score-distribution-bar").first()).toContainText("1");
   const attemptRow = page.locator(".attempt-table tbody tr").first();
   await expect(attemptRow.locator("td").nth(3)).toContainText("已完成");
   await expect(attemptRow.locator("td").nth(4)).toContainText("42.5 / 100");

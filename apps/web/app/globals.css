@@ -3820,93 +3820,65 @@ p {
   gap: 7px;
 }
 
-.score-chart-layout {
+.score-distribution-layout {
   display: grid;
-  gap: 9px;
-  grid-template-columns: 30px minmax(0, 1fr);
-  margin-top: 22px;
+  gap: 28px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.6fr);
+  margin-top: 18px;
 }
 
-.score-chart-axis {
-  color: var(--muted);
-  display: flex;
-  flex-direction: column;
-  font-size: 9px;
-  height: 220px;
-  justify-content: space-between;
-  padding-top: 1px;
-  text-align: right;
+.score-distribution-figure {
+  margin: 0;
+  min-width: 0;
 }
 
-.score-chart-scroll {
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-top: 8px;
-}
-
-.score-chart-plot {
-  height: 260px;
-  position: relative;
-}
-
-.score-chart-grid {
-  height: 220px;
-  inset: 0 0 auto;
-  pointer-events: none;
-  position: absolute;
-}
-
-.score-chart-grid i {
-  border-top: 1px solid #e7ebe8;
-  left: 0;
-  position: absolute;
-  right: 0;
-}
-
-.score-chart-bars {
+.score-distribution-bars {
+  align-items: stretch;
+  border-bottom: 1px solid #dfe7e2;
   display: grid;
-  gap: 14px;
-  grid-auto-columns: minmax(64px, 1fr);
-  grid-auto-flow: column;
-  height: 260px;
-  padding: 0 12px;
-  position: relative;
+  gap: 12px;
+  grid-template-columns: repeat(5, minmax(56px, 1fr));
+  height: 250px;
+  padding: 16px 8px 0;
 }
 
-.score-chart-item {
+.score-distribution-item {
   display: grid;
-  grid-template-rows: 220px 40px;
-  min-width: 64px;
+  grid-template-rows: minmax(0, 1fr) 24px 20px;
+  min-width: 0;
+  text-align: center;
 }
 
-.score-bar-track {
+.score-distribution-track {
   align-items: flex-end;
+  background: repeating-linear-gradient(to bottom, transparent 0, transparent 48px, #edf1ef 49px, transparent 50px);
   display: flex;
   justify-content: center;
+  min-height: 0;
 }
 
-.score-bar {
+.score-distribution-bar {
   border-radius: 4px 4px 0 0;
-  min-height: 2px;
+  min-height: 4px;
   position: relative;
-  width: 34px;
+  width: min(56px, 72%);
 }
 
-.score-bar.high {
+.score-distribution-bar.high {
   background: #4f8f73;
 }
 
-.score-bar.medium {
+.score-distribution-bar.medium {
   background: #d6a33e;
 }
 
-.score-bar.low {
+.score-distribution-bar.low {
   background: var(--red);
 }
 
-.score-bar strong {
+.score-distribution-bar strong {
   color: var(--ink);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   left: 50%;
   position: absolute;
@@ -3915,15 +3887,157 @@ p {
   white-space: nowrap;
 }
 
-.score-chart-item > span {
+.score-distribution-item > span {
   color: #52615d;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.35;
-  overflow: hidden;
-  padding-top: 8px;
-  text-align: center;
-  text-overflow: ellipsis;
+  padding-top: 7px;
   white-space: nowrap;
+}
+
+.score-distribution-item > small {
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  padding-top: 2px;
+}
+
+.score-distribution-figure figcaption {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  margin-top: 10px;
+}
+
+.score-distribution-summary {
+  min-width: 0;
+}
+
+.score-distribution-summary dl {
+  border-bottom: 1px solid #e3eae6;
+  display: grid;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding-bottom: 14px;
+}
+
+.score-distribution-summary dl > div {
+  align-items: baseline;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.score-distribution-summary dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.score-distribution-summary dd {
+  color: var(--ink);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  margin: 0;
+  text-align: right;
+}
+
+.score-distribution-summary dd small {
+  color: var(--muted);
+  display: block;
+  font-size: 10px;
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+.score-distribution-table {
+  border-collapse: collapse;
+  font-size: 11px;
+  width: 100%;
+}
+
+.score-distribution-table caption {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  text-align: left;
+}
+
+.score-distribution-table th,
+.score-distribution-table td {
+  border-bottom: 1px solid #e8edea;
+  padding: 6px 0;
+  text-align: right;
+}
+
+.score-distribution-table th:first-child {
+  color: #52615d;
+  font-weight: 400;
+  text-align: left;
+}
+
+.score-distribution-table td {
+  font-variant-numeric: tabular-nums;
+}
+
+.attempt-table-heading {
+  align-items: flex-end;
+}
+
+.attempt-table-heading > div:first-child {
+  min-width: 0;
+}
+
+.attempt-table-controls {
+  align-items: flex-end;
+  display: flex;
+  gap: 10px;
+}
+
+.attempt-table-controls label {
+  color: var(--muted);
+  display: grid;
+  font-size: 10px;
+  gap: 4px;
+}
+
+.attempt-table-controls select {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 11px;
+  height: 34px;
+  min-width: 112px;
+  padding: 0 8px;
+}
+
+.exam-table-wrap.is-refreshing {
+  opacity: 0.58;
+  pointer-events: none;
+}
+
+.attempt-pagination {
+  align-items: center;
+  border-top: 1px solid #e3eae6;
+  color: var(--muted);
+  display: flex;
+  font-size: 11px;
+  justify-content: space-between;
+  margin-top: 15px;
+  padding-top: 12px;
+}
+
+.attempt-pagination > div {
+  display: flex;
+  gap: 4px;
+}
+
+.attempt-pagination .button {
+  min-height: 30px;
+  padding: 0;
+  width: 30px;
 }
 
 .attempt-detail-modal {
@@ -5551,6 +5665,10 @@ p {
   .exam-detail-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .score-distribution-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -5811,6 +5929,31 @@ p {
   .share-link-strip {
     align-items: flex-start;
     display: grid;
+  }
+
+  .attempt-table-heading {
+    align-items: flex-start;
+    display: grid;
+    gap: 14px;
+  }
+
+  .attempt-table-controls {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .attempt-table-controls label {
+    flex: 1;
+  }
+
+  .attempt-table-controls select {
+    width: 100%;
+  }
+
+  .score-distribution-bars {
+    gap: 6px;
+    padding-left: 0;
+    padding-right: 0;
   }
 
   .exam-metrics,

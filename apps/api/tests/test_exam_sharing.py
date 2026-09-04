@@ -189,6 +189,62 @@ def create_exam_share(client, quiz_id: str, name: str = "读书复习公开考�
     return response.json()
 
 
+def test_exam_share_detail_paginates_attempts_and_aggregates_scores(client):
+    _, quiz_id = create_shareable_quiz(client, "考试成绩分布测试书")
+    share = create_exam_share(client, quiz_id, "成绩分布考试")
+    with SessionLocal() as db:
+        base_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        for index in range(35):
+            completed = index < 30
+            db.add(
+                ExamAttempt(
+                    exam_share_id=share["id"],
+                    participant_type="anonymous",
+                    participant_name=f"读者 {index + 1}",
+                    status="completed" if completed else "in_progress",
+                    total_score=float(index * 3) if completed else None,
+                    max_score=100,
+                    started_at=base_time + timedelta(minutes=index),
+                    submitted_at=base_time + timedelta(minutes=index + 1) if completed else None,
+                    completed_at=base_time + timedelta(minutes=index + 1) if completed else None,
+                )
+            )
+        db.commit()
+
+    first_page = client.get(f"/api/exam-shares/{share['id']}")
+    assert first_page.status_code == 200
+    first_body = first_page.json()
+    assert first_body["attempts_total"] == 35
+    assert first_body["attempts_page"] == 1
+    assert first_body["attempts_page_size"] == 20
+    assert len(first_body["attempts"]) == 20
+    assert first_body["graded_count"] == 30
+    assert first_body["median_score"] == 43.5
+    assert first_body["above_threshold_count"] == 10
+    assert first_body["above_threshold_rate"] == 33.3
+    assert [bucket["count"] for bucket in first_body["score_distribution"]] == [20, 4, 3, 3, 0]
+
+    second_page = client.get(
+        f"/api/exam-shares/{share['id']}?attempt_page=2&attempt_page_size=10&attempt_sort=score_asc"
+    )
+    assert second_page.status_code == 200
+    second_body = second_page.json()
+    assert second_body["attempts_total"] == 35
+    assert second_body["attempts_page"] == 2
+    assert second_body["attempts_page_size"] == 10
+    assert len(second_body["attempts"]) == 10
+    assert second_body["attempts"][0]["participant_name"] == "读者 11"
+
+    filtered = client.get(
+        f"/api/exam-shares/{share['id']}?attempt_status=in_progress"
+    )
+    assert filtered.status_code == 200
+    filtered_body = filtered.json()
+    assert filtered_body["attempts_total"] == 5
+    assert len(filtered_body["attempts"]) == 5
+    assert all(item["status"] == "in_progress" for item in filtered_body["attempts"])
+
+
 def test_exam_share_edit_keeps_started_attempts_on_old_snapshot_and_deletes_history(client):
     _, quiz_id = create_shareable_quiz(client, "考试版本隔离测试书")
     share = create_exam_share(client, quiz_id, "版本隔离考试")

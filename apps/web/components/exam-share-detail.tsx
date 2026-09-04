@@ -1,8 +1,9 @@
 "use client";
 
-import { ArrowLeft, BarChart3, Check, CircleX, Copy, Download, Eye, LoaderCircle, Monitor, PencilLine, RefreshCw, RotateCcw, ShieldAlert, Smartphone, Tablet, UserRound, X } from "lucide-react";
+import { ArrowLeft, BarChart3, Check, ChevronLeft, ChevronRight, CircleX, Copy, Download, Eye, LoaderCircle, Monitor, PencilLine, RefreshCw, RotateCcw, ShieldAlert, Smartphone, Tablet, UserRound, X } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ExamAttemptReport } from "@/components/exam-attempt-report";
 import { EmptyState, ErrorState, EvidenceList } from "@/components/ui";
@@ -11,7 +12,19 @@ import { ApiError, getAdminExamAttempt, getAdminExamShare, getExamAttemptForOwne
 import { copyText } from "@/lib/clipboard";
 import { downloadElementAsPng } from "@/lib/export-image";
 import { formatDateTime, formatDuration, formatScore } from "@/lib/format";
-import type { ExamAttempt, ExamAttemptSummary, ExamDeviceType, ExamQuestion, ExamShare, ExamShareStatus } from "@/lib/types";
+import type { ExamAttempt, ExamAttemptStatus, ExamAttemptSummary, ExamDeviceType, ExamQuestion, ExamShare, ExamShareStatus } from "@/lib/types";
+
+const ATTEMPTS_PAGE_SIZE = 20;
+type AttemptStatusFilter = "" | ExamAttemptStatus;
+type AttemptSort = "latest" | "score_desc" | "score_asc";
+
+function isAttemptStatus(value: string): value is ExamAttemptStatus {
+  return ["in_progress", "grading", "completed", "grading_failed"].includes(value);
+}
+
+function isAttemptSort(value: string): value is AttemptSort {
+  return ["latest", "score_desc", "score_asc"].includes(value);
+}
 
 const statusLabels: Record<ExamShareStatus, string> = {
   active: "分享中",
@@ -35,34 +48,73 @@ const deviceTypeLabels: Record<ExamDeviceType, string> = {
 };
 
 export function ExamShareDetailView({ shareId, admin = false }: { shareId: string; admin?: boolean }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialPage = Math.max(1, Number(searchParams.get("page") || 1) || 1);
+  const initialStatusParam = searchParams.get("status") || "";
+  const initialStatus: AttemptStatusFilter = isAttemptStatus(initialStatusParam) ? initialStatusParam : "";
+  const initialSortParam = searchParams.get("sort") || "latest";
+  const initialSort: AttemptSort = isAttemptSort(initialSortParam) ? initialSortParam : "latest";
   const [share, setShare] = useState<ExamShare | null>(null);
   const [selectedAttempt, setSelectedAttempt] = useState<ExamAttempt | null>(null);
   const [loading, setLoading] = useState(true);
+  const [attemptsLoading, setAttemptsLoading] = useState(false);
   const [attemptLoading, setAttemptLoading] = useState(false);
   const [exportingAttemptId, setExportingAttemptId] = useState<string | null>(null);
   const [reportAttempt, setReportAttempt] = useState<ExamAttempt | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
+  const [attemptPage, setAttemptPage] = useState(initialPage);
+  const [attemptStatus, setAttemptStatus] = useState<AttemptStatusFilter>(initialStatus);
+  const [attemptSort, setAttemptSort] = useState<AttemptSort>(initialSort);
   const reportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const nextPage = Math.max(1, Number(searchParams.get("page") || 1) || 1);
+    const nextStatusParam = searchParams.get("status") || "";
+    const nextStatus: AttemptStatusFilter = isAttemptStatus(nextStatusParam) ? nextStatusParam : "";
+    const nextSortParam = searchParams.get("sort") || "latest";
+    const nextSort: AttemptSort = isAttemptSort(nextSortParam) ? nextSortParam : "latest";
+    setAttemptPage(nextPage);
+    setAttemptStatus(nextStatus);
+    setAttemptSort(nextSort);
+  }, [searchParams]);
+
+  function updateAttemptUrl(page: number, status: AttemptStatusFilter, sort: AttemptSort) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (page > 1) params.set("page", String(page)); else params.delete("page");
+    if (status) params.set("status", status); else params.delete("status");
+    if (sort !== "latest") params.set("sort", sort); else params.delete("sort");
+    const query = params.toString();
+    router.replace(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });
+  }
 
   const load = useCallback(async () => {
     setError("");
+    setAttemptsLoading(true);
     try {
-      setShare(await (admin ? getAdminExamShare(shareId) : getExamShare(shareId)));
+      const options = {
+        ...(attemptPage > 1 ? { page: attemptPage } : {}),
+        ...(attemptStatus ? { status: attemptStatus } : {}),
+        ...(attemptSort !== "latest" ? { sort: attemptSort } : {}),
+      };
+      setShare(await (admin ? getAdminExamShare(shareId, options) : getExamShare(shareId, options)));
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "考试详情加载失败");
     } finally {
       setLoading(false);
+      setAttemptsLoading(false);
     }
-  }, [admin, shareId]);
+  }, [admin, attemptPage, attemptSort, attemptStatus, shareId]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    if (!share?.attempts?.some((attempt) => attempt.status === "grading")) return;
+    if (!share?.grading_count) return;
     const timer = window.setInterval(() => { void load(); }, 2500);
     return () => window.clearInterval(timer);
-  }, [load, share?.attempts]);
+  }, [load, share?.grading_count]);
   useEffect(() => {
     if (selectedAttempt?.status !== "grading") return;
     const attemptId = selectedAttempt.id;
@@ -77,11 +129,6 @@ export function ExamShareDetailView({ shareId, admin = false }: { shareId: strin
     const timer = window.setInterval(() => { void refresh(); }, 2500);
     return () => window.clearInterval(timer);
   }, [admin, selectedAttempt?.id, selectedAttempt?.status, shareId]);
-
-  const completedAttempts = useMemo(
-    () => share?.attempts?.filter((attempt) => attempt.status === "completed") || [],
-    [share?.attempts],
-  );
 
   async function copyLink() {
     if (!share) return;
@@ -143,6 +190,13 @@ export function ExamShareDetailView({ shareId, admin = false }: { shareId: strin
   if (loading) return <div className="page-wrap"><div className="loading-state">正在读取考试详情……</div></div>;
   if (!share) return <div className="page-wrap"><ErrorState message={error || "未找到这个考试活动"} /></div>;
 
+  const attempts = share.attempts || [];
+  const attemptsTotal = share.attempts_total ?? share.started_count;
+  const attemptsPage = share.attempts_page ?? attemptPage;
+  const attemptsPageSize = share.attempts_page_size ?? ATTEMPTS_PAGE_SIZE;
+  const totalAttemptPages = Math.max(1, Math.ceil(attemptsTotal / attemptsPageSize));
+  const hasAttemptFilter = Boolean(attemptStatus);
+
   return (
     <div className="page-wrap">
       <Link className="back-link" href={admin ? "/settings/exams" : "/exam-management"}><ArrowLeft size={14} />返回{admin ? "全平台考试" : "考试管理"}</Link>
@@ -157,15 +211,17 @@ export function ExamShareDetailView({ shareId, admin = false }: { shareId: strin
       <div className="metrics-grid exam-detail-metrics">
         <div className="metric"><div className="metric-label">开始答题</div><div className="metric-value">{share.started_count}<span className="metric-detail">人次</span></div></div>
         <div className="metric"><div className="metric-label">已经交卷</div><div className="metric-value">{share.submitted_count}<span className="metric-detail">份</span></div></div>
+        <div className="metric"><div className="metric-label">完成率</div><div className="metric-value">{share.completion_rate}<span className="metric-detail">%</span></div></div>
+        <div className="metric"><div className="metric-label">已完成评分</div><div className="metric-value">{share.graded_count ?? 0}<span className="metric-detail">份</span></div></div>
         <div className="metric"><div className="metric-label">平均得分率</div><div className="metric-value">{share.average_score === null ? "—" : `${share.average_score}%`}</div></div>
-        <div className="metric"><div className="metric-label">最高得分率</div><div className="metric-value">{share.highest_score === null ? "—" : `${share.highest_score}%`}</div></div>
+        <div className="metric"><div className="metric-label">中位数得分率</div><div className="metric-value">{share.median_score === null || share.median_score === undefined ? "—" : `${share.median_score}%`}</div></div>
       </div>
 
-      <ExamScoreChart attempts={completedAttempts} />
+      <ExamScoreDistribution distribution={share.score_distribution || []} gradedCount={share.graded_count || 0} aboveThresholdCount={share.above_threshold_count || 0} aboveThresholdRate={share.above_threshold_rate ?? null} />
 
       <section className="content-panel exam-attempt-panel">
-        <div className="section-title"><h2>答题记录</h2><span>{completedAttempts.length} 份已完成 · {share.grading_count} 份评分中</span></div>
-        {!share.attempts?.length ? <EmptyState title="还没有参与者" detail="分享链接被打开并开始答题后，记录会出现在这里。" /> : <div className="exam-table-wrap"><table className="exam-table attempt-table"><thead><tr><th>参与者</th><th>身份</th><th>终端 / IP</th><th>状态</th><th>得分</th><th>用时</th><th>开始时间</th><th>提交时间</th><th className="attempt-actions-cell">操作</th></tr></thead><tbody>{share.attempts.map((attempt) => <tr key={attempt.id}>
+        <div className="section-title attempt-table-heading"><div><h2>答题记录</h2><span>{hasAttemptFilter ? `${attemptsTotal} 份匹配记录` : `${share.graded_count || 0} 份已完成评分 · ${share.grading_count} 份评分中`}</span></div><div className="attempt-table-controls"><label>状态<select aria-label="按答卷状态筛选" onChange={(event) => { const next = event.target.value as AttemptStatusFilter; setAttemptStatus(next); setAttemptPage(1); updateAttemptUrl(1, next, attemptSort); }} value={attemptStatus}><option value="">全部状态</option><option value="in_progress">答题中</option><option value="grading">评分中</option><option value="completed">已完成</option><option value="grading_failed">评分失败</option></select></label><label>排序<select aria-label="答卷排序" onChange={(event) => { const next = event.target.value as AttemptSort; setAttemptSort(next); setAttemptPage(1); updateAttemptUrl(1, attemptStatus, next); }} value={attemptSort}><option value="latest">最近提交</option><option value="score_desc">得分从高到低</option><option value="score_asc">得分从低到高</option></select></label></div></div>
+        {!attempts.length ? <EmptyState title={hasAttemptFilter ? "没有符合条件的答卷" : "还没有参与者"} detail={hasAttemptFilter ? "调整状态筛选后再试。" : "分享链接被打开并开始答题后，记录会出现在这里。"} /> : <div className={`exam-table-wrap${attemptsLoading ? " is-refreshing" : ""}`}><table className="exam-table attempt-table"><thead><tr><th>参与者</th><th>身份</th><th>终端 / IP</th><th>状态</th><th>得分</th><th>用时</th><th>开始时间</th><th>提交时间</th><th className="attempt-actions-cell">操作</th></tr></thead><tbody>{attempts.map((attempt) => <tr key={attempt.id}>
           <td><div className="attempt-participant-cell"><span className="participant-avatar">{attempt.participant_avatar_url ? <img alt="" src={attempt.participant_avatar_url} /> : <UserRound size={14} />}</span><strong>{attempt.participant_name}</strong></div></td>
           <td><span className={`participant-type ${attempt.participant_type === "wechat" ? "wechat" : ""}`}><UserRound size={13} />{attempt.participant_type === "user" ? "平台用户" : attempt.participant_type === "wechat" ? "微信认证" : "匿名参与者"}</span></td>
           <td><div className="attempt-device-cell"><span>{deviceIcon(attempt.device_type)}{attempt.device_type ? deviceTypeLabels[attempt.device_type] : "历史记录未采集"}</span><small>{attempt.started_ip_address || "IP 未采集"}</small>{attempt.ip_changed && <small className="ip-change-warning"><ShieldAlert size={11} />提交 IP 已变化</small>}</div></td>
@@ -174,6 +230,7 @@ export function ExamShareDetailView({ shareId, admin = false }: { shareId: strin
           <td>{formatDuration(attempt.elapsed_seconds)}</td><td>{formatDateTime(attempt.started_at)}</td><td>{formatDateTime(attempt.submitted_at)}</td>
           <td className="attempt-actions-cell"><div className="attempt-action-buttons"><button aria-label={`查看${attempt.participant_name}的答卷`} className="button button-quiet" disabled={attemptLoading} onClick={() => void openAttempt(attempt.id)} title="查看答卷" type="button"><Eye size={15} /></button>{attempt.status === "completed" && <button aria-label={`下载${attempt.participant_name}的答题报告`} className="button button-quiet" disabled={exportingAttemptId !== null} onClick={() => void exportAttempt(attempt.id)} title="下载报告长图" type="button">{exportingAttemptId === attempt.id ? <LoaderCircle className="spin" size={15} /> : <Download size={15} />}</button>}</div></td>
         </tr>)}</tbody></table></div>}
+        {attemptsTotal > 0 && <div className="attempt-pagination"><span aria-live="polite">{attemptsLoading ? "正在刷新…" : `第 ${attemptsPage} / ${totalAttemptPages} 页 · 共 ${attemptsTotal} 份`}</span><div><button aria-label="上一页" className="button button-quiet" disabled={attemptsPage <= 1 || attemptsLoading} onClick={() => { const next = attemptsPage - 1; setAttemptPage(next); updateAttemptUrl(next, attemptStatus, attemptSort); }} title="上一页" type="button"><ChevronLeft size={16} /></button><button aria-label="下一页" className="button button-quiet" disabled={attemptsPage >= totalAttemptPages || attemptsLoading} onClick={() => { const next = attemptsPage + 1; setAttemptPage(next); updateAttemptUrl(next, attemptStatus, attemptSort); }} title="下一页" type="button"><ChevronRight size={16} /></button></div></div>}
       </section>
 
       {selectedAttempt && <div className="modal-backdrop attempt-modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setSelectedAttempt(null); }} role="presentation"><section aria-labelledby="attempt-detail-title" aria-modal="true" className="modal-panel attempt-detail-modal" role="dialog">
@@ -208,28 +265,22 @@ function deviceIcon(deviceType: ExamDeviceType | null) {
   return <Monitor aria-hidden="true" size={13} />;
 }
 
-function ExamScoreChart({ attempts }: { attempts: ExamAttemptSummary[] }) {
-  const chartWidth = Math.max(560, attempts.length * 86);
+function ExamScoreDistribution({ distribution, gradedCount, aboveThresholdCount, aboveThresholdRate }: { distribution: { label: string; min_score: number; max_score: number; count: number; percentage: number }[]; gradedCount: number; aboveThresholdCount: number; aboveThresholdRate: number | null }) {
+  const maxCount = Math.max(1, ...distribution.map((bucket) => bucket.count));
   return (
     <section className="content-panel exam-score-panel">
-      <div className="section-title"><h2><BarChart3 size={17} />参与者得分</h2><span>仅统计已完成评分的答卷</span></div>
-      {attempts.length === 0 ? (
+      <div className="section-title"><h2><BarChart3 size={17} />成绩分布</h2><span>按得分区间统计已完成评分的答卷</span></div>
+      {gradedCount === 0 ? (
         <EmptyState title="暂无可统计成绩" detail="参与者完成答题和评分后，成绩会显示在这里。" />
       ) : (
-        <div className="score-chart-layout" role="img" aria-label="已完成参与者实际得分柱状图">
-          <div className="score-chart-axis" aria-hidden="true">{[100, 75, 50, 25, 0].map((value) => <span key={value}>{value}</span>)}</div>
-          <div className="score-chart-scroll">
-            <div className="score-chart-plot" style={{ minWidth: chartWidth }}>
-              <div className="score-chart-grid" aria-hidden="true">{[100, 75, 50, 25, 0].map((value) => <i key={value} style={{ top: `${100 - value}%` }} />)}</div>
-              <div className="score-chart-bars">
-                {attempts.map((attempt) => {
-                  const percentage = Math.max(0, Math.min(100, attempt.score_percentage || 0));
-                  const scoreClass = percentage < 60 ? "low" : percentage < 80 ? "medium" : "high";
-                  return <div className="score-chart-item" key={attempt.id} title={`${attempt.participant_name}：${formatScore(attempt.total_score)} 分`}><div className="score-bar-track"><div className={`score-bar ${scoreClass}`} style={{ height: `${Math.max(percentage, 1)}%` }}><strong>{formatScore(attempt.total_score)}</strong></div></div><span>{attempt.participant_name}</span></div>;
-                })}
-              </div>
+        <div className="score-distribution-layout">
+          <figure className="score-distribution-figure" aria-label="已完成评分答卷的成绩区间分布">
+            <div className="score-distribution-bars" role="img" aria-label={`已评分 ${gradedCount} 份，成绩分布为 ${distribution.map((bucket) => `${bucket.label} ${bucket.count} 人`).join("，")}`}>
+              {distribution.map((bucket) => <div className="score-distribution-item" key={bucket.label}><div className="score-distribution-track"><div className={`score-distribution-bar ${bucket.min_score < 60 ? "low" : bucket.min_score < 80 ? "medium" : "high"}`} style={{ height: `${Math.max(bucket.count / maxCount * 100, 2)}%` }}><strong>{bucket.count}</strong></div></div><span>{bucket.label}</span><small>{bucket.percentage}%</small></div>)}
             </div>
-          </div>
+            <figcaption>每根柱显示人数，下方为该区间占已评分答卷的比例。</figcaption>
+          </figure>
+          <div className="score-distribution-summary"><dl><div><dt>已完成评分</dt><dd>{gradedCount} 份</dd></div><div><dt>60 分以上</dt><dd>{aboveThresholdRate === null ? "—" : `${aboveThresholdRate}%`}<small>{aboveThresholdCount} 份</small></dd></div></dl><table className="score-distribution-table"><caption>成绩区间明细</caption><thead><tr><th>区间</th><th>人数</th><th>占比</th></tr></thead><tbody>{distribution.map((bucket) => <tr key={bucket.label}><th scope="row">{bucket.label}</th><td>{bucket.count}</td><td>{bucket.percentage}%</td></tr>)}</tbody></table></div>
         </div>
       )}
     </section>

@@ -4,10 +4,11 @@ import copy
 import hmac
 import secrets
 from datetime import date, datetime, time, timedelta, timezone
+from statistics import median
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.database import get_db
@@ -108,6 +109,10 @@ def share_statement():
     )
 
 
+def overview_share_statement():
+    return select(ExamShare).options(selectinload(ExamShare.owner_user))
+
+
 def edit_share_statement():
     return select(ExamShare).options(
         selectinload(ExamShare.owner_user),
@@ -131,6 +136,28 @@ def get_owned_share_or_404(db: Session, share_id: str, identity: AuthIdentity) -
 
 def get_admin_share_or_404(db: Session, share_id: str) -> ExamShare:
     share = db.scalar(share_statement().where(ExamShare.id == share_id))
+    if share is None:
+        raise HTTPException(status_code=404, detail="未找到这个考试活动")
+    return share
+
+
+def get_owned_overview_share_or_404(
+    db: Session, share_id: str, identity: AuthIdentity
+) -> ExamShare:
+    share = db.scalar(
+        overview_share_statement().where(
+            ExamShare.id == share_id,
+            ExamShare.workspace_id == identity.workspace.id,
+            ExamShare.owner_user_id == identity.user.id,
+        )
+    )
+    if share is None:
+        raise HTTPException(status_code=404, detail="未找到这个考试活动")
+    return share
+
+
+def get_admin_overview_share_or_404(db: Session, share_id: str) -> ExamShare:
+    share = db.scalar(overview_share_statement().where(ExamShare.id == share_id))
     if share is None:
         raise HTTPException(status_code=404, detail="未找到这个考试活动")
     return share
@@ -268,6 +295,199 @@ def to_share_detail(share: ExamShare) -> ExamShareDetail:
             to_attempt_summary(attempt)
             for attempt in sorted(share.attempts, key=lambda item: item.started_at, reverse=True)
         ],
+    )
+
+
+def _attempt_filter_conditions(
+    share_id: str, attempt_status: str | None
+) -> list[Any]:
+    conditions: list[Any] = [ExamAttempt.exam_share_id == share_id]
+    if attempt_status:
+        conditions.append(ExamAttempt.status == attempt_status)
+    return conditions
+
+
+def _score_distribution(percentages: list[float]) -> list[dict[str, Any]]:
+    buckets = [
+        ("0–59", 0, 59, 0),
+        ("60–69", 60, 69, 0),
+        ("70–79", 70, 79, 0),
+        ("80–89", 80, 89, 0),
+        ("90–100", 90, 100, 0),
+    ]
+    counts = [0] * len(buckets)
+    for percentage in percentages:
+        if percentage < 60:
+            index = 0
+        elif percentage < 70:
+            index = 1
+        elif percentage < 80:
+            index = 2
+        elif percentage < 90:
+            index = 3
+        else:
+            index = 4
+        counts[index] += 1
+    total = len(percentages)
+    return [
+        {
+            "label": label,
+            "min_score": minimum,
+            "max_score": maximum,
+            "count": count,
+            "percentage": round(count / total * 100, 1) if total else 0,
+        }
+        for (label, minimum, maximum, _), count in zip(buckets, counts, strict=True)
+    ]
+
+
+def _share_overview_summary(
+    db: Session, share: ExamShare
+) -> tuple[ExamShareSummary, dict[str, Any]]:
+    conditions = _attempt_filter_conditions(share.id, None)
+    status_rows = db.execute(
+        select(ExamAttempt.status, func.count(ExamAttempt.id))
+        .where(*conditions)
+        .group_by(ExamAttempt.status)
+    ).all()
+    status_counts = {str(status): int(count) for status, count in status_rows}
+    total = sum(status_counts.values())
+    submitted_count = total - status_counts.get("in_progress", 0)
+    score_rows = db.execute(
+        select(ExamAttempt.total_score, ExamAttempt.max_score)
+        .where(
+            ExamAttempt.exam_share_id == share.id,
+            ExamAttempt.status == "completed",
+            ExamAttempt.total_score.is_not(None),
+            ExamAttempt.max_score > 0,
+        )
+    ).all()
+    percentages = [
+        round(float(score) / float(max_score) * 100, 1)
+        for score, max_score in score_rows
+    ]
+    question_count, single_count, multiple_count, short_count = question_counts(share)
+    summary = ExamShareSummary(
+        id=share.id,
+        share_code=share.share_code,
+        name=share.name,
+        status=effective_share_status(share),
+        quiz_id=share.quiz_id,
+        book_id=share.book_id,
+        owner_user_id=share.owner_user_id,
+        owner_username=share.owner_user.username,
+        owner_display_name=share.owner_user.display_name,
+        workspace_id=share.workspace_id,
+        book_title=share.book_title,
+        book_author=share.book_author,
+        quiz_title=share.quiz_title,
+        source_mode=share.source_mode,
+        generation_theme=str(snapshot_payload(share).get("generation_theme", "general")),
+        theme_config=dict(snapshot_payload(share).get("theme_config") or {}),
+        difficulty=share.difficulty,
+        duration_minutes=share.duration_minutes,
+        max_score=share.max_score,
+        question_count=question_count,
+        single_count=single_count,
+        multiple_count=multiple_count,
+        short_count=short_count,
+        started_count=total,
+        submitted_count=submitted_count,
+        grading_count=status_counts.get("grading", 0),
+        grading_failed_count=status_counts.get("grading_failed", 0),
+        completion_rate=round(submitted_count / total * 100, 1) if total else 0,
+        average_score=round(sum(percentages) / len(percentages), 1) if percentages else None,
+        highest_score=round(max(percentages), 1) if percentages else None,
+        created_at=share.created_at,
+        updated_at=share.updated_at,
+        stopped_at=share.stopped_at,
+        expires_at=share.expires_at,
+        last_attempt_at=share.last_attempt_at
+        or db.scalar(
+            select(func.max(ExamAttempt.started_at)).where(
+                ExamAttempt.exam_share_id == share.id
+            )
+        ),
+    )
+    above_threshold_count = sum(percentage >= 60 for percentage in percentages)
+    analytics = {
+        "graded_count": len(percentages),
+        "median_score": round(float(median(percentages)), 1) if percentages else None,
+        "above_threshold_count": above_threshold_count,
+        "above_threshold_rate": (
+            round(above_threshold_count / len(percentages) * 100, 1)
+            if percentages
+            else None
+        ),
+        "score_distribution": _score_distribution(percentages),
+    }
+    return summary, analytics
+
+
+def _share_attempt_page(
+    db: Session,
+    share_id: str,
+    *,
+    page: int,
+    page_size: int,
+    attempt_status: str | None,
+    sort: str,
+) -> tuple[list[ExamAttemptSummary], int]:
+    conditions = _attempt_filter_conditions(share_id, attempt_status)
+    total = int(db.scalar(select(func.count(ExamAttempt.id)).where(*conditions)) or 0)
+    statement = select(ExamAttempt).where(*conditions)
+    if sort == "score_desc":
+        statement = statement.order_by(
+            ExamAttempt.total_score.desc().nullslast(), ExamAttempt.started_at.desc()
+        )
+    elif sort == "score_asc":
+        statement = statement.order_by(
+            ExamAttempt.total_score.asc().nullslast(), ExamAttempt.started_at.desc()
+        )
+    else:
+        statement = statement.order_by(ExamAttempt.started_at.desc())
+    attempts = list(
+        db.scalars(statement.offset((page - 1) * page_size).limit(page_size)).all()
+    )
+    return [to_attempt_summary(attempt) for attempt in attempts], total
+
+
+def to_share_overview_detail(
+    db: Session,
+    share: ExamShare,
+    *,
+    page: int,
+    page_size: int,
+    attempt_status: str | None,
+    sort: str,
+) -> ExamShareDetail:
+    summary, analytics = _share_overview_summary(db, share)
+    attempts, total = _share_attempt_page(
+        db,
+        share.id,
+        page=page,
+        page_size=page_size,
+        attempt_status=attempt_status,
+        sort=sort,
+    )
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    if page > total_pages:
+        page = total_pages
+        attempts, total = _share_attempt_page(
+            db,
+            share.id,
+            page=page,
+            page_size=page_size,
+            attempt_status=attempt_status,
+            sort=sort,
+        )
+    return ExamShareDetail(
+        **summary.model_dump(),
+        attempts=attempts,
+        attempts_total=total,
+        attempts_page=page,
+        attempts_page_size=page_size,
+        **analytics,
     )
 
 
@@ -566,10 +786,23 @@ def list_exam_shares(
 @router.get("/exam-shares/{share_id}", response_model=ExamShareDetail)
 def get_exam_share(
     share_id: str,
+    attempt_page: int = Query(default=1, ge=1),
+    attempt_page_size: int = Query(default=20, ge=1, le=100),
+    attempt_status: Literal["in_progress", "grading", "completed", "grading_failed"] | None = Query(
+        default=None
+    ),
+    attempt_sort: Literal["latest", "score_desc", "score_asc"] = Query(default="latest"),
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> ExamShareDetail:
-    return to_share_detail(get_owned_share_or_404(db, share_id, identity))
+    return to_share_overview_detail(
+        db,
+        get_owned_overview_share_or_404(db, share_id, identity),
+        page=attempt_page,
+        page_size=attempt_page_size,
+        attempt_status=attempt_status,
+        sort=attempt_sort,
+    )
 
 
 @router.patch("/exam-shares/{share_id}", response_model=ExamShareDetail)
@@ -1292,10 +1525,16 @@ def list_admin_exam_shares(
 def get_admin_exam_share(
     share_id: str,
     request: Request,
+    attempt_page: int = Query(default=1, ge=1),
+    attempt_page_size: int = Query(default=20, ge=1, le=100),
+    attempt_status: Literal["in_progress", "grading", "completed", "grading_failed"] | None = Query(
+        default=None
+    ),
+    attempt_sort: Literal["latest", "score_desc", "score_asc"] = Query(default="latest"),
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_admin),
 ) -> ExamShareDetail:
-    share = get_admin_share_or_404(db, share_id)
+    share = get_admin_overview_share_or_404(db, share_id)
     add_audit_log(
         db,
         actor_user_id=identity.user.id,
@@ -1306,7 +1545,14 @@ def get_admin_exam_share(
         ip_address=client_ip(request),
     )
     db.commit()
-    return to_share_detail(share)
+    return to_share_overview_detail(
+        db,
+        share,
+        page=attempt_page,
+        page_size=attempt_page_size,
+        attempt_status=attempt_status,
+        sort=attempt_sort,
+    )
 
 
 @admin_router.get(

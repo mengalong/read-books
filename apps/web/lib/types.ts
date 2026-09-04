@@ -681,6 +681,14 @@ export type ExamShare = {
   expires_at: string | null;
   last_attempt_at: string | null;
   attempts?: ExamAttemptSummary[];
+  attempts_total?: number;
+  attempts_page?: number;
+  attempts_page_size?: number;
+  graded_count?: number;
+  median_score?: number | null;
+  above_threshold_count?: number;
+  above_threshold_rate?: number | null;
+  score_distribution?: { label: string; min_score: number; max_score: number; count: number; percentage: number }[];
 };
 
 export type ExamShareVersion = {

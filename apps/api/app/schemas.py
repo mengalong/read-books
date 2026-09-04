@@ -539,8 +539,24 @@ class ExamShareSummary(BaseModel):
     last_attempt_at: datetime | None
 
 
+class ExamScoreDistribution(BaseModel):
+    label: str
+    min_score: int
+    max_score: int
+    count: int
+    percentage: float
+
+
 class ExamShareDetail(ExamShareSummary):
     attempts: list[ExamAttemptSummary] = Field(default_factory=list)
+    attempts_total: int = 0
+    attempts_page: int = 1
+    attempts_page_size: int = 20
+    graded_count: int = 0
+    median_score: float | None = None
+    above_threshold_count: int = 0
+    above_threshold_rate: float | None = None
+    score_distribution: list[ExamScoreDistribution] = Field(default_factory=list)
 
 
 class ExamShareVersionSummary(BaseModel):

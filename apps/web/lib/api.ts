@@ -396,8 +396,17 @@ export function getExamShares(filters: { search?: string; status?: ExamShareStat
   return apiFetch<ExamShare[]>(`/exam-shares${suffix}`);
 }
 
-export function getExamShare(shareId: string) {
-  return apiFetch<ExamShare>(`/exam-shares/${shareId}`);
+export function getExamShare(
+  shareId: string,
+  options: { page?: number; pageSize?: number; status?: string; sort?: "latest" | "score_desc" | "score_asc" } = {},
+) {
+  const params = new URLSearchParams();
+  if (options.page) params.set("attempt_page", String(options.page));
+  if (options.pageSize) params.set("attempt_page_size", String(options.pageSize));
+  if (options.status) params.set("attempt_status", options.status);
+  if (options.sort) params.set("attempt_sort", options.sort);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<ExamShare>(`/exam-shares/${shareId}${suffix}`);
 }
 
 export function getEditableExamShare(shareId: string) {
@@ -459,8 +468,17 @@ export function getAdminExamShares(filters: { search?: string; ownerId?: string;
   return apiFetch<ExamShare[]>(`/admin/exam-shares${suffix}`);
 }
 
-export function getAdminExamShare(shareId: string) {
-  return apiFetch<ExamShare>(`/admin/exam-shares/${shareId}`);
+export function getAdminExamShare(
+  shareId: string,
+  options: { page?: number; pageSize?: number; status?: string; sort?: "latest" | "score_desc" | "score_asc" } = {},
+) {
+  const params = new URLSearchParams();
+  if (options.page) params.set("attempt_page", String(options.page));
+  if (options.pageSize) params.set("attempt_page_size", String(options.pageSize));
+  if (options.status) params.set("attempt_status", options.status);
+  if (options.sort) params.set("attempt_sort", options.sort);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<ExamShare>(`/admin/exam-shares/${shareId}${suffix}`);
 }
 
 export function getAdminExamAttempt(shareId: string, attemptId: string) {
