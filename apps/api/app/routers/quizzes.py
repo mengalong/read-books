@@ -177,7 +177,50 @@ def to_quiz_response(quiz: Quiz, reveal_answers: bool = False) -> QuizResponse:
     )
 
 
-def to_generation_response(task: QuizGenerationTask) -> QuizGenerationTaskResponse:
+def _legacy_question_states(task: QuizGenerationTask, db: Session) -> list[dict[str, object]]:
+    if task.status != "completed" or not task.quiz_id:
+        return list(task.question_states or [])
+    states = list(task.question_states or [])
+    if states and any(
+        isinstance(state, dict) and state.get("status") in {"ready", "confirmed"}
+        for state in states
+    ):
+        return states
+    questions = db.scalars(
+        select(Question).where(Question.quiz_id == task.quiz_id).order_by(Question.position)
+    ).all()
+    if not questions:
+        return states
+    return [
+        {
+            "position": question.position,
+            "question_type": question.question_type,
+            "status": "ready",
+            "attempts": 0,
+            "error_message": None,
+            "question": {
+                "question_type": question.question_type,
+                "prompt": question.prompt,
+                "options": list(question.options or []),
+                "correct_answers": list(question.correct_answers or []),
+                "explanation": question.explanation,
+                "knowledge_point": question.knowledge_point,
+                "estimated_seconds": question.estimated_seconds,
+                "reference_answer": question.reference_answer,
+                "grading_rubric": list(question.grading_rubric or []),
+                "source_chunk_ids": list(question.source_chunk_ids or []),
+                "source_evidence": list(question.source_evidence or []),
+                "max_score": question.max_score,
+            },
+            "updated_at": question.updated_at,
+        }
+        for question in questions
+    ]
+
+
+def to_generation_response(
+    task: QuizGenerationTask, db: Session | None = None
+) -> QuizGenerationTaskResponse:
     return QuizGenerationTaskResponse(
         id=task.id,
         book_id=task.book_id,
@@ -197,7 +240,11 @@ def to_generation_response(task: QuizGenerationTask) -> QuizGenerationTaskRespon
         short_count=task.short_count,
         quiz_id=task.quiz_id,
         error_message=task.error_message,
-        question_states=list(task.question_states or []),
+        question_states=(
+            _legacy_question_states(task, db)
+            if db is not None
+            else list(task.question_states or [])
+        ),
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
@@ -300,7 +347,7 @@ def generate_quiz(
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return to_generation_response(task)
+    return to_generation_response(task, db)
 
 
 @router.get(
@@ -352,7 +399,7 @@ def intervene_generation_task(
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return to_generation_response(updated)
+    return to_generation_response(updated, db)
 
 
 @router.get(
