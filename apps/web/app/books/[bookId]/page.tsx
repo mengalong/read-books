@@ -400,7 +400,7 @@ export default function BookDetailPage() {
             <div className="quiz-library-main">
               <strong>{quiz.title}</strong>
               <span>难度：{difficultyLabels[quiz.difficulty] || quiz.difficulty} · {quiz.question_count} 道题 · {quiz.duration_minutes} 分钟 · 创建于 {formatDateTime(quiz.created_at)}</span>
-              <span>出题依据：{quiz.source_mode === "model_knowledge" ? "模型知识（无逐句依据）" : quiz.source_mode === "material" ? "可信台词资料" : quiz.source_mode === "plot" ? "剧情梗概事件" : quiz.source_mode === "combined" ? "PDF 原文 + 剧情梗概 + 可信台词" : "已解析 PDF 原文"} · {generationThemeLabel(quiz.generation_theme)}</span>
+              <span>出题依据：{quiz.source_mode === "model_knowledge" ? "模型知识（无逐句依据）" : quiz.source_mode === "material" ? "可信台词资料" : quiz.source_mode === "plot" ? "剧情梗概事件" : quiz.source_mode === "combined" ? "综合可信来源（PDF / 剧情 / 台词）" : "已解析 PDF 原文"} · {generationThemeLabel(quiz.generation_theme)}</span>
               <span>题目构成：单选 {quiz.single_count} · 多选 {quiz.multiple_count} · 问答 {quiz.short_count}</span>
             </div>
             <div className="quiz-library-stats"><span>已复习 {quiz.review_count} 次</span><strong>{latestPercent === null ? "暂无成绩" : `最近得分率 ${latestPercent}%`}</strong></div>

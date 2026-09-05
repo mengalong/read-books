@@ -178,7 +178,7 @@ data/app.db
 - JSON 字段用于保存题目选项、评分要点、原文依据等结构化数据。
 - PDF 原文片段需要独立表存储，不能只存在题目 JSON 中，否则后续检索和去重会困难。
 - 大文本字段只保存必要原文片段；PDF 原文件保存在文件系统。
-- `Quiz` 和 `QuizGenerationTask` 保存 `source_mode`，明确区分 `pdf`（可追溯 PDF 原文）、`material`（用户上传并确认的可信资料）、`combined`（PDF 原文与可信资料综合来源）与 `model_knowledge`（无逐句原文依据）。
+- `Quiz` 和 `QuizGenerationTask` 保存 `source_mode`，明确区分 `pdf`（可追溯 PDF 原文）、`material`（用户上传并确认的可信台词资料）、`plot`（用户上传并确认的剧情事件）、`combined`（可用 PDF、剧情事件和可信台词的综合来源）与 `model_knowledge`（无逐句原文依据）。即使没有 PDF，只要剧情事件和可信台词同时可用，也必须使用 `combined`。
 - `ResourceMaterial`、`MaterialSegment` 和 `QuoteEntry` 分别保存上传文件、可定位内容片段和校对后的台词；`generation_theme/theme_config` 保存专题、资料、角色和考察角度，题目保存实际引用的台词与片段 ID。
 - `Question` 额外保存 `fact_key`、`fact_claim` 和 `semantic_signature`。生成任务逐题把已生成事实摘要传给模型，后端使用本地归一化和字段/字符 n-gram 相似度拦截同一事实的不同问法；旧题没有事实字段时回退到题干、知识点、选项答案和来源 ID 的兼容规则。
 - `Book` 保存 `resource_type`、`model_knowledge_supported` 和 `model_knowledge_checked_at`，用于区分书籍、电影和电视剧，并记录模型真实内容检查结果。

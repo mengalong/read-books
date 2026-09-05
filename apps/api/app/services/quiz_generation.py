@@ -116,6 +116,11 @@ def resolve_source_mode(
             PlotEvent.enabled_for_generation.is_(True),
         ).limit(1)
     )
+    # A resource can be comprehensive even when it has no PDF. Plot summaries and
+    # trusted dialogue must therefore enter the same combined strategy as PDF-backed
+    # resources instead of letting the dialogue source win by fallback order.
+    if confirmed_quote and confirmed_plot:
+        return "combined"
     if completed_chunk and (confirmed_quote or confirmed_plot):
         return "combined"
     if completed_chunk:
@@ -1420,7 +1425,7 @@ def run_generation_task(task_id: str) -> None:
                 "正在准备可信台词"
                 if task.source_mode == "material"
                 else (
-                    "正在准备 PDF 与可信台词"
+                    "正在准备综合剧情与台词来源"
                     if task.source_mode == "combined"
                     else "正在准备资源信息"
                 )
@@ -1454,7 +1459,7 @@ def run_generation_task(task_id: str) -> None:
                     db, task.book_id, task.page_start, task.page_end
                 )
                 if not chunks:
-                    raise RuntimeError("没有可用于综合出题的可信 PDF 或台词资料")
+                    raise RuntimeError("没有可用于综合出题的可信 PDF、剧情或台词资料")
                 recent_chunk_ids = (
                     _recent_chunk_ids(db, task.book_id)
                     | _recent_quote_ids(db, task.book_id)

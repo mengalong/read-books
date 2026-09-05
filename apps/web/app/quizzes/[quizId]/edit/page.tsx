@@ -79,7 +79,7 @@ export default function QuizEditPage() {
           <div className="eyebrow">编辑模式</div>
           <strong>{quiz.questions.length} 道题</strong>
           <p>每道题都可以单独保存，保存后立即生效。</p>
-          <dl><div><dt>难度</dt><dd>{quiz.difficulty === "easy" ? "基础" : quiz.difficulty === "hard" ? "深入" : "适中"}</dd></div><div><dt>来源</dt><dd>{quiz.source_mode === "model_knowledge" ? "模型知识" : quiz.source_mode === "material" ? "可信台词" : quiz.source_mode === "plot" ? "剧情梗概" : quiz.source_mode === "combined" ? "PDF + 剧情 + 可信台词" : "PDF 原文"}</dd></div><div><dt>状态</dt><dd>{quiz.status === "ready" ? "可复习" : "已提交"}</dd></div></dl>
+          <dl><div><dt>难度</dt><dd>{quiz.difficulty === "easy" ? "基础" : quiz.difficulty === "hard" ? "深入" : "适中"}</dd></div><div><dt>来源</dt><dd>{quiz.source_mode === "model_knowledge" ? "模型知识" : quiz.source_mode === "material" ? "可信台词" : quiz.source_mode === "plot" ? "剧情梗概" : quiz.source_mode === "combined" ? "综合可信来源" : "PDF 原文"}</dd></div><div><dt>状态</dt><dd>{quiz.status === "ready" ? "可复习" : "已提交"}</dd></div></dl>
         </aside>
       </div>
 

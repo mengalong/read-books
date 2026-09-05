@@ -535,6 +535,63 @@ def test_general_source_mode_uses_combined_sources_when_pdf_and_quotes_exist(cli
     assert question["source_evidence"]
 
 
+def test_general_source_mode_uses_combined_sources_when_plot_and_quotes_exist_without_pdf(client, monkeypatch):
+    book = create_resource(client, "潜伏剧情台词综合判定")
+    quote = upload_without_background_parse(
+        client,
+        monkeypatch,
+        book["id"],
+        name="combined-plot-quotes.csv",
+        content="台词,角色,集,上下文\n会议现在开始,吴站长,1,站内会议\n".encode("utf-8"),
+        material_type="quote_sheet",
+    )
+    parse_material_document(quote["id"])
+    plot_payload = {
+        "schema_version": "plot_summary.v1",
+        "source_registry": [{"source_id": "src-plot", "title": "剧情资料"}],
+        "events": [{
+            "event_id": "s01e01-event-001",
+            "level": "event",
+            "season_number": 1,
+            "episode_number": 1,
+            "sequence": 1,
+            "title": "任务安排",
+            "summary": "组织为任务安排新的身份掩护。",
+            "cause": "任务需要新的身份安排。",
+            "action": "相关人物接受并执行安排。",
+            "result": "人物进入新的行动阶段。",
+            "future_impact": "为后续合作和冲突埋下基础。",
+            "characters": ["余则成", "翠平"],
+            "source_refs": ["src-plot"],
+            "confidence": "confirmed",
+            "question_usable": True,
+        }],
+    }
+    plot = upload_without_background_parse(
+        client,
+        monkeypatch,
+        book["id"],
+        name="combined-plot.json",
+        content=json.dumps(plot_payload, ensure_ascii=False).encode("utf-8"),
+        material_type="plot_summary",
+    )
+    parse_material_document(plot["id"])
+
+    with SessionLocal() as db:
+        assert resolve_source_mode(
+            db,
+            book["id"],
+            QuizGenerateRequest(single_count=1, multiple_count=0, short_count=0),
+        ) == "combined"
+
+    generated = client.post(
+        f"/api/books/{book['id']}/quizzes",
+        json={"single_count": 1, "multiple_count": 0, "short_count": 0},
+    )
+    assert generated.status_code == 202
+    assert generated.json()["source_mode"] == "combined"
+
+
 def test_topic_generation_validates_material_count_and_character(client, monkeypatch):
     book = create_resource(client, "潜伏专题范围校验")
     material = upload_without_background_parse(
