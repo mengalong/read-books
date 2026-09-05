@@ -349,7 +349,7 @@ export default function BookDetailPage() {
         <div className="generation-progress-heading"><div><span className="eyebrow">出题任务</span><strong>{book.active_generation_status === "awaiting_intervention" ? "本次出题需要人工处理" : book.active_generation_phase || "正在后台生成题目"}</strong></div>{book.active_generation_status === "awaiting_intervention" ? <AlertCircle size={21} /> : <LoaderCircle className="spin" size={21} />}</div>
         <div className="progress-track"><div className="progress-fill" style={{ width: `${book.active_generation_total_questions ? book.active_generation_completed_questions / book.active_generation_total_questions * 100 : 0}%` }} /></div>
         <div className="generation-progress-meta"><span>{book.active_generation_completed_questions} / {book.active_generation_total_questions} 道题</span><span>{book.active_generation_status === "awaiting_intervention" ? "已保留中间结果，请进入出题过程处理" : "可以离开此页，任务会继续执行"}</span></div>
-        {book.active_generation_status === "awaiting_intervention" && <div className="generation-progress-actions"><Link className="button button-secondary" href={`/books/${book.id}/quiz/new`}><AlertCircle size={15} />查看并处理出题任务</Link></div>}
+        <div className="generation-progress-actions"><Link className="button button-secondary" href={`/books/${book.id}/quiz/new`}>{book.active_generation_status === "awaiting_intervention" ? <AlertCircle size={15} /> : <LoaderCircle size={15} />} {book.active_generation_status === "awaiting_intervention" ? "查看并处理出题任务" : "查看出题进度"}</Link></div>
       </div>}
 
       {book.pre_generation_status !== "disabled" && !book.active_generation_task_id && <div className={`pre-generation-banner ${book.pre_generation_status}`}>

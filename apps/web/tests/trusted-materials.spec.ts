@@ -185,6 +185,30 @@ test("分级剧情梗概支持一次选择多个文件并逐个上传", async ({
   await expect.poll(() => uploadCount).toBe(2);
 });
 
+test("离开出题详情后可从资源主页重新进入进行中的任务", async ({ page }) => {
+  await mockAdminIdentity(page);
+  const runningBook = {
+    ...book,
+    id: "book-running",
+    active_generation_task_id: "task-running",
+    active_generation_status: "processing",
+    active_generation_completed_questions: 3,
+    active_generation_total_questions: 10,
+    active_generation_phase: "正在生成第 4 / 10 道题",
+  };
+  await page.route("**/api/books/book-running", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(runningBook) });
+  });
+  await page.route("**/api/books/book-running/materials", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: "[]" });
+  });
+
+  await page.goto("/books/book-running");
+  const link = page.getByRole("link", { name: "查看出题进度" });
+  await expect(link).toBeVisible();
+  await expect(link).toHaveAttribute("href", "/books/book-running/quiz/new");
+});
+
 test("台词校对支持修正角色并确认", async ({ page }) => {
   await mockAdminIdentity(page);
   await mockBookAndMaterials(page);

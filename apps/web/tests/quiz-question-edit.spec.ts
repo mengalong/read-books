@@ -683,6 +683,49 @@ test("试卷概览支持发起模型合理性审查并展示逐题建议", async
   await expect(page.getByText("补充事件背景。" )).toBeVisible();
 });
 
+test("试卷编辑页逐题展示审查建议并支持单题复审", async ({ page }) => {
+  await mockAdminIdentity(page);
+  const quiz = {
+    id: "quiz-single-review", book_id: "book-1", book_title: "测试书", title: "单题审查试卷",
+    difficulty: "medium", duration_minutes: 15, status: "ready", source_mode: "pdf",
+    generation_theme: "general", theme_config: {}, total_score: null, max_score: 6,
+    elapsed_seconds: null, submitted_at: null, next_review_date: null,
+    quality_review_status: "not_started", quality_review_task_id: null, quality_review_question_id: null,
+    quality_review_result: null, quality_review_error: null, quality_review_requested_at: null,
+    quality_review_completed_at: null, created_at: "2026-09-05T08:00:00Z",
+    questions: [{
+      id: "question-single-review", position: 1, question_type: "single", question_subtype: "general",
+      prompt: "原题干", options: [{ id: "A", text: "原答案" }, { id: "B", text: "干扰项" }],
+      correct_answers: ["A"], explanation: "原解析", knowledge_point: "原知识点",
+      difficulty: "medium", estimated_seconds: 45, reference_answer: null, grading_rubric: [],
+      source_evidence: [], quote_entry_ids: [], plot_event_ids: [], source_segment_ids: [], max_score: 6,
+    }],
+  };
+  await page.route("**/api/quizzes/quiz-single-review/editable", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(quiz) });
+  });
+  await page.route("**/api/quizzes/quiz-single-review/questions/question-single-review/quality-review", async (route) => {
+    await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({
+      status: "completed", task_id: "single-review-task", question_id: "question-single-review", error: null,
+      requested_at: "2026-09-05T08:01:00Z", completed_at: "2026-09-05T08:01:02Z",
+      result: {
+        schema_version: "quiz_quality_review.v2", overall_verdict: "needs_revision", score: 72,
+        summary: "第 1 题需要补充限定。", strengths: [], reviewed_question_count: 1,
+        total_question_count: 1, reviewed_question_positions: [1], generated_at: "2026-09-05T08:01:02Z",
+        issues: [{ question_position: 1, severity: "medium", category: "ambiguity", problem: "题干不够明确。", suggestion: "补充事件背景。", evidence: null, suggested_prompt: "结合任务背景，人物为什么采取这一行动？", suggested_options: [{ id: "A", text: "因为任务需要" }, { id: "B", text: "因为个人兴趣" }], suggested_correct_answers: ["A"], suggested_explanation: "题目应围绕已知任务背景作答。", suggested_knowledge_point: "行动动机", suggested_reference_answer: null, suggested_grading_rubric: [] }],
+        question_reviews: [{ question_position: 1, score: 72, verdict: "needs_revision", summary: "题干需要限定。", strengths: [], issues: [{ question_position: 1, severity: "medium", category: "ambiguity", problem: "题干不够明确。", suggestion: "补充事件背景。", evidence: null, suggested_prompt: "结合任务背景，人物为什么采取这一行动？", suggested_options: [{ id: "A", text: "因为任务需要" }, { id: "B", text: "因为个人兴趣" }], suggested_correct_answers: ["A"], suggested_explanation: "题目应围绕已知任务背景作答。", suggested_knowledge_point: "行动动机", suggested_reference_answer: null, suggested_grading_rubric: [] }]}],
+      },
+    }) });
+  });
+
+  await page.goto("/quizzes/quiz-single-review/edit");
+  await expect(page.getByText("本题尚未审查")).toBeVisible();
+  await page.getByRole("button", { name: "审查本题" }).click();
+  await expect(page.getByText("模型审查：72/100")).toBeVisible();
+  await expect(page.getByText("建议题干：结合任务背景，人物为什么采取这一行动？")).toBeVisible();
+  await expect(page.getByText("A. 因为任务需要（答案）")).toBeVisible();
+});
+
 test("结果页不显示题目编辑入口", async ({ page }) => {
   await mockAdminIdentity(page);
 

@@ -4,7 +4,7 @@ import { AlertTriangle, CheckCircle2, LoaderCircle, RotateCcw, Save } from "luci
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { ApiError } from "@/lib/api";
-import type { Question, QuestionUpdatePayload } from "@/lib/types";
+import type { Question, QuestionUpdatePayload, QuizQualityReview, QuizQualityReviewResult } from "@/lib/types";
 
 const OPTION_IDS = ["A", "B", "C", "D"] as const;
 
@@ -19,6 +19,8 @@ type QuizQuestionEditListProps = {
   onSaved: (question: Question) => void;
   onUpdateQuestion: (questionId: string, payload: QuestionUpdatePayload) => Promise<Question>;
   onRegenerateQuestion: (questionId: string) => Promise<Question>;
+  qualityReviewResult?: QuizQualityReviewResult | null;
+  onReviewQuestion?: (questionId: string) => Promise<QuizQualityReview>;
 };
 
 export function QuizQuestionEditList({
@@ -26,6 +28,8 @@ export function QuizQuestionEditList({
   onSaved,
   onUpdateQuestion,
   onRegenerateQuestion,
+  qualityReviewResult,
+  onReviewQuestion,
 }: QuizQuestionEditListProps) {
   return (
     <div className="quiz-question-edit-list">
@@ -36,6 +40,8 @@ export function QuizQuestionEditList({
           onSaved={onSaved}
           onUpdateQuestion={onUpdateQuestion}
           question={question}
+          qualityReview={qualityReviewResult?.question_reviews?.find((item) => item.question_position === question.position) || null}
+          onReviewQuestion={onReviewQuestion}
         />
       ))}
     </div>
@@ -47,14 +53,19 @@ function QuestionEditForm({
   onSaved,
   onUpdateQuestion,
   onRegenerateQuestion,
+  qualityReview,
+  onReviewQuestion,
 }: {
   question: Question;
   onSaved: (question: Question) => void;
   onUpdateQuestion: (questionId: string, payload: QuestionUpdatePayload) => Promise<Question>;
   onRegenerateQuestion: (questionId: string) => Promise<Question>;
+  qualityReview: QuizQualityReviewResult["question_reviews"][number] | null;
+  onReviewQuestion?: (questionId: string) => Promise<QuizQualityReview>;
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
   const [confirmingRegeneration, setConfirmingRegeneration] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -153,6 +164,19 @@ function QuestionEditForm({
     }
   }
 
+  async function handleReview() {
+    if (!onReviewQuestion || reviewing || submitting || regenerating) return;
+    setReviewing(true);
+    setError("");
+    try {
+      await onReviewQuestion(question.id);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "本题审查失败");
+    } finally {
+      setReviewing(false);
+    }
+  }
+
   return (
     <form className="question-edit-form" onSubmit={(event) => void handleSubmit(event)}>
       <div className="question-card-header">
@@ -173,6 +197,7 @@ function QuestionEditForm({
       </div>
       {error && <div className="toast-error">{error}</div>}
       {saved && <div className="question-edit-saved"><CheckCircle2 size={14} />已保存</div>}
+      {(qualityReview || onReviewQuestion) && <QuestionQualityReviewCard review={qualityReview} reviewing={reviewing} onReview={onReviewQuestion ? () => void handleReview() : undefined} />}
       <div className="form-grid question-editor-grid">
         <label className="field field-full">
           <span>题干</span>
@@ -299,4 +324,40 @@ function QuestionEditForm({
       )}
     </form>
   );
+}
+
+const qualityReviewVerdictLabels: Record<"pass" | "needs_revision" | "high_risk", string> = {
+  pass: "建议通过",
+  needs_revision: "建议修改",
+  high_risk: "高风险",
+};
+
+const qualityReviewCategoryLabels: Record<QuizQualityReviewResult["issues"][number]["category"], string> = {
+  fact: "事实",
+  answer: "答案",
+  source: "来源",
+  ambiguity: "歧义",
+  duplicate: "重复",
+  wording: "措辞",
+  difficulty: "难度",
+  other: "其他",
+};
+
+function QuestionQualityReviewCard({
+  review,
+  reviewing,
+  onReview,
+}: {
+  review: QuizQualityReviewResult["question_reviews"][number] | null;
+  reviewing: boolean;
+  onReview?: () => void;
+}) {
+  if (!review) {
+    return <aside className="question-quality-review"><div className="question-quality-review-heading"><div><strong>本题尚未审查</strong></div>{onReview && <button className="button button-quiet" disabled={reviewing} onClick={onReview} type="button"><RotateCcw size={14} />{reviewing ? "审查中……" : "审查本题"}</button>}</div><p className="question-quality-review-summary">保存题目后可以只针对本题发起模型审查。</p></aside>;
+  }
+  return <aside className={`question-quality-review ${review.verdict}`}>
+    <div className="question-quality-review-heading"><div><strong>模型审查：{review.score}/100</strong><span className="question-quality-review-verdict">{qualityReviewVerdictLabels[review.verdict]}</span></div>{onReview && <button className="button button-quiet" disabled={reviewing} onClick={onReview} type="button"><RotateCcw size={14} />{reviewing ? "审查中……" : "重新审查本题"}</button>}</div>
+    {review.summary && <p className="question-quality-review-summary">{review.summary}</p>}
+    {review.issues.length > 0 ? <div className="question-quality-review-issues">{review.issues.map((issue, index) => <div className="question-quality-review-issue" key={`${issue.category}-${index}`}><div className="question-quality-review-issue-meta"><span>{qualityReviewCategoryLabels[issue.category]}</span><span>{issue.severity === "high" ? "高风险" : issue.severity === "medium" ? "建议修改" : "措辞优化"}</span></div><p><strong>问题：</strong>{issue.problem}</p><p><strong>修改建议：</strong>{issue.suggestion}</p>{issue.suggested_prompt && <p><strong>建议题干：</strong>{issue.suggested_prompt}</p>}{issue.suggested_options.length > 0 && <div className="question-quality-review-options"><strong>建议选项：</strong>{issue.suggested_options.map((option) => <span className={issue.suggested_correct_answers.includes(option.id) ? "correct" : ""} key={option.id}>{option.id}. {option.text}{issue.suggested_correct_answers.includes(option.id) ? "（答案）" : ""}</span>)}</div>}{issue.suggested_explanation && <p><strong>建议解析：</strong>{issue.suggested_explanation}</p>}{issue.suggested_knowledge_point && <p><strong>建议知识点：</strong>{issue.suggested_knowledge_point}</p>}{issue.suggested_reference_answer && <p><strong>建议参考答案：</strong>{issue.suggested_reference_answer}</p>}{issue.evidence && <p className="question-quality-review-evidence"><strong>审查依据：</strong>{issue.evidence}</p>}</div>)}</div> : <div className="question-quality-review-ok"><CheckCircle2 size={15} />未发现需要修改的问题</div>}
+  </aside>;
 }

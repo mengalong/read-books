@@ -406,6 +406,13 @@ export function getQuizQualityReview(quizId: string) {
   return apiFetch<QuizQualityReview>(`/quizzes/${quizId}/quality-review`);
 }
 
+export function requestQuizQuestionQualityReview(quizId: string, questionId: string) {
+  return apiFetch<QuizQualityReview>(
+    `/quizzes/${quizId}/questions/${questionId}/quality-review`,
+    { method: "POST" },
+  );
+}
+
 export function getEditableQuiz(quizId: string) {
   return apiFetch<Quiz>(`/quizzes/${quizId}/editable`);
 }

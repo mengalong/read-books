@@ -493,6 +493,7 @@ export type Quiz = {
   next_review_date: string | null;
   quality_review_status: "not_started" | "pending" | "processing" | "completed" | "failed";
   quality_review_task_id: string | null;
+  quality_review_question_id: string | null;
   quality_review_result: QuizQualityReviewResult | null;
   quality_review_error: string | null;
   quality_review_requested_at: string | null;
@@ -508,21 +509,42 @@ export type QuizQualityReviewIssue = {
   problem: string;
   suggestion: string;
   evidence: string | null;
+  suggested_prompt: string | null;
+  suggested_options: { id: string; text: string }[];
+  suggested_correct_answers: string[];
+  suggested_explanation: string | null;
+  suggested_knowledge_point: string | null;
+  suggested_reference_answer: string | null;
+  suggested_grading_rubric: { point: string; score?: number }[];
+};
+
+export type QuizQuestionQualityReview = {
+  question_position: number;
+  score: number;
+  verdict: "pass" | "needs_revision" | "high_risk";
+  summary: string;
+  strengths: string[];
+  issues: QuizQualityReviewIssue[];
 };
 
 export type QuizQualityReviewResult = {
   schema_version: string;
   overall_verdict: "pass" | "needs_revision" | "high_risk";
+  score: number;
   summary: string;
   strengths: string[];
   issues: QuizQualityReviewIssue[];
   reviewed_question_count: number;
+  total_question_count: number;
+  reviewed_question_positions: number[];
+  question_reviews: QuizQuestionQualityReview[];
   generated_at: string | null;
 };
 
 export type QuizQualityReview = {
   status: Quiz["quality_review_status"];
   task_id: string | null;
+  question_id: string | null;
   result: QuizQualityReviewResult | null;
   error: string | null;
   requested_at: string | null;

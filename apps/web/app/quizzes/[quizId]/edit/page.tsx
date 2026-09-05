@@ -7,8 +7,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import { ErrorState, SourceModeNotice } from "@/components/ui";
 import { QuizQuestionEditList } from "@/components/quiz-question-edit-list";
-import { ApiError, getEditableQuiz, regenerateQuizQuestion, updateQuizQuestion } from "@/lib/api";
-import type { Question, Quiz } from "@/lib/types";
+import { ApiError, getEditableQuiz, getQuizQualityReview, regenerateQuizQuestion, requestQuizQuestionQualityReview, updateQuizQuestion } from "@/lib/api";
+import type { Question, Quiz, QuizQualityReview } from "@/lib/types";
 
 const questionTypeLabels: Record<Question["question_type"], string> = {
   single: "单项选择题",
@@ -29,6 +29,16 @@ export default function QuizEditPage() {
       .finally(() => setLoading(false));
   }, [params.quizId]);
 
+  useEffect(() => {
+    if (!quiz || !["pending", "processing"].includes(quiz.quality_review_status)) return;
+    const timer = window.setInterval(() => {
+      getQuizQualityReview(params.quizId)
+        .then((review) => applyQualityReview(review))
+        .catch(() => undefined);
+    }, 2200);
+    return () => window.clearInterval(timer);
+  }, [params.quizId, quiz?.quality_review_status]);
+
   const counts = useMemo(() => {
     if (!quiz) return [];
     return (["single", "multiple", "short"] as const)
@@ -46,6 +56,37 @@ export default function QuizEditPage() {
         ),
       };
     });
+  }
+
+  function applyQualityReview(review: QuizQualityReview) {
+    setQuiz((current) => current ? {
+      ...current,
+      quality_review_status: review.status,
+      quality_review_task_id: review.task_id,
+      quality_review_question_id: review.question_id,
+      quality_review_result: review.result,
+      quality_review_error: review.error,
+      quality_review_requested_at: review.requested_at,
+      quality_review_completed_at: review.completed_at,
+    } : current);
+  }
+
+  async function handleQuestionReview(questionId: string): Promise<QuizQualityReview> {
+    const initial = await requestQuizQuestionQualityReview(params.quizId, questionId);
+    applyQualityReview(initial);
+    if (!["pending", "processing"].includes(initial.status)) {
+      if (initial.status === "failed") throw new Error(initial.error || "本题审查失败");
+      return initial;
+    }
+    let latest = initial;
+    for (let attempt = 0; attempt < 90; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2200));
+      latest = await getQuizQualityReview(params.quizId);
+      applyQualityReview(latest);
+      if (!["pending", "processing"].includes(latest.status)) break;
+    }
+    if (latest.status === "failed") throw new Error(latest.error || "本题审查失败");
+    return latest;
   }
 
   if (loading) return <div className="page-wrap"><div className="loading-state">正在打开试卷编辑器……</div></div>;
@@ -88,7 +129,9 @@ export default function QuizEditPage() {
         <QuizQuestionEditList
           onRegenerateQuestion={(questionId) => regenerateQuizQuestion(quiz.id, questionId)}
           onSaved={handleQuestionSaved}
+          onReviewQuestion={handleQuestionReview}
           onUpdateQuestion={(questionId, payload) => updateQuizQuestion(quiz.id, questionId, payload)}
+          qualityReviewResult={quiz.quality_review_result}
           questions={quiz.questions}
         />
       </section>

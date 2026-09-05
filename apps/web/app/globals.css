@@ -3287,6 +3287,123 @@ p {
   gap: 6px;
 }
 
+.question-quality-review {
+  background: #f8faf8;
+  border: 1px solid #dce9e1;
+  border-left: 3px solid var(--green);
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 13px 15px;
+}
+
+.question-quality-review.needs_revision {
+  background: var(--yellow-soft);
+  border-color: #eadfca;
+  border-left-color: #c78a2c;
+}
+
+.question-quality-review.high_risk {
+  background: var(--red-soft);
+  border-color: #ecc9c0;
+  border-left-color: var(--red);
+}
+
+.question-quality-review-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.question-quality-review-heading > div {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.question-quality-review-heading strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.question-quality-review-verdict {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.question-quality-review-summary,
+.question-quality-review-issue p {
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.question-quality-review-issues {
+  display: grid;
+  gap: 9px;
+}
+
+.question-quality-review-issue {
+  border-top: 1px solid rgba(111, 124, 121, 0.2);
+  display: grid;
+  gap: 4px;
+  padding-top: 9px;
+}
+
+.question-quality-review-issue-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.question-quality-review-issue-meta span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.question-quality-review-issue p strong {
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.question-quality-review-options {
+  display: grid;
+  gap: 3px;
+}
+
+.question-quality-review-options strong {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.question-quality-review-options span {
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.question-quality-review-options span.correct {
+  color: var(--green);
+  font-weight: 650;
+}
+
+.question-quality-review-evidence {
+  color: var(--muted) !important;
+}
+
+.question-quality-review-ok {
+  align-items: center;
+  color: var(--green);
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+}
+
 .question-edit-form-actions {
   display: flex;
   justify-content: flex-end;
@@ -3371,6 +3488,19 @@ p {
   padding: 9px 12px;
 }
 
+.quality-review-verdict > div {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.quality-review-verdict-label {
+  color: inherit !important;
+  font-size: 11px !important;
+  font-weight: 700;
+}
+
 .quality-review-verdict.pass {
   background: var(--green-soft);
   color: var(--green);
@@ -3392,6 +3522,77 @@ p {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.6;
+}
+
+.quality-review-question-scores {
+  display: grid;
+  gap: 8px;
+}
+
+.quality-review-question-scores > strong {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.quality-review-question-scores > div {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+}
+
+.quality-review-question-score {
+  background: #f7faf8;
+  border: 1px solid #e1ebe4;
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+}
+
+.quality-review-question-score.needs_revision {
+  background: var(--yellow-soft);
+  border-color: #eadfca;
+}
+
+.quality-review-question-score.high_risk {
+  background: var(--red-soft);
+  border-color: #ecc9c0;
+}
+
+.quality-review-question-score span,
+.quality-review-question-score small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.quality-review-question-score strong {
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.quality-review-suggested-options {
+  display: grid;
+  gap: 3px;
+}
+
+.quality-review-suggested-options strong,
+.quality-review-suggested-options span {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.quality-review-suggested-options strong {
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.quality-review-suggested-options span {
+  color: var(--ink);
+}
+
+.quality-review-suggested-options span.correct {
+  color: var(--green);
+  font-weight: 650;
 }
 
 .quality-review-strengths,
