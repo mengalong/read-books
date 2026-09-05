@@ -457,6 +457,12 @@ export type Quiz = {
   questions: Question[];
 };
 
+export type QuizExport = {
+  format: string;
+  purpose: string;
+  quiz: Quiz;
+};
+
 export type QuizGenerationTask = {
   id: string;
   book_id: string;

@@ -458,6 +458,30 @@ test("书籍页选择试卷先看概览，再开始答题进入复习", async ({
       }),
     });
   });
+  await page.route("**/api/quizzes/quiz-1/export", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        format: "read-books-quiz-validation-v1",
+        purpose: "请校验题目和答案",
+        quiz: {
+          id: "quiz-1", book_id: "book-1", book_title: "测试书", title: "第一套试卷",
+          difficulty: "medium", duration_minutes: 15, status: "ready", source_mode: "pdf",
+          generation_theme: "general", theme_config: {}, total_score: null, max_score: 6,
+          elapsed_seconds: null, submitted_at: null, next_review_date: null,
+          created_at: "2026-08-03T09:00:00Z",
+          questions: [{
+            id: "q1", position: 1, question_type: "single", question_subtype: "general",
+            prompt: "题干", options: [{ id: "A", text: "选项 A" }, { id: "B", text: "选项 B" }],
+            correct_answers: ["A"], explanation: "解析", knowledge_point: "知识点",
+            difficulty: "medium", estimated_seconds: 45, reference_answer: null,
+            grading_rubric: [], source_evidence: [], quote_entry_ids: [], source_segment_ids: [],
+            max_score: 6,
+          }],
+        },
+      }),
+    });
+  });
 
   await page.route("**/api/quizzes/quiz-1/reviews", async (route) => {
     reviewRequests += 1;
@@ -566,6 +590,16 @@ test("书籍页选择试卷先看概览，再开始答题进入复习", async ({
   await page.getByRole("link", { name: "选择这套" }).click();
   await expect(page).toHaveURL(/\/quizzes\/quiz-1$/);
   await expect(page.getByRole("button", { name: "开始答题" })).toBeVisible();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "导出题目与答案" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toContain("题目答案校验.json");
+  await page.getByRole("link", { name: "预览题目与答案" }).click();
+  await expect(page).toHaveURL(/\/quizzes\/quiz-1\/preview$/);
+  await expect(page.getByText("正确答案", { exact: true })).toBeVisible();
+  await expect(page.getByText("解析", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(/选项 A/)).toBeVisible();
+  await page.getByRole("link", { name: "返回试卷概览" }).click();
   expect(reviewRequests).toBe(0);
   await expect(page.getByRole("button", { name: "编辑题目" })).toHaveCount(0);
 

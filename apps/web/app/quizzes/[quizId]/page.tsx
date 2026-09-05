@@ -1,12 +1,12 @@
 "use client";
 
-import { ArrowLeft, CheckCircle2, Clock3, Code2, FileQuestion, Play } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Clock3, Code2, Download, Eye, FileQuestion, Play } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { ErrorState, SourceModeNotice } from "@/components/ui";
-import { ApiError, getQuiz, startReview } from "@/lib/api";
+import { ApiError, getQuiz, getQuizExport, startReview } from "@/lib/api";
 import type { Quiz } from "@/lib/types";
 
 const questionTypeLabels = {
@@ -20,6 +20,7 @@ export default function QuizOverviewPage() {
   const router = useRouter();
   const [quiz, setQuiz] = useState<Quiz | null>(null);
   const [starting, setStarting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -58,6 +59,28 @@ export default function QuizOverviewPage() {
     }
   }
 
+  async function handleExport() {
+    if (!quiz) return;
+    setExporting(true);
+    setError("");
+    try {
+      const payload = await getQuizExport(quiz.id);
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${quiz.title.replace(/[\\/:*?"<>|]/g, "_")}-题目答案校验.json`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "试卷导出失败");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   if (loading) return <div className="page-wrap"><div className="loading-state">正在打开试卷概览……</div></div>;
   if (!quiz) return <div className="page-wrap"><ErrorState message={error || "未找到这套试卷"} /></div>;
 
@@ -68,7 +91,7 @@ export default function QuizOverviewPage() {
       <SourceModeNotice sourceMode={quiz.source_mode} />
       <header className="page-header">
         <div><div className="eyebrow">Review paper</div><h1 className="page-title">{quiz.title}</h1><p className="page-description">先查看这套试卷的概览，确认后再开始答题。只有点击开始按钮后才会创建复习记录。</p></div>
-        <div className="quiz-overview-actions"><Link className="button button-secondary" href={`/quizzes/${quiz.id}/generation-debug`}><Code2 size={15} />查看出题过程</Link><button className="button button-primary" disabled={starting} onClick={() => void handleStart()} type="button"><Play size={15} />{starting ? "正在进入……" : "开始答题"}</button></div>
+        <div className="quiz-overview-actions"><Link className="button button-secondary" href={`/quizzes/${quiz.id}/generation-debug`}><Code2 size={15} />查看出题过程</Link><Link className="button button-secondary" href={`/quizzes/${quiz.id}/preview`}><Eye size={15} />预览题目与答案</Link><button className="button button-secondary" disabled={exporting} onClick={() => void handleExport()} type="button"><Download size={15} />{exporting ? "正在导出……" : "导出题目与答案"}</button><button className="button button-primary" disabled={starting} onClick={() => void handleStart()} type="button"><Play size={15} />{starting ? "正在进入……" : "开始答题"}</button></div>
       </header>
 
       <div className="quiz-choice-layout">

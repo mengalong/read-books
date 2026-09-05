@@ -398,6 +398,12 @@ class QuizResponse(ApiModel):
     questions: list[QuestionResponse]
 
 
+class QuizExportResponse(BaseModel):
+    format: str = "read-books-quiz-validation-v1"
+    purpose: str = "请校验这套试卷的题目、答案、解析与来源依据，指出事实错误、答案错误、来源不一致或题目歧义。"
+    quiz: QuizResponse
+
+
 class AnswerSubmission(BaseModel):
     question_id: str
     selected_answers: list[str] = Field(default_factory=list)

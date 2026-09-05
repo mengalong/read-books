@@ -29,6 +29,7 @@ from app.schemas import (
     QuizGenerationInterventionRequest,
     QuizGenerationTaskDebugResponse,
     QuizQuestionGenerationTrace,
+    QuizExportResponse,
     QuizResponse,
     QuizSummary,
     ReviewTaskResponse,
@@ -509,6 +510,16 @@ def get_quiz(
     identity: AuthIdentity = Depends(require_ready_identity),
 ) -> QuizResponse:
     return to_quiz_response(get_quiz_or_404(db, quiz_id, identity))
+
+
+@router.get("/quizzes/{quiz_id}/export", response_model=QuizExportResponse)
+def export_quiz(
+    quiz_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> QuizExportResponse:
+    quiz = get_quiz_or_404(db, quiz_id, identity)
+    return QuizExportResponse(quiz=to_quiz_response(quiz, reveal_answers=True))
 
 
 @router.get(

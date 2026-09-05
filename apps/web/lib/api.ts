@@ -13,6 +13,7 @@ import type {
   PromptTemplate,
   PromptType,
   Quiz,
+  QuizExport,
   QuizGenerationTask,
   QuizGenerationDebug,
   QuizGenerationTaskDebug,
@@ -363,6 +364,10 @@ export function getGenerationTaskDebug(taskId: string) {
 
 export function getQuiz(quizId: string) {
   return apiFetch<Quiz>(`/quizzes/${quizId}`);
+}
+
+export function getQuizExport(quizId: string) {
+  return apiFetch<QuizExport>(`/quizzes/${quizId}/export`);
 }
 
 export function getEditableQuiz(quizId: string) {

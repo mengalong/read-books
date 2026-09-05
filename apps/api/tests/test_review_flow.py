@@ -195,6 +195,11 @@ def test_quiz_generation_debug_returns_calls_grouped_by_question(client):
                 position=1,
                 question_type="single",
                 prompt="模型生成题目",
+                options=[
+                    {"id": "A", "text": "正确"},
+                    {"id": "B", "text": "错误"},
+                ],
+                correct_answers=["A"],
                 explanation="模型解析",
                 knowledge_point="测试知识点",
                 estimated_seconds=45,
@@ -238,6 +243,11 @@ def test_quiz_generation_debug_returns_calls_grouped_by_question(client):
     task_debug = client.get(f"/api/quiz-generation-tasks/{task.id}/debug")
     assert task_debug.status_code == 200
     assert task_debug.json()["calls"][0]["question_position"] == 1
+    exported = client.get(f"/api/quizzes/{quiz_id}/export")
+    assert exported.status_code == 200
+    assert exported.json()["format"] == "read-books-quiz-validation-v1"
+    assert exported.json()["quiz"]["questions"][0]["correct_answers"] == ["A"]
+    assert exported.json()["quiz"]["questions"][0]["explanation"] == "模型解析"
 
 
 def test_generation_intervention_confirms_draft_and_resumes_task(client, monkeypatch):
