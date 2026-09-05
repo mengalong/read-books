@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import time
 
@@ -8,7 +9,7 @@ import pytest
 from openpyxl import Workbook
 
 from app.database import SessionLocal
-from app.models import ContentChunk, ExamShare, PdfDocument, ResourceMaterial
+from app.models import ContentChunk, ExamShare, PdfDocument, PlotEvent, ResourceMaterial
 from app.schemas import QuizGenerateRequest
 from app.services.material_parser import parse_material_document, parse_material_file
 from app.services.quiz_generation import resolve_source_mode
@@ -576,3 +577,53 @@ def test_topic_generation_validates_material_count_and_character(client, monkeyp
     )
     assert missing_character.status_code == 409
     assert "只有 0 条" in missing_character.json()["detail"]
+
+
+def test_plot_summary_json_is_parsed_managed_and_used_as_source(client, monkeypatch):
+    book = create_resource(client, "潜伏剧情梗概导入")
+    payload = {
+        "schema_version": "plot_summary.v1",
+        "source_registry": [{"source_id": "src-001", "title": "百科资料", "url": "https://example.com"}],
+        "events": [
+            {
+                "event_id": "s01e01-event-001",
+                "level": "event",
+                "season_number": 1,
+                "episode_number": 1,
+                "sequence": 1,
+                "title": "任务安排",
+                "summary": "组织为任务安排身份掩护。",
+                "cause": "任务需要新的身份安排。",
+                "action": "相关人物接受并执行身份掩护安排。",
+                "result": "人物进入新的行动阶段。",
+                "future_impact": "为后续合作和冲突埋下基础。",
+                "characters": ["余则成", "翠平"],
+                "source_refs": ["src-001"],
+                "confidence": "confirmed",
+                "question_usable": True,
+            }
+        ],
+    }
+    material = upload_without_background_parse(
+        client,
+        monkeypatch,
+        book["id"],
+        name="潜伏剧情梗概.json",
+        content=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        material_type="plot_summary",
+    )
+    parse_material_document(material["id"])
+
+    events = client.get(f"/api/books/{book['id']}/plot-events?material_id={material['id']}")
+    assert events.status_code == 200
+    assert events.json()["total"] == 1
+    assert events.json()["items"][0]["title"] == "任务安排"
+    assert events.json()["items"][0]["enabled_for_generation"] is True
+    with SessionLocal() as db:
+        stored = db.query(PlotEvent).filter(PlotEvent.material_id == material["id"]).one()
+        assert stored.source_refs == ["src-001"]
+        assert resolve_source_mode(
+            db,
+            book["id"],
+            QuizGenerateRequest(single_count=1, multiple_count=0, short_count=0),
+        ) == "plot"

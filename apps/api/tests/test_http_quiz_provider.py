@@ -9,6 +9,7 @@ from app.services.prompt_config import DEFAULT_PROMPTS, PromptTemplateDefinition
 from app.services.quiz_provider import (
     HttpQuizAiProvider,
     MockQuizAiProvider,
+    TrustedPlotSource,
     TrustedQuoteSource,
     key_sentence,
 )
@@ -151,6 +152,28 @@ def make_trusted_quote() -> TrustedQuoteSource:
     )
 
 
+def make_trusted_plot() -> TrustedPlotSource:
+    return TrustedPlotSource(
+        id="plot-1",
+        event_id="s01e01-event-001",
+        material_id="plot-material-1",
+        file_name="潜伏剧情梗概.json",
+        material_type="plot_summary",
+        content="组织安排身份掩护，人物接受任务并进入新的行动阶段。",
+        season_number=1,
+        episode_number=1,
+        sequence=1,
+        title="任务安排",
+        cause="任务需要新的身份安排。",
+        action="人物接受并执行身份掩护安排。",
+        result="人物进入新的行动阶段。",
+        future_impact="为后续合作和冲突埋下基础。",
+        characters=["余则成", "翠平"],
+        source_refs=["src-001"],
+        confidence="confirmed",
+    )
+
+
 def generated_quote_payload(*, speaker: str = "吴站长", quote_id: str = "quote-1") -> dict:
     return {
         "questions": [
@@ -287,6 +310,50 @@ def test_http_provider_validates_trusted_quote_and_rebuilds_evidence(monkeypatch
     assert questions[0].source_evidence[0]["speaker"] == "吴站长"
     assert "quote-1" in requests[0]["json"]["messages"][1]["content"]
     assert "可信台词资料" in requests[0]["json"]["messages"][0]["content"]
+
+
+def test_http_provider_validates_trusted_plot_source(monkeypatch):
+    source = make_trusted_plot()
+    payload = generated_quote_payload(quote_id="unused")
+    question = payload["questions"][0]
+    question.update(
+        {
+            "question_subtype": "plot_cause",
+            "prompt": "为什么需要安排这次身份掩护？",
+            "options": [
+                {"id": "A", "text": "任务需要新的身份安排"},
+                {"id": "B", "text": "资料没有说明原因"},
+                {"id": "C", "text": "人物拒绝执行任务"},
+                {"id": "D", "text": "这只是模型推测"},
+            ],
+            "correct_answers": ["A"],
+            "explanation": "剧情资料说明任务需要新的身份安排。",
+            "knowledge_point": "身份掩护的任务原因",
+            "plot_event_ids": [source.id],
+            "quote_entry_ids": [],
+            "source_chunk_ids": [],
+        }
+    )
+    requests = install_chat_responses(monkeypatch, [json.dumps(payload, ensure_ascii=False)])
+    provider = HttpQuizAiProvider(make_configuration())
+
+    questions = provider.generate_questions(
+        chunks=[source],
+        file_names={},
+        single_count=1,
+        multiple_count=0,
+        short_count=0,
+        difficulty="medium",
+        generation_number=0,
+        recent_chunk_ids=set(),
+        book_title="潜伏",
+        resource_type="tv_series",
+        source_mode="plot",
+    )
+
+    assert questions[0].plot_event_ids == [source.id]
+    assert questions[0].source_evidence[0]["plot_event_id"] == source.id
+    assert "plot_event_id" in requests[0]["json"]["messages"][1]["content"]
 
 
 def test_http_provider_accepts_paraphrased_trusted_quote_prompt(monkeypatch):

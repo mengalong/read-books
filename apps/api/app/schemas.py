@@ -4,7 +4,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-SourceMode = Literal["pdf", "material", "combined", "model_knowledge"]
+SourceMode = Literal["pdf", "material", "plot", "combined", "model_knowledge"]
 GenerationTheme = Literal["general", "classic_quotes", "character"]
 
 
@@ -95,8 +95,8 @@ class PdfResponse(ApiModel):
 class MaterialResponse(ApiModel):
     id: str
     book_id: str
-    material_type: Literal["book_text", "script", "subtitle", "quote_sheet"]
-    file_format: Literal["pdf", "txt", "srt", "vtt", "ass", "csv", "xlsx"]
+    material_type: Literal["book_text", "script", "subtitle", "quote_sheet", "plot_summary"]
+    file_format: Literal["pdf", "txt", "srt", "vtt", "ass", "csv", "xlsx", "json"]
     file_name: str
     file_size: int
     season_number: int | None = None
@@ -106,6 +106,7 @@ class MaterialResponse(ApiModel):
     error_message: str | None = None
     segment_count: int = 0
     quote_count: int = 0
+    source_registry: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -148,6 +149,53 @@ class QuoteEntryUpdateRequest(BaseModel):
 
 class QuoteEntryBulkRequest(BaseModel):
     quote_ids: list[str] = Field(min_length=1, max_length=200)
+
+
+class PlotEventResponse(ApiModel):
+    id: str
+    book_id: str
+    material_id: str
+    event_id: str
+    level: str
+    season_number: int | None = None
+    episode_number: int | None = None
+    sequence: int | None = None
+    title: str
+    summary: str
+    cause: str
+    action: str
+    result: str
+    future_impact: str
+    characters: list[str] = Field(default_factory=list)
+    relationship_changes: list[Any] = Field(default_factory=list)
+    conflict_tags: list[str] = Field(default_factory=list)
+    theme_tags: list[str] = Field(default_factory=list)
+    importance: str
+    source_refs: list[str] = Field(default_factory=list)
+    confidence: str
+    question_usable: str
+    review_status: Literal["pending", "confirmed", "rejected"]
+    enabled_for_generation: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class PlotEventListResponse(BaseModel):
+    items: list[PlotEventResponse] = Field(default_factory=list)
+    total: int = 0
+    pending_count: int = 0
+    confirmed_count: int = 0
+
+
+class PlotEventUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, max_length=240)
+    summary: str | None = None
+    cause: str | None = None
+    action: str | None = None
+    result: str | None = None
+    future_impact: str | None = None
+    review_status: Literal["pending", "confirmed", "rejected"] | None = None
+    enabled_for_generation: bool | None = None
 
 
 class QuizSummary(BaseModel):
@@ -372,6 +420,7 @@ class QuestionResponse(ApiModel):
     grading_rubric: list[dict[str, Any]] = Field(default_factory=list)
     source_evidence: list[SourceEvidence]
     quote_entry_ids: list[str] = Field(default_factory=list)
+    plot_event_ids: list[str] = Field(default_factory=list)
     source_segment_ids: list[str] = Field(default_factory=list)
     max_score: float
     correct_answers: list[str] | None = None
@@ -467,6 +516,7 @@ class ExamQuestionResponse(BaseModel):
     grading_rubric: list[dict[str, Any]] = Field(default_factory=list)
     source_evidence: list[SourceEvidence] = Field(default_factory=list)
     quote_entry_ids: list[str] = Field(default_factory=list)
+    plot_event_ids: list[str] = Field(default_factory=list)
     source_segment_ids: list[str] = Field(default_factory=list)
     source_mode: SourceMode | None = None
 

@@ -151,6 +151,7 @@ def to_question_response(question: Question, reveal_answers: bool) -> QuestionRe
         grading_rubric=question.grading_rubric if reveal_answers else [],
         source_evidence=source_evidence,
         quote_entry_ids=list(question.quote_entry_ids or []),
+        plot_event_ids=list(question.plot_event_ids or []),
         source_segment_ids=list(question.source_segment_ids or []),
         max_score=question.max_score,
         correct_answers=question.correct_answers if reveal_answers else None,

@@ -66,8 +66,15 @@ export function SourceModeNotice({ sourceMode, compact = false }: { sourceMode: 
   if (sourceMode === "combined") return <div className={`source-mode-warning combined-source${compact ? " compact" : ""}`}>
     <FileText size={17} />
     <div>
-      <strong>本次综合使用 PDF 与可信台词</strong>
-      <span>题目只能依据已解析 PDF 原文和用户确认的台词资料生成，系统会保留实际引用来源用于校验。</span>
+      <strong>本次综合使用可信剧情、PDF 与台词</strong>
+      <span>题目只能依据已解析 PDF、已确认剧情梗概事件和用户确认的台词资料生成，系统会保留实际引用来源用于校验。</span>
+    </div>
+  </div>;
+  if (sourceMode === "plot") return <div className={`source-mode-warning material-source${compact ? " compact" : ""}`}>
+    <FileText size={17} />
+    <div>
+      <strong>本次使用可信剧情梗概</strong>
+      <span>题目依据已确认并启用的剧情事件生成，系统会保留对应事件和来源信息用于校验。</span>
     </div>
   </div>;
   if (sourceMode === "material") return <div className={`source-mode-warning material-source${compact ? " compact" : ""}`}>
@@ -89,7 +96,7 @@ export function SourceModeNotice({ sourceMode, compact = false }: { sourceMode: 
 
 export function EvidenceList({ evidence, open = false, sourceMode = "pdf" }: { evidence: SourceEvidence[]; open?: boolean; sourceMode?: SourceMode }) {
   function evidenceLocation(item: SourceEvidence) {
-    if (sourceMode === "material" || (sourceMode === "combined" && item.material_id)) {
+    if (sourceMode === "material" || sourceMode === "plot" || (sourceMode === "combined" && item.material_id)) {
       const parts = [
         item.speaker || null,
         item.season_number ? `第 ${item.season_number} 季` : null,
@@ -116,7 +123,7 @@ export function EvidenceList({ evidence, open = false, sourceMode = "pdf" }: { e
 
   return (
     <details className="evidence" open={open}>
-      <summary>{sourceMode === "material" ? "可信资料依据" : sourceMode === "combined" ? "综合可信来源依据" : "原文依据"}（{evidence.length} 处，答题时默认折叠）</summary>
+      <summary>{sourceMode === "material" ? "可信台词依据" : sourceMode === "plot" ? "剧情梗概依据" : sourceMode === "combined" ? "综合可信来源依据" : "原文依据"}（{evidence.length} 处，答题时默认折叠）</summary>
       <div className="evidence-body">
         {evidence.map((item) => (
           <div key={item.chunk_id} style={{ marginBottom: 14 }}>

@@ -163,7 +163,8 @@ export default function NewQuizPage() {
   const hasPdfSource = book.stats.completed_pdf_count > 0;
   const canUseModelKnowledge = Boolean(book.model_knowledge_supported === true || (book.resource_type === "book" && book.model_knowledge_supported !== false));
   const hasTrustedQuotes = Boolean(book.stats.confirmed_quote_count);
-  const generalReady = hasPdfSource || hasTrustedQuotes || canUseModelKnowledge;
+  const hasPlotSource = materials.some((material) => material.material_type === "plot_summary" && material.segment_count > 0 && ["needs_review", "completed"].includes(material.parse_status));
+  const generalReady = hasPdfSource || hasTrustedQuotes || hasPlotSource || canUseModelKnowledge;
   const themedReady = selectedMaterialIds.length > 0
     && selectedSubtypes.length > 0
     && (theme !== "character" || selectedCharacters.length > 0)
@@ -171,7 +172,7 @@ export default function NewQuizPage() {
     && !(selectedSubtypes.length === 1 && selectedSubtypes[0] === "quote_speaker" && (counts.multiple_count > 0 || counts.short_count > 0));
   const canGenerate = totalQuestions > 0 && (theme === "general" ? generalReady : themedReady);
   const sourceMode = theme === "general"
-    ? (hasPdfSource && hasTrustedQuotes ? "combined" : hasPdfSource ? "pdf" : hasTrustedQuotes ? "material" : "model_knowledge")
+    ? (hasPdfSource && (hasTrustedQuotes || hasPlotSource) || hasTrustedQuotes && hasPlotSource ? "combined" : hasPdfSource ? "pdf" : hasTrustedQuotes ? "material" : hasPlotSource ? "plot" : "model_knowledge")
     : "material";
 
   async function handleIntervention(
@@ -278,11 +279,13 @@ export default function NewQuizPage() {
           <strong>{totalQuestions} 道题</strong>
           <p>{theme === "general"
             ? sourceMode === "combined"
-              ? "综合已解析 PDF 原文和已确认台词，题目必须保留真实来源依据。"
+              ? "综合已解析 PDF、已确认剧情梗概和台词，题目必须保留真实来源依据。"
               : sourceMode === "pdf"
                 ? "基于已解析 PDF 原文生成，并保留页码依据。"
                 : sourceMode === "material"
                   ? `基于 ${book.stats.confirmed_quote_count} 条已确认台词生成，题目会保留可信资料定位。`
+                  : sourceMode === "plot"
+                    ? "基于已确认剧情梗概事件生成，题目会保留剧情来源定位。"
                   : "基于模型知识生成，不提供逐句原文依据。"
             : `基于 ${availableQuotes.length} 条已确认台词生成，题目会保留可信资料定位。`}</p>
           <dl><div><dt>主题</dt><dd>{themes.find((item) => item.value === theme)?.label}</dd></div><div><dt>目标时长</dt><dd>{duration} 分钟</dd></div><div><dt>预计用时</dt><dd>{estimatedMinutes} 分钟</dd></div><div><dt>评分方式</dt><dd>自动评分</dd></div></dl>

@@ -46,6 +46,7 @@ class GeneratedQuestion:
     max_score: float
     question_subtype: str = "general"
     quote_entry_ids: list[str] = field(default_factory=list)
+    plot_event_ids: list[str] = field(default_factory=list)
     source_segment_ids: list[str] = field(default_factory=list)
     fact_key: str = ""
     fact_claim: str = ""
@@ -68,6 +69,39 @@ class TrustedQuoteSource:
     episode_number: int | None = None
     start_ms: int | None = None
     end_ms: int | None = None
+
+
+@dataclass(frozen=True)
+class TrustedPlotSource:
+    id: str
+    event_id: str
+    material_id: str
+    file_name: str
+    material_type: str
+    content: str
+    source_segment_ids: list[str] = field(default_factory=list)
+    level: str = "event"
+    season_number: int | None = None
+    episode_number: int | None = None
+    sequence: int | None = None
+    title: str = ""
+    cause: str = ""
+    action: str = ""
+    result: str = ""
+    future_impact: str = ""
+    characters: list[str] = field(default_factory=list)
+    relationship_changes: list[Any] = field(default_factory=list)
+    conflict_tags: list[str] = field(default_factory=list)
+    theme_tags: list[str] = field(default_factory=list)
+    importance: str = "medium"
+    source_refs: list[str] = field(default_factory=list)
+    confidence: str = "unknown"
+
+    @property
+    def context(self) -> str:
+        return "；".join(
+            value for value in (self.cause, self.action, self.result, self.future_impact) if value
+        )
 
 
 @dataclass
@@ -99,7 +133,7 @@ class QuizAiProvider(Protocol):
 
     def generate_questions(
         self,
-        chunks: list[ContentChunk | TrustedQuoteSource],
+        chunks: list[ContentChunk | TrustedQuoteSource | TrustedPlotSource],
         file_names: dict[str, str],
         single_count: int,
         multiple_count: int,
@@ -216,7 +250,7 @@ class MockQuizAiProvider:
 
     def generate_questions(
         self,
-        chunks: list[ContentChunk | TrustedQuoteSource],
+        chunks: list[ContentChunk | TrustedQuoteSource | TrustedPlotSource],
         file_names: dict[str, str],
         single_count: int,
         multiple_count: int,
@@ -284,8 +318,8 @@ class MockQuizAiProvider:
 
     def _single_question_for_source(
         self,
-        source: ContentChunk | TrustedQuoteSource,
-        pool: list[ContentChunk | TrustedQuoteSource],
+        source: ContentChunk | TrustedQuoteSource | TrustedPlotSource,
+        pool: list[ContentChunk | TrustedQuoteSource | TrustedPlotSource],
         file_names: dict[str, str],
         offset: int,
     ) -> GeneratedQuestion:
@@ -317,12 +351,37 @@ class MockQuizAiProvider:
                 source_evidence=self._material_evidence(source),
                 max_score=6,
             )
+        if isinstance(source, TrustedPlotSource):
+            correct = compact_text(source.summary, 120)
+            options = [
+                {"id": "A", "text": correct},
+                {"id": "B", "text": "该事件在资料中没有发生"},
+                {"id": "C", "text": "该结果与资料描述相反"},
+                {"id": "D", "text": "该内容仅来自模型记忆"},
+            ]
+            return GeneratedQuestion(
+                question_type="single",
+                prompt=f"根据剧情资料，关于“{source.title or source.summary}”的表述哪项正确？",
+                options=options,
+                correct_answers=["A"],
+                explanation="正确选项是已确认剧情事件的摘要，其他选项与资料不符。",
+                knowledge_point=source.title or "剧情事件理解",
+                estimated_seconds=45,
+                reference_answer=None,
+                grading_rubric=[],
+                source_chunk_ids=[],
+                quote_entry_ids=[],
+                plot_event_ids=[source.id],
+                source_segment_ids=list(source.source_segment_ids),
+                source_evidence=self._plot_evidence(source),
+                max_score=6,
+            )
         return self._single_question(source, [item for item in pool if isinstance(item, ContentChunk)], file_names, offset)
 
     def _multiple_question_for_source(
         self,
-        source: ContentChunk | TrustedQuoteSource,
-        pool: list[ContentChunk | TrustedQuoteSource],
+        source: ContentChunk | TrustedQuoteSource | TrustedPlotSource,
+        pool: list[ContentChunk | TrustedQuoteSource | TrustedPlotSource],
         file_names: dict[str, str],
         offset: int,
     ) -> GeneratedQuestion:
@@ -350,10 +409,36 @@ class MockQuizAiProvider:
                 source_evidence=self._material_evidence(source),
                 max_score=10,
             )
+        if isinstance(source, TrustedPlotSource):
+            correct = compact_text(source.action or source.summary, 120)
+            result = compact_text(source.result or source.future_impact or source.summary, 120)
+            options = [
+                {"id": "A", "text": correct},
+                {"id": "B", "text": result},
+                {"id": "C", "text": "资料没有记录相关行动"},
+                {"id": "D", "text": "该事件完全无法确认"},
+            ]
+            return GeneratedQuestion(
+                question_type="multiple",
+                prompt=f"关于剧情事件“{source.title or source.summary}”，以下哪些表述有资料依据？",
+                options=options,
+                correct_answers=["A", "B"],
+                explanation="正确选项直接概括已确认剧情事件中的行动信息。",
+                knowledge_point=source.title or "剧情事件理解",
+                estimated_seconds=90,
+                reference_answer=None,
+                grading_rubric=[],
+                source_chunk_ids=[],
+                quote_entry_ids=[],
+                plot_event_ids=[source.id],
+                source_segment_ids=list(source.source_segment_ids),
+                source_evidence=self._plot_evidence(source),
+                max_score=10,
+            )
         return self._multiple_question(source, [item for item in pool if isinstance(item, ContentChunk)], file_names, offset)
 
     def _short_question_for_source(
-        self, source: ContentChunk | TrustedQuoteSource, file_names: dict[str, str]
+        self, source: ContentChunk | TrustedQuoteSource | TrustedPlotSource, file_names: dict[str, str]
     ) -> GeneratedQuestion:
         if isinstance(source, TrustedQuoteSource):
             reference = source.context or source.content
@@ -371,6 +456,27 @@ class MockQuizAiProvider:
                 quote_entry_ids=[source.id],
                 source_segment_ids=list(source.source_segment_ids),
                 source_evidence=self._material_evidence(source),
+                max_score=20,
+            )
+        if isinstance(source, TrustedPlotSource):
+            reference = "；".join(
+                value for value in (source.summary, source.cause, source.action, source.result) if value
+            )
+            return GeneratedQuestion(
+                question_type="short",
+                prompt=f"请结合剧情资料说明“{source.title or source.summary}”的前因、行动和结果。",
+                options=[],
+                correct_answers=[],
+                explanation="评分关注回答是否覆盖剧情事件的前因、行动和结果。",
+                knowledge_point=source.title or "剧情事件理解",
+                estimated_seconds=180,
+                reference_answer=reference,
+                grading_rubric=rubric_from_text(reference, 20),
+                source_chunk_ids=[],
+                quote_entry_ids=[],
+                plot_event_ids=[source.id],
+                source_segment_ids=list(source.source_segment_ids),
+                source_evidence=self._plot_evidence(source),
                 max_score=20,
             )
         return self._short_question(source, file_names)
@@ -391,6 +497,22 @@ class MockQuizAiProvider:
                 "excerpt": compact_text(source.content, 500),
                 "highlight": source.content,
                 "support": "题目与答案依据由后端从用户上传并确认的可信台词资料重建。",
+            }
+        ]
+
+    def _plot_evidence(self, source: TrustedPlotSource) -> list[dict[str, Any]]:
+        return [
+            {
+                "chunk_id": source.id,
+                "plot_event_id": source.id,
+                "material_id": source.material_id,
+                "material_type": source.material_type,
+                "file_name": source.file_name,
+                "season_number": source.season_number,
+                "episode_number": source.episode_number,
+                "excerpt": compact_text(source.content, 1_000),
+                "highlight": source.content,
+                "support": "题目与答案依据由后端从用户上传并确认的剧情梗概事件重建。",
             }
         ]
 
@@ -996,12 +1118,12 @@ class HttpQuizAiProvider:
 
     def _candidate_chunks(
         self,
-        chunks: list[ContentChunk | TrustedQuoteSource],
+        chunks: list[ContentChunk | TrustedQuoteSource | TrustedPlotSource],
         total: int,
         generation_number: int,
         recent_chunk_ids: set[str],
         relevance_query: str = "",
-    ) -> list[ContentChunk | TrustedQuoteSource]:
+    ) -> list[ContentChunk | TrustedQuoteSource | TrustedPlotSource]:
         fresh = [chunk for chunk in chunks if chunk.id not in recent_chunk_ids]
         repeated = [chunk for chunk in chunks if chunk.id in recent_chunk_ids]
         ranked_fresh = None
@@ -1019,7 +1141,7 @@ class HttpQuizAiProvider:
 
     def _source_evidence(
         self,
-        chunk: ContentChunk | TrustedQuoteSource,
+        chunk: ContentChunk | TrustedQuoteSource | TrustedPlotSource,
         file_names: dict[str, str],
         focus_text: str = "",
     ) -> dict[str, Any]:
@@ -1040,6 +1162,21 @@ class HttpQuizAiProvider:
                 "highlight": chunk.content,
                 "support": "题目与答案依据由后端从用户上传并确认的可信台词资料重建。",
             }
+        if isinstance(chunk, TrustedPlotSource):
+            excerpt = compact_text(chunk.content, 1_000)
+            return {
+                "chunk_id": chunk.id,
+                "plot_event_id": chunk.id,
+                "material_id": chunk.material_id,
+                "material_type": chunk.material_type,
+                "file_name": chunk.file_name,
+                "page_number": None,
+                "season_number": chunk.season_number,
+                "episode_number": chunk.episode_number,
+                "excerpt": excerpt,
+                "highlight": chunk.content,
+                "support": "题目与答案依据由后端从用户上传并确认的剧情梗概事件重建。",
+            }
         file_name = file_names.get(chunk.pdf_id)
         if not file_name:
             raise RuntimeError("真实模型题目的来源文件不存在")
@@ -1055,7 +1192,7 @@ class HttpQuizAiProvider:
 
     def _generation_values(
         self,
-        candidates: list[ContentChunk | TrustedQuoteSource],
+        candidates: list[ContentChunk | TrustedQuoteSource | TrustedPlotSource],
         single_count: int,
         multiple_count: int,
         short_count: int,
@@ -1088,6 +1225,33 @@ class HttpQuizAiProvider:
                 for source in candidates
                 if isinstance(source, TrustedQuoteSource)
             ]
+        elif source_mode == "plot":
+            source_material = [
+                {
+                    "source_kind": "plot_summary",
+                    "plot_event_id": source.id,
+                    "event_id": source.event_id,
+                    "level": source.level if hasattr(source, "level") else "event",
+                    "season_number": source.season_number,
+                    "episode_number": source.episode_number,
+                    "sequence": source.sequence,
+                    "title": source.title,
+                    "summary": source.content,
+                    "cause": source.cause,
+                    "action": source.action,
+                    "result": source.result,
+                    "future_impact": source.future_impact,
+                    "characters": source.characters,
+                    "relationship_changes": source.relationship_changes,
+                    "conflict_tags": source.conflict_tags,
+                    "theme_tags": source.theme_tags,
+                    "importance": source.importance,
+                    "source_refs": source.source_refs,
+                    "confidence": source.confidence,
+                }
+                for source in candidates
+                if isinstance(source, TrustedPlotSource)
+            ]
         elif source_mode == "combined":
             source_material = [
                 {
@@ -1114,6 +1278,31 @@ class HttpQuizAiProvider:
                 }
                 for source in candidates
                 if isinstance(source, TrustedQuoteSource)
+            ] + [
+                {
+                    "source_kind": "plot_summary",
+                    "plot_event_id": source.id,
+                    "event_id": source.event_id,
+                    "level": "event",
+                    "season_number": source.season_number,
+                    "episode_number": source.episode_number,
+                    "sequence": source.sequence,
+                    "title": source.title,
+                    "summary": source.content,
+                    "cause": source.cause,
+                    "action": source.action,
+                    "result": source.result,
+                    "future_impact": source.future_impact,
+                    "characters": source.characters,
+                    "relationship_changes": source.relationship_changes,
+                    "conflict_tags": source.conflict_tags,
+                    "theme_tags": source.theme_tags,
+                    "importance": source.importance,
+                    "source_refs": source.source_refs,
+                    "confidence": source.confidence,
+                }
+                for source in candidates
+                if isinstance(source, TrustedPlotSource)
             ]
         else:
             source_material = [
@@ -1138,7 +1327,9 @@ class HttpQuizAiProvider:
                     if source_mode == "material"
                     else "model_knowledge（仅使用模型对该资源的内化知识，不提供 PDF 原文依据）"
                     if source_mode == "model_knowledge"
-                    else "combined（必须只依据提供的 PDF 原文和已确认可信台词资料）"
+                    else "plot（必须基于用户上传并确认的剧情梗概事件）"
+                    if source_mode == "plot"
+                    else "combined（必须只依据提供的 PDF 原文、剧情梗概和已确认可信台词资料）"
                 )
             ),
             "difficulty": difficulty,
@@ -1207,7 +1398,7 @@ class HttpQuizAiProvider:
     def _validate_questions(
         self,
         payload: dict[str, Any],
-        candidates: list[ContentChunk | TrustedQuoteSource],
+        candidates: list[ContentChunk | TrustedQuoteSource | TrustedPlotSource],
         file_names: dict[str, str],
         single_count: int,
         multiple_count: int,
@@ -1246,11 +1437,19 @@ class HttpQuizAiProvider:
             ):
                 raise RuntimeError(f"真实模型第 {position} 道题的台词来源格式不正确")
             unique_quote_ids = list(dict.fromkeys(raw_quote_ids))
+            raw_plot_ids = raw.get("plot_event_ids", [])
+            if not isinstance(raw_plot_ids, list) or not all(
+                isinstance(event_id, str) and event_id.strip() for event_id in raw_plot_ids
+            ):
+                raise RuntimeError(f"真实模型第 {position} 道题的剧情来源格式不正确")
+            unique_plot_ids = list(dict.fromkeys(raw_plot_ids))
             if source_mode == "pdf" and not unique_source_ids:
                 raise RuntimeError(f"真实模型第 {position} 道题缺少原文片段来源")
             if source_mode == "material" and not unique_quote_ids:
                 raise RuntimeError(f"真实模型第 {position} 道题缺少可信台词来源")
-            if source_mode == "combined" and not (unique_source_ids or unique_quote_ids):
+            if source_mode == "plot" and not unique_plot_ids:
+                raise RuntimeError(f"真实模型第 {position} 道题缺少剧情梗概来源")
+            if source_mode == "combined" and not (unique_source_ids or unique_quote_ids or unique_plot_ids):
                 raise RuntimeError(f"真实模型第 {position} 道题缺少可信来源")
             if source_mode != "pdf" and unique_source_ids:
                 if source_mode not in {"combined"}:
@@ -1258,10 +1457,14 @@ class HttpQuizAiProvider:
             if source_mode != "material" and unique_quote_ids:
                 if source_mode not in {"combined"}:
                     raise RuntimeError(f"真实模型第 {position} 道题不应包含可信台词来源")
+            if source_mode not in {"plot", "combined"} and unique_plot_ids:
+                raise RuntimeError(f"真实模型第 {position} 道题不应包含剧情梗概来源")
             if any(source_id not in chunks_by_id for source_id in unique_source_ids):
                 raise RuntimeError(f"真实模型第 {position} 道题引用了未提供的原文片段")
             if any(quote_id not in chunks_by_id for quote_id in unique_quote_ids):
                 raise RuntimeError(f"真实模型第 {position} 道题引用了未提供的可信台词")
+            if any(event_id not in chunks_by_id for event_id in unique_plot_ids):
+                raise RuntimeError(f"真实模型第 {position} 道题引用了未提供的剧情事件")
             prompt = self._question_text(raw, "prompt")
             if prompt is None:
                 raise RuntimeError(f"真实模型第 {position} 道题缺少题干字段")
@@ -1285,9 +1488,9 @@ class HttpQuizAiProvider:
                 or not all(isinstance(value, str) for value in raw_answer_signature)
             ):
                 raise RuntimeError(f"真实模型第 {position} 道题的答案事实格式不正确")
-            if source_mode in {"material", "combined"}:
+            if source_mode in {"material", "plot", "combined"}:
                 allowed = set(allowed_question_subtypes or [])
-                if source_mode == "material" and generation_theme != "general" and question_subtype not in allowed:
+                if source_mode in {"material", "plot"} and generation_theme != "general" and question_subtype not in allowed:
                     raise RuntimeError(f"真实模型第 {position} 道题超出所选考察角度")
                 quote_sources = [
                     chunks_by_id[quote_id]
@@ -1296,10 +1499,18 @@ class HttpQuizAiProvider:
                 ]
                 if source_mode == "material" and not quote_sources:
                     raise RuntimeError(f"真实模型第 {position} 道题没有有效台词来源")
+                plot_sources = [
+                    chunks_by_id[event_id]
+                    for event_id in unique_plot_ids
+                    if isinstance(chunks_by_id[event_id], TrustedPlotSource)
+                ]
+                if source_mode == "plot" and not plot_sources:
+                    raise RuntimeError(f"真实模型第 {position} 道题没有有效剧情来源")
                 # quote_entry_ids are the authoritative traceability link. The prompt may
                 # quote the line verbatim or describe it in natural language.
             else:
                 quote_sources = []
+                plot_sources = []
                 if question_subtype != "general":
                     raise RuntimeError(f"真实模型第 {position} 道题不应设置专题子类型")
             explanation = self._question_text(raw, "explanation") or (
@@ -1308,14 +1519,18 @@ class HttpQuizAiProvider:
                 else (
                     "本题依据用户上传并确认的可信台词资料生成。"
                     if source_mode == "material"
-                    else "本题依据模型对该资源内容的知识生成，不对应具体 PDF 原文。"
+                    else (
+                        "本题依据用户上传并确认的剧情梗概事件生成。"
+                        if source_mode == "plot"
+                        else "本题依据模型对该资源内容的知识生成，不对应具体 PDF 原文。"
+                    )
                 )
             )
             knowledge = self._question_text(raw, "knowledge_point") or (
                 knowledge_point(
-                    chunks_by_id[(unique_source_ids or unique_quote_ids)[0]].content
+                    chunks_by_id[(unique_source_ids or unique_quote_ids or unique_plot_ids)[0]].content
                 )
-                if unique_source_ids or unique_quote_ids
+                if unique_source_ids or unique_quote_ids or unique_plot_ids
                 else f"{resource_type_label(resource_type)}内容理解"
             )
             options: list[dict[str, str]] = []
@@ -1379,13 +1594,13 @@ class HttpQuizAiProvider:
             evidence = (
                 [
                     self._source_evidence(chunks_by_id[source_id], file_names, focus_text)
-                    for source_id in [*unique_source_ids, *unique_quote_ids]
+                    for source_id in [*unique_source_ids, *unique_quote_ids, *unique_plot_ids]
                 ]
-                if source_mode in {"pdf", "material", "combined"}
+                if source_mode in {"pdf", "material", "plot", "combined"}
                 else []
             )
             validation_warnings: list[str] = []
-            if source_mode in {"pdf", "material", "combined"}:
+            if source_mode in {"pdf", "material", "plot", "combined"}:
                 faithfulness = check_question_faithfulness(
                     explanation=explanation,
                     correct_answers_text=correct_option_text,
@@ -1395,7 +1610,7 @@ class HttpQuizAiProvider:
                     source_text=source_text_for_question(
                         raw,
                         chunks_by_id,
-                        [*unique_source_ids, *unique_quote_ids],
+                        [*unique_source_ids, *unique_quote_ids, *unique_plot_ids],
                     ),
                 )
                 if not faithfulness.passed:
@@ -1464,6 +1679,7 @@ class HttpQuizAiProvider:
                     max_score=settings["max_score"],
                     question_subtype=question_subtype,
                     quote_entry_ids=unique_quote_ids,
+                    plot_event_ids=unique_plot_ids,
                     source_segment_ids=source_segment_ids,
                     fact_key=str(semantic_signature.get("fact_key", "")),
                     fact_claim=str(semantic_signature.get("fact_claim", "")),
@@ -1534,7 +1750,7 @@ class HttpQuizAiProvider:
 
     def generate_questions(
         self,
-        chunks: list[ContentChunk | TrustedQuoteSource],
+        chunks: list[ContentChunk | TrustedQuoteSource | TrustedPlotSource],
         file_names: dict[str, str],
         single_count: int,
         multiple_count: int,
@@ -1601,22 +1817,29 @@ class HttpQuizAiProvider:
         )
         source_boundary = (
             rendered_system_prompt
-            + "\n\n系统来源边界：本次没有 PDF 原文，只能根据资源名称、类型、主创信息和模型知识生成；"
-            "source_chunk_ids 必须为空，不得编造页码、章节、集数、镜头或引文。"
+            + "\n\n系统来源边界：本次没有可引用的 PDF 原文、剧情梗概或台词资料，只能根据资源名称、类型、主创信息和模型知识生成；"
+            "source_chunk_ids、plot_event_ids 和 quote_entry_ids 必须为空，不得编造页码、章节、集数、镜头或引文。"
             if source_mode == "model_knowledge"
             else (
                 rendered_system_prompt
                 + "\n\n系统来源边界：本次只能使用提供的可信台词资料。题目可以逐字引用、自然转述或概括台词含义，"
                 "quote_entry_ids 必须来自 SOURCE_MATERIAL，角色、集数、时间和场景不得补写。"
-                "每道题必须返回 question_subtype、quote_entry_ids，并将 source_chunk_ids 设为空数组。"
+                "每道题必须返回 question_subtype、quote_entry_ids，并将 source_chunk_ids 和 plot_event_ids 设为空数组。"
                 f"\n专题约束：{theme_requirements}"
                 if source_mode == "material"
                 else (
                     rendered_system_prompt
-                    + "\n\n系统来源边界：本次只能使用 SOURCE_MATERIAL 中提供的 PDF 原文和已确认可信台词资料。"
-                    "每道题至少引用一个真实 source_chunk_id 或 quote_entry_id；不得使用模型记忆补写场景、人物关系或台词。"
+                    + "\n\n系统来源边界：本次只能使用提供的剧情梗概事件。题目必须围绕事件、人物行动、因果、结果或关系变化，"
+                    "plot_event_ids 必须来自 SOURCE_MATERIAL，source_chunk_ids 和 quote_entry_ids 必须为空，不得用模型记忆补写剧情。"
+                    f"\n专题约束：{theme_requirements}"
+                    if source_mode == "plot"
+                    else (
+                    rendered_system_prompt
+                    + "\n\n系统来源边界：本次只能使用 SOURCE_MATERIAL 中提供的 PDF 原文、已确认剧情梗概事件和已确认可信台词资料。"
+                    "每道题至少引用一个真实 source_chunk_id、plot_event_id 或 quote_entry_id；不得使用模型记忆补写场景、人物关系或台词。"
                     if source_mode == "combined"
                     else rendered_system_prompt
+                    )
                 )
             )
         )

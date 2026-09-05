@@ -6,17 +6,20 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies import require_ready_identity
-from app.models import QuoteEntry, QuizGenerationTask, ResourceMaterial
+from app.models import PlotEvent, QuoteEntry, QuizGenerationTask, ResourceMaterial
 from app.routers.books import ensure_book_is_active, get_book_or_404
 from app.schemas import (
     MaterialResponse,
+    PlotEventListResponse,
+    PlotEventResponse,
+    PlotEventUpdateRequest,
     QuoteEntryBulkRequest,
     QuoteEntryListResponse,
     QuoteEntryResponse,
@@ -28,12 +31,13 @@ from app.services.material_parser import parse_material_document
 
 router = APIRouter(tags=["materials"])
 settings = get_settings()
-ALLOWED_FORMATS = {"pdf", "txt", "srt", "vtt", "ass", "csv", "xlsx"}
+ALLOWED_FORMATS = {"pdf", "txt", "srt", "vtt", "ass", "csv", "xlsx", "json"}
 FORMAT_TYPES = {
     "book_text": {"pdf", "txt"},
     "script": {"pdf", "txt"},
     "subtitle": {"srt", "vtt", "ass"},
     "quote_sheet": {"csv", "xlsx"},
+    "plot_summary": {"json"},
 }
 
 
@@ -47,6 +51,20 @@ def _quote_response(quote: QuoteEntry) -> QuoteEntryResponse:
         **values,
         material_file_name=quote.material.file_name,
     )
+
+
+def _plot_event_response(event: PlotEvent) -> PlotEventResponse:
+    return PlotEventResponse.model_validate(event)
+
+
+def _material_response(material: ResourceMaterial, db: Session) -> MaterialResponse:
+    values = {
+        field: getattr(material, field)
+        for field in MaterialResponse.model_fields
+        if hasattr(material, field)
+    }
+    values["source_registry"] = list(material.source_registry or [])
+    return MaterialResponse(**values)
 
 
 def _material_or_404(
@@ -155,7 +173,7 @@ async def upload_material(
         raise HTTPException(status_code=409, detail="这份资料已经上传过了") from exc
     db.refresh(material)
     threading.Thread(target=parse_material_document, args=(material.id,), daemon=True).start()
-    return MaterialResponse.model_validate(material)
+    return _material_response(material, db)
 
 
 @router.get("/books/{book_id}/materials", response_model=list[MaterialResponse])
@@ -163,15 +181,16 @@ def list_materials(
     book_id: str,
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
-) -> list[ResourceMaterial]:
+) -> list[MaterialResponse]:
     get_book_or_404(db, book_id, identity)
-    return list(
+    materials = list(
         db.scalars(
             select(ResourceMaterial)
             .where(ResourceMaterial.book_id == book_id)
             .order_by(ResourceMaterial.created_at.desc())
         ).all()
     )
+    return [_material_response(material, db) for material in materials]
 
 
 @router.get("/books/{book_id}/materials/{material_id}", response_model=MaterialResponse)
@@ -180,8 +199,8 @@ def get_material(
     material_id: str,
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
-) -> ResourceMaterial:
-    return _material_or_404(db, book_id, material_id, identity)
+) -> MaterialResponse:
+    return _material_response(_material_or_404(db, book_id, material_id, identity), db)
 
 
 @router.post(
@@ -194,7 +213,7 @@ def reparse_material(
     material_id: str,
     db: Session = Depends(get_db),
     identity: AuthIdentity = Depends(require_ready_identity),
-) -> ResourceMaterial:
+) -> MaterialResponse:
     book = get_book_or_404(db, book_id, identity, for_write=True)
     ensure_book_is_active(book)
     material = _material_or_404(db, book_id, material_id, identity)
@@ -205,7 +224,7 @@ def reparse_material(
     db.commit()
     db.refresh(material)
     threading.Thread(target=parse_material_document, args=(material.id,), daemon=True).start()
-    return material
+    return _material_response(material, db)
 
 
 @router.delete(
@@ -237,6 +256,94 @@ def delete_material(
     db.delete(material)
     db.commit()
     Path(file_path).unlink(missing_ok=True)
+
+
+@router.get("/books/{book_id}/plot-events", response_model=PlotEventListResponse)
+def list_plot_events(
+    book_id: str,
+    material_id: str | None = None,
+    episode_number: int | None = Query(default=None, ge=1),
+    review_status: str | None = Query(default=None),
+    search: str | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> PlotEventListResponse:
+    get_book_or_404(db, book_id, identity)
+    filters = [PlotEvent.book_id == book_id]
+    if material_id:
+        filters.append(PlotEvent.material_id == material_id)
+    if episode_number is not None:
+        filters.append(PlotEvent.episode_number == episode_number)
+    if review_status:
+        if review_status not in {"pending", "confirmed", "rejected"}:
+            raise HTTPException(status_code=400, detail="不支持的剧情事件校对状态")
+        filters.append(PlotEvent.review_status == review_status)
+    if search and search.strip():
+        term = search.strip()
+        filters.append(
+            or_(
+                PlotEvent.title.contains(term),
+                PlotEvent.summary.contains(term),
+                PlotEvent.action.contains(term),
+            )
+        )
+    total = db.scalar(select(func.count(PlotEvent.id)).where(*filters)) or 0
+    items = list(
+        db.scalars(
+            select(PlotEvent)
+            .where(*filters)
+            .order_by(PlotEvent.season_number, PlotEvent.episode_number, PlotEvent.sequence, PlotEvent.created_at)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).all()
+    )
+    pending_count, confirmed_count = db.execute(
+        select(
+            func.count(PlotEvent.id).filter(PlotEvent.review_status == "pending"),
+            func.count(PlotEvent.id).filter(PlotEvent.review_status == "confirmed"),
+        ).where(PlotEvent.book_id == book_id)
+    ).one()
+    return PlotEventListResponse(
+        items=[_plot_event_response(item) for item in items],
+        total=total,
+        pending_count=pending_count or 0,
+        confirmed_count=confirmed_count or 0,
+    )
+
+
+@router.patch("/books/{book_id}/plot-events/{event_id}", response_model=PlotEventResponse)
+def update_plot_event(
+    book_id: str,
+    event_id: str,
+    payload: PlotEventUpdateRequest,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> PlotEventResponse:
+    get_book_or_404(db, book_id, identity, for_write=True)
+    event = db.scalar(
+        select(PlotEvent).where(PlotEvent.id == event_id, PlotEvent.book_id == book_id)
+    )
+    if event is None:
+        raise HTTPException(status_code=404, detail="未找到这条剧情事件")
+    changes = payload.model_dump(exclude_unset=True)
+    for field in ("title", "summary", "cause", "action", "result", "future_impact"):
+        if field in changes:
+            setattr(event, field, str(changes[field] or "").strip())
+    if payload.review_status is not None:
+        event.review_status = payload.review_status
+        if payload.review_status == "rejected":
+            event.enabled_for_generation = False
+        elif payload.review_status == "confirmed" and payload.enabled_for_generation is None:
+            event.enabled_for_generation = True
+    if payload.enabled_for_generation is not None:
+        if payload.enabled_for_generation and event.review_status != "confirmed":
+            raise HTTPException(status_code=409, detail="只有已确认剧情事件才能用于出题")
+        event.enabled_for_generation = payload.enabled_for_generation
+    db.commit()
+    db.refresh(event)
+    return _plot_event_response(event)
 
 
 @router.get("/books/{book_id}/quotes", response_model=QuoteEntryListResponse)

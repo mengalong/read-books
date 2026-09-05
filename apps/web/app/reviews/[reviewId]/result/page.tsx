@@ -51,7 +51,7 @@ export default function ReviewResultPage() {
       </section>
 
       {result.weak_points.length > 0 && <div className="weak-points"><strong>本次薄弱点：</strong>{result.weak_points.join("、")}</div>}
-      <div className="section-title"><h2>逐题复盘</h2><span>{result.source_mode === "model_knowledge" ? "模型知识说明已全部展开" : result.source_mode === "combined" ? "PDF 与可信台词依据已全部展开" : result.source_mode === "material" ? "可信台词依据已全部展开" : "原文依据已全部展开"}</span></div>
+      <div className="section-title"><h2>逐题复盘</h2><span>{result.source_mode === "model_knowledge" ? "模型知识说明已全部展开" : result.source_mode === "combined" ? "PDF、剧情和可信台词依据已全部展开" : result.source_mode === "material" ? "可信台词依据已全部展开" : result.source_mode === "plot" ? "剧情梗概依据已全部展开" : "原文依据已全部展开"}</span></div>
       {result.questions.map((question, index) => {
         const answer = answerMap.get(question.id);
         if (!answer) return null;

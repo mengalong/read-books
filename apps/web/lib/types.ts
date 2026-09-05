@@ -234,7 +234,7 @@ export type PreGenerationResponse = {
 };
 
 export type QuestionType = "single" | "multiple" | "short";
-export type SourceMode = "pdf" | "material" | "combined" | "model_knowledge";
+export type SourceMode = "pdf" | "material" | "plot" | "combined" | "model_knowledge";
 export type GenerationTheme = "general" | "classic_quotes" | "character";
 export type QuestionSubtype =
   | "general"
@@ -311,8 +311,8 @@ export type PdfDocument = {
 export type ResourceMaterial = {
   id: string;
   book_id: string;
-  material_type: "book_text" | "script" | "subtitle" | "quote_sheet";
-  file_format: "pdf" | "txt" | "srt" | "vtt" | "ass" | "csv" | "xlsx";
+  material_type: "book_text" | "script" | "subtitle" | "quote_sheet" | "plot_summary";
+  file_format: "pdf" | "txt" | "srt" | "vtt" | "ass" | "csv" | "xlsx" | "json";
   file_name: string;
   file_size: number;
   season_number: number | null;
@@ -322,8 +322,45 @@ export type ResourceMaterial = {
   error_message: string | null;
   segment_count: number;
   quote_count: number;
+  source_registry?: Record<string, unknown>[];
   created_at: string;
   updated_at: string;
+};
+
+export type PlotEvent = {
+  id: string;
+  book_id: string;
+  material_id: string;
+  event_id: string;
+  level: string;
+  season_number: number | null;
+  episode_number: number | null;
+  sequence: number | null;
+  title: string;
+  summary: string;
+  cause: string;
+  action: string;
+  result: string;
+  future_impact: string;
+  characters: string[];
+  relationship_changes: unknown[];
+  conflict_tags: string[];
+  theme_tags: string[];
+  importance: string;
+  source_refs: string[];
+  confidence: string;
+  question_usable: string;
+  review_status: "pending" | "confirmed" | "rejected";
+  enabled_for_generation: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PlotEventList = {
+  items: PlotEvent[];
+  total: number;
+  pending_count: number;
+  confirmed_count: number;
 };
 
 export type QuoteEntry = {
@@ -431,6 +468,7 @@ export type Question = {
   grading_rubric: { point: string; keywords?: string[]; score?: number }[];
   source_evidence: SourceEvidence[];
   quote_entry_ids: string[];
+  plot_event_ids: string[];
   source_segment_ids: string[];
   max_score: number;
   correct_answers: string[] | null;
@@ -631,6 +669,7 @@ export type ExamQuestion = {
   grading_rubric: { point: string; keywords?: string[]; score?: number }[];
   source_evidence: SourceEvidence[];
   quote_entry_ids: string[];
+  plot_event_ids: string[];
   source_segment_ids: string[];
   source_mode?: SourceMode | null;
 };

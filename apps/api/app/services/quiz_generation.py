@@ -18,6 +18,7 @@ from app.models import (
     ContentChunk,
     ModelUsageRecord,
     PdfDocument,
+    PlotEvent,
     QuoteEntry,
     Question,
     Quiz,
@@ -31,6 +32,7 @@ from app.services.prompt_config import get_effective_prompt_templates
 from app.services.quiz_provider import (
     GeneratedQuestion,
     TrustedQuoteSource,
+    TrustedPlotSource,
     compact_text,
     get_quiz_provider,
     parse_json_object,
@@ -107,12 +109,21 @@ def resolve_source_mode(
         )
         .limit(1)
     )
-    if completed_chunk and confirmed_quote:
+    confirmed_plot = db.scalar(
+        select(PlotEvent.id).where(
+            PlotEvent.book_id == book_id,
+            PlotEvent.review_status == "confirmed",
+            PlotEvent.enabled_for_generation.is_(True),
+        ).limit(1)
+    )
+    if completed_chunk and (confirmed_quote or confirmed_plot):
         return "combined"
     if completed_chunk:
         return "pdf"
     if confirmed_quote:
         return "material"
+    if confirmed_plot:
+        return "plot"
 
     has_pdf = db.scalar(select(PdfDocument.id).where(PdfDocument.book_id == book_id).limit(1))
     if has_pdf:
@@ -205,7 +216,7 @@ def validate_generation_request(
     }:
         raise ValueError("该书正在后台预生成测试，请等待本次任务完成")
     source_mode = resolve_source_mode(db, book_id, payload)
-    if source_mode in {"material", "model_knowledge"} and (payload.page_start or payload.page_end):
+    if source_mode in {"material", "plot", "model_knowledge"} and (payload.page_start or payload.page_end):
         raise ValueError("没有 PDF 时不能指定页码范围")
     return book
 
@@ -385,6 +396,7 @@ def apply_generation_intervention(
         current.setdefault("source_chunk_ids", [])
         current.setdefault("source_evidence", [])
         current.setdefault("quote_entry_ids", [])
+        current.setdefault("plot_event_ids", [])
         current.setdefault("source_segment_ids", [])
         current.setdefault("fact_key", "")
         current.setdefault("fact_claim", current["prompt"])
@@ -555,6 +567,62 @@ def _get_all_confirmed_quote_sources(db: Session, book_id: str) -> list[TrustedQ
     ]
 
 
+def _get_plot_sources(db: Session, book_id: str) -> list[TrustedPlotSource]:
+    rows = db.execute(
+        select(PlotEvent, ResourceMaterial)
+        .join(ResourceMaterial, ResourceMaterial.id == PlotEvent.material_id)
+        .where(
+            PlotEvent.book_id == book_id,
+            PlotEvent.review_status == "confirmed",
+            PlotEvent.enabled_for_generation.is_(True),
+            PlotEvent.question_usable == "true",
+        )
+        .order_by(
+            PlotEvent.season_number,
+            PlotEvent.episode_number,
+            PlotEvent.sequence,
+            PlotEvent.created_at,
+        )
+    ).all()
+    return [
+        TrustedPlotSource(
+            id=event.id,
+            event_id=event.event_id,
+            material_id=material.id,
+            file_name=material.file_name,
+            material_type=material.material_type,
+            content="；".join(
+                value
+                for value in (
+                    event.summary,
+                    event.cause,
+                    event.action,
+                    event.result,
+                    event.future_impact,
+                )
+                if value
+            ),
+            level=event.level,
+            season_number=event.season_number,
+            episode_number=event.episode_number,
+            sequence=event.sequence,
+            title=event.title,
+            cause=event.cause,
+            action=event.action,
+            result=event.result,
+            future_impact=event.future_impact,
+            characters=list(event.characters or []),
+            relationship_changes=list(event.relationship_changes or []),
+            conflict_tags=list(event.conflict_tags or []),
+            theme_tags=list(event.theme_tags or []),
+            importance=event.importance,
+            source_refs=list(event.source_refs or []),
+            confidence=event.confidence,
+        )
+        for event, material in rows
+    ]
+
+
 def _matching_quote_sources_for_question(
     sources: list[TrustedQuoteSource], question: Any
 ) -> list[TrustedQuoteSource]:
@@ -585,12 +653,13 @@ def _matching_quote_sources_for_question(
 
 
 def _background_context_for_chunks(
-    db: Session, book_id: str, chunks: list[ContentChunk | TrustedQuoteSource]
+    db: Session, book_id: str, chunks: list[ContentChunk | TrustedQuoteSource | TrustedPlotSource]
 ) -> str:
     episode_numbers = {
         chunk.episode_number
         for chunk in chunks
-        if isinstance(chunk, TrustedQuoteSource) and chunk.episode_number is not None
+        if isinstance(chunk, (TrustedQuoteSource, TrustedPlotSource))
+        and chunk.episode_number is not None
     }
     return get_understanding_context(db, book_id, episode_numbers=episode_numbers or None)
 
@@ -600,12 +669,13 @@ def _combined_sources(
     book_id: str,
     page_start: int | None = None,
     page_end: int | None = None,
-) -> tuple[list[ContentChunk | TrustedQuoteSource], dict[str, str]]:
+) -> tuple[list[ContentChunk | TrustedQuoteSource | TrustedPlotSource], dict[str, str]]:
     pdf_chunks = _get_chunks(db, book_id, page_start, page_end)
     quote_sources = _get_all_confirmed_quote_sources(db, book_id)
-    if not pdf_chunks and not quote_sources:
+    plot_sources = _get_plot_sources(db, book_id)
+    if not pdf_chunks and not quote_sources and not plot_sources:
         return [], {}
-    return [*pdf_chunks, *quote_sources], _chunk_file_names(db, pdf_chunks)
+    return [*pdf_chunks, *quote_sources, *plot_sources], _chunk_file_names(db, pdf_chunks)
 
 
 def _theme_requirements(generation_theme: str, theme_config: dict[str, Any]) -> str:
@@ -645,6 +715,17 @@ def _recent_quote_ids(db: Session, book_id: str) -> set[str]:
         .limit(80)
     ).all()
     return {quote_id for row in recent_rows for quote_id in (row or [])}
+
+
+def _recent_plot_ids(db: Session, book_id: str) -> set[str]:
+    recent_rows = db.scalars(
+        select(Question.plot_event_ids)
+        .join(Quiz, Quiz.id == Question.quiz_id)
+        .where(Quiz.book_id == book_id)
+        .order_by(Quiz.created_at.desc())
+        .limit(80)
+    ).all()
+    return {event_id for row in recent_rows for event_id in (row or [])}
 
 
 def _historical_questions(db: Session, book_id: str) -> list[Question]:
@@ -806,12 +887,16 @@ def _is_duplicate_question(
     candidate_knowledge = _normalize_question_text(candidate.knowledge_point)
     candidate_sources = set(candidate.source_chunk_ids or [])
     candidate_quotes = set(candidate.quote_entry_ids or [])
+    candidate_plots = set(candidate.plot_event_ids or [])
     for question in siblings:
         question_sources = set(getattr(question, "source_chunk_ids", None) or [])
         question_quotes = set(getattr(question, "quote_entry_ids", None) or [])
+        question_plots = set(getattr(question, "plot_event_ids", None) or [])
         if candidate_sources and question_sources and candidate_sources & question_sources:
             return True
         if candidate_quotes and question_quotes and candidate_quotes & question_quotes:
+            return True
+        if candidate_plots and question_plots and candidate_plots & question_plots:
             return True
         if candidate_prompt and candidate_prompt == _normalize_question_text(question.prompt):
             return True
@@ -856,6 +941,26 @@ def regenerate_quiz_question(
         chunks = preferred_sources or all_sources
         recent_chunk_ids = set() if preferred_sources else blocked_source_ids
         file_names = {}
+    elif quiz.source_mode in {"plot", "combined"}:
+        all_sources, file_names = (
+            (_get_plot_sources(db, quiz.book_id), {})
+            if quiz.source_mode == "plot"
+            else _combined_sources(db, quiz.book_id)
+        )
+        if not all_sources:
+            raise ValueError("没有可用于重出题的剧情或可信资料，资料可能已删除或停用")
+        blocked_source_ids = {
+            source_id
+            for sibling in same_type_questions
+            for source_id in (
+                (sibling.source_chunk_ids or [])
+                + (sibling.quote_entry_ids or [])
+                + (sibling.plot_event_ids or [])
+            )
+        }
+        preferred_sources = [source for source in all_sources if source.id not in blocked_source_ids]
+        chunks = preferred_sources or all_sources
+        recent_chunk_ids = set() if preferred_sources else blocked_source_ids
     else:
         matched_sources = _matching_quote_sources_for_question(
             _get_all_confirmed_quote_sources(db, quiz.book_id), question
@@ -967,6 +1072,7 @@ def regenerate_quiz_question(
         question.source_chunk_ids = item.source_chunk_ids
         question.question_subtype = item.question_subtype
         question.quote_entry_ids = item.quote_entry_ids
+        question.plot_event_ids = item.plot_event_ids
         question.source_segment_ids = item.source_segment_ids
         question.fact_key = item.fact_key
         question.fact_claim = item.fact_claim
@@ -1143,6 +1249,7 @@ def regenerate_snapshot_question(
         next_question["source_chunk_ids"] = item.source_chunk_ids
         next_question["question_subtype"] = item.question_subtype
         next_question["quote_entry_ids"] = item.quote_entry_ids
+        next_question["plot_event_ids"] = item.plot_event_ids
         next_question["source_segment_ids"] = item.source_segment_ids
         next_question["fact_key"] = item.fact_key
         next_question["fact_claim"] = item.fact_claim
@@ -1196,6 +1303,7 @@ def _generated_question_from_state(value: dict[str, Any]) -> GeneratedQuestion:
         "max_score": float(value.get("max_score") or 0),
         "question_subtype": str(value.get("question_subtype") or "general"),
         "quote_entry_ids": list(value.get("quote_entry_ids") or []),
+        "plot_event_ids": list(value.get("plot_event_ids") or []),
         "source_segment_ids": list(value.get("source_segment_ids") or []),
         "fact_key": str(value.get("fact_key") or ""),
         "fact_claim": str(value.get("fact_claim") or ""),
@@ -1313,14 +1421,22 @@ def run_generation_task(task_id: str) -> None:
                     raise RuntimeError("符合专题范围的可信台词数量不足")
                 file_names = {}
                 recent_chunk_ids = _recent_quote_ids(db, task.book_id)
+            elif task.source_mode == "plot":
+                chunks = _get_plot_sources(db, task.book_id)
+                if len(chunks) < task.total_questions:
+                    raise RuntimeError("符合条件的已确认剧情事件数量不足")
+                file_names = {}
+                recent_chunk_ids = _recent_plot_ids(db, task.book_id)
             elif task.source_mode == "combined":
                 chunks, file_names = _combined_sources(
                     db, task.book_id, task.page_start, task.page_end
                 )
                 if not chunks:
                     raise RuntimeError("没有可用于综合出题的可信 PDF 或台词资料")
-                recent_chunk_ids = _recent_chunk_ids(db, task.book_id) | _recent_quote_ids(
-                    db, task.book_id
+                recent_chunk_ids = (
+                    _recent_chunk_ids(db, task.book_id)
+                    | _recent_quote_ids(db, task.book_id)
+                    | _recent_plot_ids(db, task.book_id)
                 )
             else:
                 chunks = _get_chunks(db, task.book_id, task.page_start, task.page_end)
@@ -1544,6 +1660,7 @@ def run_generation_task(task_id: str) -> None:
                 state["updated_at"] = utc_now().isoformat()
                 recent_chunk_ids.update(item.source_chunk_ids)
                 recent_chunk_ids.update(item.quote_entry_ids)
+                recent_chunk_ids.update(item.plot_event_ids)
                 task.completed_questions = sum(
                     _finalized_state_status(current.get("status"))
                     for current in question_states
@@ -1602,6 +1719,7 @@ def run_generation_task(task_id: str) -> None:
                         grading_rubric=item.grading_rubric,
                         source_chunk_ids=item.source_chunk_ids,
                         quote_entry_ids=item.quote_entry_ids,
+                        plot_event_ids=item.plot_event_ids,
                         source_segment_ids=item.source_segment_ids,
                         fact_key=item.fact_key,
                         fact_claim=item.fact_claim,

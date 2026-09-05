@@ -75,6 +75,7 @@ def serialize_question(question: Question) -> dict[str, Any]:
         "grading_rubric": list(question.grading_rubric or []),
         "source_chunk_ids": list(question.source_chunk_ids or []),
         "quote_entry_ids": list(question.quote_entry_ids or []),
+        "plot_event_ids": list(question.plot_event_ids or []),
         "source_segment_ids": list(question.source_segment_ids or []),
         "fact_key": question.fact_key,
         "fact_claim": question.fact_claim,

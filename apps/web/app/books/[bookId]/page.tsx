@@ -9,6 +9,7 @@ import { BookCover, EmptyState, ErrorState, NextReview, SourceModeNotice, Status
 import { ApiError, createExamShare, deleteBook, deleteMaterial, deletePdf, deleteQuiz, getBook, getChunks, getMaterials, getQuoteSheetTemplateUrl, reparseMaterial, restoreBook, unlistBook, uploadMaterial, uploadPdf } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { formatDate, formatDateTime, formatFileSize, generationThemeLabel, materialTypeLabel, resourceAuthorLabel, resourceTypeLabel, scorePercentage } from "@/lib/format";
+import { buildPlotSummaryPrompt } from "@/lib/plot-summary-prompt";
 import type { BookDetail, Chunk, ExamShare, PdfDocument, QuizSummary, ResourceMaterial } from "@/lib/types";
 
 const difficultyLabels: Record<string, string> = {
@@ -43,6 +44,8 @@ export default function BookDetailPage() {
   const [createdShare, setCreatedShare] = useState<ExamShare | null>(null);
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [plotPromptOpen, setPlotPromptOpen] = useState(false);
+  const [plotPromptCopied, setPlotPromptCopied] = useState(false);
   const [error, setError] = useState("");
 
   async function refresh(loadChunks = true) {
@@ -86,7 +89,8 @@ export default function BookDetailPage() {
     ),
   );
   const hasTrustedQuotes = Boolean(book?.stats.confirmed_quote_count);
-  const canGenerate = Boolean(book && isActive && !generating && (hasPdfSource || canUseModelKnowledge || hasTrustedQuotes));
+  const hasPlotSource = materials.some((material) => material.material_type === "plot_summary" && material.segment_count > 0 && ["needs_review", "completed"].includes(material.parse_status));
+  const canGenerate = Boolean(book && isActive && !generating && (hasPdfSource || canUseModelKnowledge || hasTrustedQuotes || hasPlotSource));
   const previewChunks = useMemo(() => chunks.slice(0, 4), [chunks]);
 
   async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
@@ -234,6 +238,22 @@ export default function BookDetailPage() {
     }
   }
 
+  function openPlotPrompt() {
+    setPlotPromptCopied(false);
+    setPlotPromptOpen(true);
+  }
+
+  async function copyPlotPrompt() {
+    if (!book) return;
+    try {
+      await copyText(buildPlotSummaryPrompt(book));
+      setPlotPromptCopied(true);
+      window.setTimeout(() => setPlotPromptCopied(false), 1500);
+    } catch {
+      setError("提示词复制失败，请手动选择文本复制");
+    }
+  }
+
   async function handleShelfStatus() {
     if (!book) return;
     const action = book.shelf_status === "active" ? "下架" : "恢复上架";
@@ -324,6 +344,7 @@ export default function BookDetailPage() {
         <div className="section-title">
           <h2>可信资料</h2>
           <div className="section-actions">
+            <button className="button button-secondary" onClick={openPlotPrompt} type="button"><Code2 size={15} />生成剧情梗概提示词</button>
             {book.stats.quote_count > 0 && <Link className="button button-secondary" href={`/books/${book.id}/quotes`}><MessageSquareQuote size={15} />校对台词</Link>}
             {isActive && <button className="button button-primary" onClick={openMaterialDialog} type="button"><UploadCloud size={15} />上传资料</button>}
           </div>
@@ -333,11 +354,11 @@ export default function BookDetailPage() {
           <div className="file-main">
             <div className="file-name" title={material.file_name}>{material.file_name}</div>
             <div className="file-meta">{materialTypeLabel(material.material_type)} · {material.file_format.toUpperCase()} · {formatFileSize(material.file_size)}{material.season_number ? ` · 第 ${material.season_number} 季` : ""}{material.episode_label ? ` · ${material.episode_label}` : ""}{material.version_label ? ` · ${material.version_label}` : ""}</div>
-            <div className="file-meta">{material.segment_count} 个片段 · {material.quote_count} 条台词{material.error_message ? ` · ${material.error_message}` : ""}</div>
+            <div className="file-meta">{material.material_type === "plot_summary" ? `${material.segment_count} 条剧情事件` : `${material.segment_count} 个片段 · ${material.quote_count} 条台词`}{material.error_message ? ` · ${material.error_message}` : ""}</div>
           </div>
           <StatusBadge status={material.parse_status} />
           <div className="material-row-actions">
-            {material.parse_status === "needs_review" && <Link aria-label={`校对${material.file_name}`} className="button button-quiet" href={`/books/${book.id}/quotes?material_id=${material.id}`} title="校对台词"><MessageSquareQuote size={15} /></Link>}
+            {material.material_type === "plot_summary" && material.parse_status !== "processing" && <Link aria-label={`查看剧情${material.file_name}`} className="button button-quiet" href={`/books/${book.id}/plot-events?material_id=${material.id}`} title="查看剧情事件"><FileText size={15} /></Link>}{material.parse_status === "needs_review" && material.material_type !== "plot_summary" && <Link aria-label={`校对${material.file_name}`} className="button button-quiet" href={`/books/${book.id}/quotes?material_id=${material.id}`} title="校对台词"><MessageSquareQuote size={15} /></Link>}
             {material.parse_status === "failed" && <button aria-label={`重新解析${material.file_name}`} className="button button-quiet" disabled={managingMaterialId === material.id} onClick={() => void handleMaterialReparse(material)} title="重新解析" type="button"><RefreshCcw size={15} /></button>}
             <button aria-label={`删除可信资料${material.file_name}`} className="button button-quiet" disabled={managingMaterialId === material.id || material.parse_status === "processing"} onClick={() => void handleMaterialDelete(material)} title="删除资料" type="button"><Trash2 size={15} /></button>
           </div>
@@ -352,7 +373,7 @@ export default function BookDetailPage() {
             <div className="quiz-library-main">
               <strong>{quiz.title}</strong>
               <span>难度：{difficultyLabels[quiz.difficulty] || quiz.difficulty} · {quiz.question_count} 道题 · {quiz.duration_minutes} 分钟 · 创建于 {formatDateTime(quiz.created_at)}</span>
-              <span>出题依据：{quiz.source_mode === "model_knowledge" ? "模型知识（无逐句依据）" : quiz.source_mode === "material" ? "可信台词资料" : quiz.source_mode === "combined" ? "PDF 原文 + 可信台词" : "已解析 PDF 原文"} · {generationThemeLabel(quiz.generation_theme)}</span>
+              <span>出题依据：{quiz.source_mode === "model_knowledge" ? "模型知识（无逐句依据）" : quiz.source_mode === "material" ? "可信台词资料" : quiz.source_mode === "plot" ? "剧情梗概事件" : quiz.source_mode === "combined" ? "PDF 原文 + 剧情梗概 + 可信台词" : "已解析 PDF 原文"} · {generationThemeLabel(quiz.generation_theme)}</span>
               <span>题目构成：单选 {quiz.single_count} · 多选 {quiz.multiple_count} · 问答 {quiz.short_count}</span>
             </div>
             <div className="quiz-library-stats"><span>已复习 {quiz.review_count} 次</span><strong>{latestPercent === null ? "暂无成绩" : `最近得分率 ${latestPercent}%`}</strong></div>
@@ -426,16 +447,23 @@ export default function BookDetailPage() {
         <section aria-labelledby="material-upload-title" aria-modal="true" className="modal-panel material-upload-modal" role="dialog">
           <div className="modal-heading"><div><h2 id="material-upload-title">上传可信资料</h2><p>系统会在后台解析文件，并把需要确认的角色台词送到校对页。</p></div><button aria-label="关闭上传资料弹窗" className="modal-close" disabled={uploadingMaterial} onClick={() => setMaterialDialogOpen(false)} title="关闭" type="button"><X size={18} /></button></div>
           <form onSubmit={handleMaterialUpload}>
-            <label className="field"><span>资料类型</span><select onChange={(event) => { setMaterialType(event.target.value as ResourceMaterial["material_type"]); setMaterialFile(null); }} value={materialType}>{book.resource_type === "book" && <option value="book_text">原文资料（PDF、TXT）</option>}<option value="script">剧本或整理稿（PDF、TXT）</option><option value="subtitle">字幕（SRT、VTT、ASS）</option><option value="quote_sheet">结构化台词表（CSV、XLSX）</option></select></label>
+            <label className="field"><span>资料类型</span><select onChange={(event) => { setMaterialType(event.target.value as ResourceMaterial["material_type"]); setMaterialFile(null); }} value={materialType}>{book.resource_type === "book" && <option value="book_text">原文资料（PDF、TXT）</option>}<option value="script">剧本或整理稿（PDF、TXT）</option><option value="subtitle">字幕（SRT、VTT、ASS）</option><option value="quote_sheet">结构化台词表（CSV、XLSX）</option><option value="plot_summary">分级剧情梗概（JSON）</option></select></label>
             <label className="field"><span>选择文件</span><input accept={materialAccept(materialType)} key={materialType} onChange={(event) => setMaterialFile(event.target.files?.[0] || null)} required type="file" /></label>
             <div className="form-grid compact-grid">
               <label className="field"><span>季数（可选）</span><input max={999} min={1} onChange={(event) => setMaterialSeason(event.target.value)} type="number" value={materialSeason} /></label>
               <label className="field"><span>集数或范围（可选）</span><input maxLength={80} onChange={(event) => setMaterialEpisode(event.target.value)} placeholder="例如：第 1 集" value={materialEpisode} /></label>
             </div>
             <label className="field"><span>版本说明（可选）</span><input maxLength={120} onChange={(event) => setMaterialVersion(event.target.value)} placeholder="例如：DVD 字幕版" value={materialVersion} /></label>
-            {materialType === "quote_sheet" && <p className="field-hint">台词表必须包含“台词”和“角色”两列；可以从 <a href={getQuoteSheetTemplateUrl()}>模板文件</a> 开始整理。</p>}
+            {materialType === "quote_sheet" && <p className="field-hint">台词表必须包含“台词”和“角色”两列；可以从 <a href={getQuoteSheetTemplateUrl()}>模板文件</a> 开始整理。</p>}{materialType === "plot_summary" && <p className="field-hint">请上传提示词生成的 plot_summary.v1 JSON；导入后会按剧情事件保存，可信度不足的事件需要校对。</p>}
             <div className="modal-actions"><button className="button button-secondary" disabled={uploadingMaterial} onClick={() => setMaterialDialogOpen(false)} type="button">取消</button><button className="button button-primary" disabled={uploadingMaterial || !materialFile} type="submit"><UploadCloud size={15} />{uploadingMaterial ? "正在上传……" : "上传并解析"}</button></div>
           </form>
+        </section>
+      </div>}
+      {plotPromptOpen && book && <div className="modal-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) setPlotPromptOpen(false); }} role="presentation">
+        <section aria-labelledby="plot-prompt-title" aria-modal="true" className="modal-panel plot-prompt-modal" role="dialog">
+          <div className="modal-heading"><div><h2 id="plot-prompt-title">生成剧情梗概提示词</h2><p>复制后交给支持联网检索的大模型，生成可导入的 plot_summary.v1 JSON。</p></div><button aria-label="关闭剧情梗概提示词" className="modal-close" onClick={() => setPlotPromptOpen(false)} title="关闭" type="button"><X size={18} /></button></div>
+          <textarea aria-label="剧情梗概生成提示词" className="plot-prompt-textarea" readOnly value={buildPlotSummaryPrompt(book)} />
+          <div className="modal-actions"><button className="button button-secondary" onClick={() => setPlotPromptOpen(false)} type="button">关闭</button><button className="button button-primary" onClick={() => void copyPlotPrompt()} type="button"><Copy size={15} />{plotPromptCopied ? "已复制" : "复制提示词"}</button></div>
         </section>
       </div>}
     </div>
@@ -454,5 +482,6 @@ function toDateTimeLocal(value: Date) {
 function materialAccept(materialType: ResourceMaterial["material_type"]) {
   if (materialType === "subtitle") return ".srt,.vtt,.ass";
   if (materialType === "quote_sheet") return ".csv,.xlsx";
+  if (materialType === "plot_summary") return ".json,application/json";
   return ".pdf,.txt,application/pdf,text/plain";
 }

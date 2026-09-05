@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import json
 import logging
 import re
 import unicodedata
@@ -16,7 +17,7 @@ import fitz
 from sqlalchemy import delete, select
 
 from app.database import SessionLocal
-from app.models import MaterialSegment, QuoteEntry, ResourceMaterial
+from app.models import MaterialSegment, PlotEvent, QuoteEntry, ResourceMaterial
 from app.services.pdf_parser import extract_with_ocr, is_readable_page, normalize_text
 
 
@@ -339,6 +340,66 @@ def _parse_xlsx(material: ResourceMaterial) -> list[ParsedSegment]:
     return _rows_to_segments(material, payload)
 
 
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _parse_plot_summary(material: ResourceMaterial) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    try:
+        payload = json.loads(_decode_text(Path(material.file_path)))
+    except json.JSONDecodeError as exc:
+        raise ValueError("剧情梗概 JSON 格式不正确") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("剧情梗概必须是 JSON 对象")
+    version = str(payload.get("schema_version") or "")
+    if not version.startswith("plot_summary."):
+        raise ValueError("剧情梗概缺少受支持的 schema_version（应为 plot_summary.v1）")
+    events = payload.get("events")
+    if not isinstance(events, list) or not events:
+        raise ValueError("剧情梗概缺少 events 数组")
+    source_registry = payload.get("source_registry")
+    if not isinstance(source_registry, list):
+        source_registry = []
+    normalized_events: list[dict[str, Any]] = []
+    seen_event_ids: set[str] = set()
+    for index, raw in enumerate(events, start=1):
+        if not isinstance(raw, dict):
+            raise ValueError(f"剧情事件第 {index} 条格式不正确")
+        event_id = str(raw.get("event_id") or "").strip()
+        summary = str(raw.get("summary") or "").strip()
+        if not event_id or not summary:
+            raise ValueError(f"剧情事件第 {index} 条缺少 event_id 或 summary")
+        if event_id in seen_event_ids:
+            raise ValueError(f"剧情事件存在重复 event_id：{event_id}")
+        seen_event_ids.add(event_id)
+        normalized_events.append(
+            {
+                "event_id": event_id[:160],
+                "level": str(raw.get("level") or "event")[:20],
+                "season_number": _parse_int(raw.get("season_number")),
+                "episode_number": _parse_int(raw.get("episode_number")),
+                "sequence": _parse_int(raw.get("sequence")),
+                "title": str(raw.get("title") or "")[:240],
+                "summary": summary,
+                "cause": str(raw.get("cause") or ""),
+                "action": str(raw.get("action") or ""),
+                "result": str(raw.get("result") or ""),
+                "future_impact": str(raw.get("future_impact") or ""),
+                "characters": _string_list(raw.get("characters")),
+                "relationship_changes": raw.get("relationship_changes") if isinstance(raw.get("relationship_changes"), list) else [],
+                "conflict_tags": _string_list(raw.get("conflict_tags")),
+                "theme_tags": _string_list(raw.get("theme_tags")),
+                "importance": str(raw.get("importance") or "medium")[:20],
+                "source_refs": _string_list(raw.get("source_refs")),
+                "confidence": str(raw.get("confidence") or "unknown")[:20],
+                "question_usable": str(raw.get("question_usable") or "needs_review").lower()[:20],
+            }
+        )
+    return normalized_events, [item for item in source_registry if isinstance(item, dict)]
+
+
 def parse_material_file(material: ResourceMaterial) -> list[ParsedSegment]:
     if material.file_format == "pdf":
         return _parse_pdf(material)
@@ -382,6 +443,39 @@ def parse_material_document(material_id: str) -> None:
         db.commit()
 
         try:
+            if material.material_type == "plot_summary":
+                events, source_registry = _parse_plot_summary(material)
+                db.execute(delete(PlotEvent).where(PlotEvent.material_id == material.id))
+                db.execute(delete(QuoteEntry).where(QuoteEntry.material_id == material.id))
+                db.execute(delete(MaterialSegment).where(MaterialSegment.material_id == material.id))
+                usable_count = 0
+                for event in events:
+                    confidence = event["confidence"]
+                    question_usable = event["question_usable"]
+                    usable = question_usable == "true" and confidence in {"confirmed", "probable"}
+                    db.add(
+                        PlotEvent(
+                            book_id=material.book_id,
+                            material_id=material.id,
+                            **event,
+                            review_status="confirmed" if usable else "pending",
+                            enabled_for_generation=usable,
+                        )
+                    )
+                    usable_count += int(usable)
+                material.source_registry = source_registry
+                material.segment_count = len(events)
+                material.quote_count = 0
+                material.parse_status = "completed" if usable_count == len(events) else "needs_review"
+                material.error_message = None
+                book_id = material.book_id
+                db.commit()
+                from app.services.material_understanding import refresh_material_understanding
+
+                threading.Thread(
+                    target=refresh_material_understanding, args=(book_id,), daemon=True
+                ).start()
+                return
             records = parse_material_file(material)
             if not records:
                 raise ValueError("资料中没有识别出可用文本")

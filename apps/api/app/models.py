@@ -225,6 +225,9 @@ class Book(TimestampMixin, Base):
     material_segments: Mapped[list[MaterialSegment]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
     )
+    plot_events: Mapped[list["PlotEvent"]] = relationship(
+        back_populates="book", cascade="all, delete-orphan"
+    )
     quote_entries: Mapped[list[QuoteEntry]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
     )
@@ -311,6 +314,7 @@ class ResourceMaterial(TimestampMixin, Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     segment_count: Mapped[int] = mapped_column(Integer, default=0)
     quote_count: Mapped[int] = mapped_column(Integer, default=0)
+    source_registry: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
 
     book: Mapped[Book] = relationship(back_populates="materials")
     created_by_user: Mapped[User | None] = relationship(
@@ -320,6 +324,9 @@ class ResourceMaterial(TimestampMixin, Base):
         back_populates="material", cascade="all, delete-orphan"
     )
     quotes: Mapped[list[QuoteEntry]] = relationship(
+        back_populates="material", cascade="all, delete-orphan"
+    )
+    plot_events: Mapped[list["PlotEvent"]] = relationship(
         back_populates="material", cascade="all, delete-orphan"
     )
 
@@ -350,6 +357,43 @@ class MaterialSegment(TimestampMixin, Base):
 
     book: Mapped[Book] = relationship(back_populates="material_segments")
     material: Mapped[ResourceMaterial] = relationship(back_populates="segments")
+
+
+class PlotEvent(TimestampMixin, Base):
+    __tablename__ = "plot_events"
+    __table_args__ = (
+        UniqueConstraint("book_id", "event_id", name="uq_plot_event_book_event"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    book_id: Mapped[str] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    material_id: Mapped[str] = mapped_column(
+        ForeignKey("resource_materials.id", ondelete="CASCADE"), index=True
+    )
+    event_id: Mapped[str] = mapped_column(String(160), index=True)
+    level: Mapped[str] = mapped_column(String(20), default="event", index=True)
+    season_number: Mapped[int | None] = mapped_column(Integer, index=True)
+    episode_number: Mapped[int | None] = mapped_column(Integer, index=True)
+    sequence: Mapped[int | None] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(240), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    cause: Mapped[str] = mapped_column(Text, default="")
+    action: Mapped[str] = mapped_column(Text, default="")
+    result: Mapped[str] = mapped_column(Text, default="")
+    future_impact: Mapped[str] = mapped_column(Text, default="")
+    characters: Mapped[list[str]] = mapped_column(JSON, default=list)
+    relationship_changes: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    conflict_tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    theme_tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    importance: Mapped[str] = mapped_column(String(20), default="medium")
+    source_refs: Mapped[list[str]] = mapped_column(JSON, default=list)
+    confidence: Mapped[str] = mapped_column(String(20), default="unknown", index=True)
+    question_usable: Mapped[str] = mapped_column(String(20), default="needs_review", index=True)
+    review_status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    enabled_for_generation: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+    book: Mapped[Book] = relationship(back_populates="plot_events")
+    material: Mapped[ResourceMaterial] = relationship(back_populates="plot_events")
 
 
 class QuoteEntry(TimestampMixin, Base):
@@ -457,6 +501,7 @@ class Question(TimestampMixin, Base):
     grading_rubric: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     source_chunk_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     quote_entry_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    plot_event_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     source_segment_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     fact_key: Mapped[str | None] = mapped_column(String(1000), index=True)
     fact_claim: Mapped[str | None] = mapped_column(Text)

@@ -100,6 +100,7 @@ export function materialTypeLabel(value: ResourceMaterial["material_type"]) {
     script: "剧本或整理稿",
     subtitle: "字幕",
     quote_sheet: "结构化台词表",
+    plot_summary: "剧情梗概",
   }[value];
 }
 

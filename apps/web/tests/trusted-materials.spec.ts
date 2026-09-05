@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { mockAdminIdentity } from "./test-helpers";
+import { mockAdminIdentity, mockInsecureClipboard, readCopiedText } from "./test-helpers";
 
 const book = {
   id: "book-topic",
@@ -121,15 +121,25 @@ async function mockBookAndMaterials(
 
 test("资源详情支持上传可信台词资料", async ({ page }) => {
   await mockAdminIdentity(page);
+  await mockInsecureClipboard(page);
   await mockBookAndMaterials(page);
 
   await page.goto(`/books/${book.id}`);
   await expect(page.getByRole("heading", { name: "可信资料" })).toBeVisible();
   await expect(page.getByText(material.file_name)).toBeVisible();
   await expect(page.getByText("电影和电视剧不支持 PDF 上传")).toHaveCount(0);
+  await page.getByRole("button", { name: "生成剧情梗概提示词" }).click();
+  await expect(page.getByRole("heading", { name: "生成剧情梗概提示词" })).toBeVisible();
+  await page.getByRole("button", { name: "复制提示词" }).click();
+  await expect(page.getByRole("button", { name: "已复制" })).toBeVisible();
+  expect(await readCopiedText(page)).toContain("plot_summary.v1");
+  expect(await readCopiedText(page)).toContain("潜伏");
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
 
   await page.getByRole("button", { name: "上传资料" }).click();
   await expect(page.getByRole("heading", { name: "上传可信资料" })).toBeVisible();
+  await page.getByLabel("资料类型").selectOption("plot_summary");
+  await expect(page.getByText("plot_summary.v1 JSON")).toBeVisible();
   await page.getByLabel("资料类型").selectOption("quote_sheet");
   await page.getByLabel("选择文件").setInputFiles({
     name: "吴站长台词.csv",

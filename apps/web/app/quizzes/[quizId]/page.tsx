@@ -100,7 +100,7 @@ export default function QuizOverviewPage() {
           <div className="quiz-choice-items">
             {overview.map((item) => <div className="quiz-choice-item" key={item.type}><div className="count-icon"><FileQuestion size={17} /></div><div><strong>{item.label}</strong><span>{item.count} 道 · {item.score} 分</span></div></div>)}
           </div>
-          <div className="quiz-choice-note"><CheckCircle2 size={16} />{quiz.source_mode === "model_knowledge" ? "本套试卷基于模型知识生成，没有 PDF 页码和逐句原文依据。" : quiz.source_mode === "combined" ? "每道题都保留对应的 PDF 或可信台词来源。" : quiz.source_mode === "material" ? "每道题都保留对应的可信台词来源。" : "每道题都保留对应的 PDF 页码和原文依据。"}</div>
+          <div className="quiz-choice-note"><CheckCircle2 size={16} />{quiz.source_mode === "model_knowledge" ? "本套试卷基于模型知识生成，没有 PDF 页码和逐句原文依据。" : quiz.source_mode === "combined" ? "每道题都保留对应的 PDF、剧情事件或可信台词来源。" : quiz.source_mode === "material" ? "每道题都保留对应的可信台词来源。" : quiz.source_mode === "plot" ? "每道题都保留对应的剧情梗概事件来源。" : "每道题都保留对应的 PDF 页码和原文依据。"}</div>
         </section>
         <aside className="quiz-settings-summary">
           <div className="eyebrow">本套试卷</div>

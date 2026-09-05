@@ -12,6 +12,8 @@ import type {
   PromptPreview,
   PromptTemplate,
   PromptType,
+  PlotEvent,
+  PlotEventList,
   Quiz,
   QuizExport,
   QuizGenerationTask,
@@ -211,6 +213,31 @@ export function uploadPdf(bookId: string, file: File) {
 
 export function getMaterials(bookId: string) {
   return apiFetch<ResourceMaterial[]>(`/books/${bookId}/materials`);
+}
+
+export function getPlotEvents(
+  bookId: string,
+  params: { materialId?: string; episodeNumber?: number; reviewStatus?: string; search?: string; page?: number; pageSize?: number } = {},
+) {
+  const query = new URLSearchParams();
+  if (params.materialId) query.set("material_id", params.materialId);
+  if (params.episodeNumber) query.set("episode_number", String(params.episodeNumber));
+  if (params.reviewStatus) query.set("review_status", params.reviewStatus);
+  if (params.search) query.set("search", params.search);
+  if (params.page) query.set("page", String(params.page));
+  if (params.pageSize) query.set("page_size", String(params.pageSize));
+  return apiFetch<PlotEventList>(`/books/${bookId}/plot-events${query.toString() ? `?${query}` : ""}`);
+}
+
+export function updatePlotEvent(
+  bookId: string,
+  eventId: string,
+  payload: Partial<Pick<PlotEvent, "title" | "summary" | "cause" | "action" | "result" | "future_impact" | "review_status" | "enabled_for_generation">>,
+) {
+  return apiFetch<PlotEvent>(`/books/${bookId}/plot-events/${eventId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function uploadMaterial(

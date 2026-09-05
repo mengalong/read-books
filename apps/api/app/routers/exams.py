@@ -695,6 +695,7 @@ def to_question_response(
         grading_rubric=list(question.get("grading_rubric") or []) if include_sources else [],
         source_evidence=list(question.get("source_evidence") or []) if include_sources else [],
         quote_entry_ids=list(question.get("quote_entry_ids") or []) if include_sources else [],
+        plot_event_ids=list(question.get("plot_event_ids") or []) if include_sources else [],
         source_segment_ids=list(question.get("source_segment_ids") or []) if include_sources else [],
         source_mode=question.get("source_mode"),
     )
