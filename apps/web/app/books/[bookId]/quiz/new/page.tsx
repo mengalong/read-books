@@ -201,7 +201,7 @@ export default function NewQuizPage() {
   }
 
   async function handleCancelGeneration() {
-    if (!generationTask || !["pending", "processing"].includes(generationTask.status)) return;
+    if (!generationTask || !["pending", "processing", "awaiting_intervention"].includes(generationTask.status)) return;
     if (!window.confirm("确定要终止当前出题任务吗？已生成的中间结果和调试记录会保留。")) return;
     setTaskActionBusy(true);
     setError("");
@@ -246,7 +246,7 @@ export default function NewQuizPage() {
         <div className="progress-track"><div className="progress-fill" style={{ width: `${generationTask.total_questions ? generationTask.completed_questions / generationTask.total_questions * 100 : 0}%` }} /></div>
         <div className="generation-progress-meta"><span>{generationTask.completed_questions} / {generationTask.total_questions} 道题</span><span>{generationTask.error_message || generationTask.current_phase}</span></div>
         <GenerationQuestionStates task={generationTask} calls={generationCalls} onIntervention={handleIntervention} />
-        <div className="generation-progress-actions"><button className="button button-secondary" disabled={taskActionBusy} onClick={() => void handleCopyGeneration()} type="button"><Copy size={15} />{taskCopyState === "copied" ? "已复制出题内容" : "复制当前出题内容"}</button>{["pending", "processing"].includes(generationTask.status) && <button className="button button-secondary" disabled={taskActionBusy} onClick={() => void handleCancelGeneration()} type="button"><Square size={14} />终止出题</button>}{!["pending", "processing", "completed"].includes(generationTask.status) && <button className="button button-danger" disabled={taskActionBusy} onClick={() => void handleDeleteGeneration()} type="button"><Trash2 size={14} />删除任务</button>}{generationTask.status === "completed" && generationTask.quiz_id && <Link className="button button-primary" href={`/quizzes/${generationTask.quiz_id}`}><CheckCircle2 size={15} />查看并开始复习</Link>}</div>
+        <div className="generation-progress-actions"><button className="button button-secondary" disabled={taskActionBusy} onClick={() => void handleCopyGeneration()} type="button"><Copy size={15} />{taskCopyState === "copied" ? "已复制出题内容" : "复制当前出题内容"}</button>{["pending", "processing", "awaiting_intervention"].includes(generationTask.status) && <button className="button button-secondary" disabled={taskActionBusy} onClick={() => void handleCancelGeneration()} type="button"><Square size={14} />终止出题</button>}{["cancelled", "failed"].includes(generationTask.status) && <button className="button button-danger" disabled={taskActionBusy} onClick={() => void handleDeleteGeneration()} type="button"><Trash2 size={14} />删除任务</button>}{generationTask.status === "completed" && generationTask.quiz_id && <Link className="button button-primary" href={`/quizzes/${generationTask.quiz_id}`}><CheckCircle2 size={15} />查看并开始复习</Link>}</div>
       </section>}
 
       <div className="quiz-settings-grid">

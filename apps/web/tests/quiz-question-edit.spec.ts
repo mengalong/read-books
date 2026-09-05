@@ -243,7 +243,7 @@ test("出题任务中断后保留逐题状态并支持人工确认", async ({ pa
   expect(await readCopiedText(page)).toContain("第二题输入 Prompt");
   expect(await readCopiedText(page)).toContain("第二题模型回复");
   expect(await readCopiedText(page)).toContain("第二题草稿");
-  await expect(page.getByRole("button", { name: "删除任务" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "终止出题" })).toBeVisible();
   await page.getByRole("button", { name: "确认题目可用" }).click();
   await expect(page.getByText("已确认")).toBeVisible();
   expect(action).toBe("accept");
