@@ -491,8 +491,42 @@ export type Quiz = {
   elapsed_seconds: number | null;
   submitted_at: string | null;
   next_review_date: string | null;
+  quality_review_status: "not_started" | "pending" | "processing" | "completed" | "failed";
+  quality_review_task_id: string | null;
+  quality_review_result: QuizQualityReviewResult | null;
+  quality_review_error: string | null;
+  quality_review_requested_at: string | null;
+  quality_review_completed_at: string | null;
   created_at: string;
   questions: Question[];
+};
+
+export type QuizQualityReviewIssue = {
+  question_position: number | null;
+  severity: "high" | "medium" | "low";
+  category: "fact" | "answer" | "source" | "ambiguity" | "duplicate" | "wording" | "difficulty" | "other";
+  problem: string;
+  suggestion: string;
+  evidence: string | null;
+};
+
+export type QuizQualityReviewResult = {
+  schema_version: string;
+  overall_verdict: "pass" | "needs_revision" | "high_risk";
+  summary: string;
+  strengths: string[];
+  issues: QuizQualityReviewIssue[];
+  reviewed_question_count: number;
+  generated_at: string | null;
+};
+
+export type QuizQualityReview = {
+  status: Quiz["quality_review_status"];
+  task_id: string | null;
+  result: QuizQualityReviewResult | null;
+  error: string | null;
+  requested_at: string | null;
+  completed_at: string | null;
 };
 
 export type QuizExport = {

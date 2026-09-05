@@ -16,6 +16,7 @@ import type {
   PlotEventList,
   Quiz,
   QuizExport,
+  QuizQualityReview,
   QuizGenerationTask,
   QuizGenerationDebug,
   QuizGenerationTaskDebug,
@@ -395,6 +396,14 @@ export function getQuiz(quizId: string) {
 
 export function getQuizExport(quizId: string) {
   return apiFetch<QuizExport>(`/quizzes/${quizId}/export`);
+}
+
+export function requestQuizQualityReview(quizId: string) {
+  return apiFetch<QuizQualityReview>(`/quizzes/${quizId}/quality-review`, { method: "POST" });
+}
+
+export function getQuizQualityReview(quizId: string) {
+  return apiFetch<QuizQualityReview>(`/quizzes/${quizId}/quality-review`);
 }
 
 export function getEditableQuiz(quizId: string) {

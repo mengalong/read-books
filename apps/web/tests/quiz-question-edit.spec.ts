@@ -608,6 +608,81 @@ test("书籍页选择试卷先看概览，再开始答题进入复习", async ({
   expect(reviewRequests).toBe(1);
 });
 
+test("试卷概览支持发起模型合理性审查并展示逐题建议", async ({ page }) => {
+  await mockAdminIdentity(page);
+  await page.route("**/api/quizzes/quiz-quality", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "quiz-quality",
+        book_id: "book-1",
+        book_title: "测试书",
+        title: "待审查试卷",
+        difficulty: "medium",
+        duration_minutes: 15,
+        status: "ready",
+        source_mode: "pdf",
+        generation_theme: "general",
+        theme_config: {},
+        total_score: null,
+        max_score: 6,
+        elapsed_seconds: null,
+        submitted_at: null,
+        next_review_date: null,
+        quality_review_status: "not_started",
+        quality_review_task_id: null,
+        quality_review_result: null,
+        quality_review_error: null,
+        quality_review_requested_at: null,
+        quality_review_completed_at: null,
+        created_at: "2026-09-05T08:00:00Z",
+        questions: [{
+          id: "q1", position: 1, question_type: "single", question_subtype: "general",
+          prompt: "题干", options: [{ id: "A", text: "答案" }, { id: "B", text: "干扰项" }],
+          correct_answers: null, explanation: null, knowledge_point: "知识点", difficulty: "medium",
+          estimated_seconds: 45, reference_answer: null, grading_rubric: [], source_evidence: [],
+          quote_entry_ids: [], plot_event_ids: [], source_segment_ids: [], max_score: 6,
+        }],
+      }),
+    });
+  });
+  await page.route("**/api/quizzes/quiz-quality/quality-review", async (route) => {
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "completed",
+        task_id: "quality-task-1",
+        error: null,
+        requested_at: "2026-09-05T08:01:00Z",
+        completed_at: "2026-09-05T08:01:05Z",
+        result: {
+          schema_version: "quiz_quality_review.v1",
+          overall_verdict: "needs_revision",
+          summary: "一题需要修改后再使用。",
+          strengths: ["知识点明确。"],
+          issues: [{
+            question_position: 1,
+            severity: "medium",
+            category: "ambiguity",
+            problem: "题干缺少必要限定。",
+            suggestion: "补充事件背景。",
+            evidence: null,
+          }],
+          reviewed_question_count: 1,
+          generated_at: "2026-09-05T08:01:05Z",
+        },
+      }),
+    });
+  });
+
+  await page.goto("/quizzes/quiz-quality");
+  await page.getByRole("button", { name: "开始模型审查" }).click();
+  await expect(page.getByText("建议修改", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("题干缺少必要限定。" )).toBeVisible();
+  await expect(page.getByText("补充事件背景。" )).toBeVisible();
+});
+
 test("结果页不显示题目编辑入口", async ({ page }) => {
   await mockAdminIdentity(page);
 

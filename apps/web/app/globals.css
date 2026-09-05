@@ -3307,6 +3307,182 @@ p {
   gap: 9px;
 }
 
+.quiz-quality-review {
+  margin-bottom: 24px;
+}
+
+.quality-review-title {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.quality-review-title svg {
+  color: var(--green);
+}
+
+.quality-review-empty,
+.quality-review-progress,
+.quality-review-failed {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.quality-review-empty p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+  max-width: 720px;
+}
+
+.quality-review-progress {
+  color: var(--muted);
+  font-size: 13px;
+  justify-content: flex-start;
+}
+
+.quality-review-progress svg {
+  color: var(--green);
+}
+
+.quality-review-failed {
+  background: var(--red-soft);
+  color: #a94332;
+  font-size: 13px;
+  line-height: 1.55;
+  padding: 12px 14px;
+}
+
+.quality-review-failed > span {
+  flex: 1;
+}
+
+.quality-review-result {
+  display: grid;
+  gap: 14px;
+}
+
+.quality-review-verdict {
+  border-left: 3px solid var(--green);
+  display: grid;
+  gap: 4px;
+  padding: 9px 12px;
+}
+
+.quality-review-verdict.pass {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.quality-review-verdict.needs_revision {
+  background: var(--yellow-soft);
+  border-left-color: #c78a2c;
+  color: #8a5f28;
+}
+
+.quality-review-verdict.high_risk {
+  background: var(--red-soft);
+  border-left-color: var(--red);
+  color: #a94332;
+}
+
+.quality-review-verdict span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.quality-review-strengths,
+.quality-review-issues {
+  display: grid;
+  gap: 9px;
+}
+
+.quality-review-strengths > strong,
+.quality-review-issues > strong {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.quality-review-strengths ul {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.quality-review-issue {
+  border: 1px solid #eadfca;
+  border-left: 3px solid #c78a2c;
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+}
+
+.quality-review-issue.high {
+  border-color: #ecc9c0;
+  border-left-color: var(--red);
+}
+
+.quality-review-issue > div {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.quality-review-issue-position {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.quality-review-issue-category,
+.quality-review-issue-severity {
+  background: #f4eee1;
+  color: #8a5f28;
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.quality-review-issue-severity {
+  background: #f9eae5;
+  color: #a94332;
+}
+
+.quality-review-issue p {
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.quality-review-issue p strong {
+  color: var(--muted);
+  font-weight: 650;
+}
+
+.quality-review-issue-evidence {
+  color: var(--muted) !important;
+}
+
+.quality-review-no-issues {
+  align-items: center;
+  background: var(--green-soft);
+  color: var(--green);
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  padding: 11px 13px;
+}
+
+.quality-review-rerun {
+  justify-self: start;
+}
+
 .quiz-preview-header {
   margin-bottom: 20px;
 }
@@ -6841,6 +7017,12 @@ p {
   .quiz-overview-actions .button {
     justify-content: center;
     margin-top: 0;
+  }
+
+  .quality-review-empty,
+  .quality-review-failed {
+    align-items: flex-start;
+    display: grid;
   }
 
   .generation-debug-question-heading {

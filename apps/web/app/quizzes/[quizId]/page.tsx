@@ -1,12 +1,12 @@
 "use client";
 
-import { ArrowLeft, CheckCircle2, Clock3, Code2, Download, Eye, FileQuestion, Play } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardCheck, Clock3, Code2, Download, Eye, FileQuestion, LoaderCircle, Play } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { ErrorState, SourceModeNotice } from "@/components/ui";
-import { ApiError, getQuiz, getQuizExport, startReview } from "@/lib/api";
+import { ApiError, getQuiz, getQuizExport, requestQuizQualityReview, startReview } from "@/lib/api";
 import type { Quiz } from "@/lib/types";
 
 const questionTypeLabels = {
@@ -21,6 +21,7 @@ export default function QuizOverviewPage() {
   const [quiz, setQuiz] = useState<Quiz | null>(null);
   const [starting, setStarting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [qualityReviewBusy, setQualityReviewBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -30,6 +31,14 @@ export default function QuizOverviewPage() {
       .catch((reason: unknown) => setError(reason instanceof ApiError ? reason.message : "试卷加载失败"))
       .finally(() => setLoading(false));
   }, [params.quizId]);
+
+  useEffect(() => {
+    if (!quiz || !["pending", "processing"].includes(quiz.quality_review_status)) return;
+    const timer = window.setInterval(() => {
+      getQuiz(params.quizId).then(setQuiz).catch(() => undefined);
+    }, 2200);
+    return () => window.clearInterval(timer);
+  }, [params.quizId, quiz?.quality_review_status]);
 
   const overview = useMemo(() => {
     if (!quiz) return [];
@@ -81,6 +90,28 @@ export default function QuizOverviewPage() {
     }
   }
 
+  async function handleQualityReview() {
+    if (!quiz || qualityReviewBusy) return;
+    setQualityReviewBusy(true);
+    setError("");
+    try {
+      const review = await requestQuizQualityReview(quiz.id);
+      setQuiz((current) => current ? {
+        ...current,
+        quality_review_status: review.status,
+        quality_review_task_id: review.task_id,
+        quality_review_result: review.result,
+        quality_review_error: review.error,
+        quality_review_requested_at: review.requested_at,
+        quality_review_completed_at: review.completed_at,
+      } : current);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "试卷审查任务创建失败");
+    } finally {
+      setQualityReviewBusy(false);
+    }
+  }
+
   if (loading) return <div className="page-wrap"><div className="loading-state">正在打开试卷概览……</div></div>;
   if (!quiz) return <div className="page-wrap"><ErrorState message={error || "未找到这套试卷"} /></div>;
 
@@ -93,6 +124,8 @@ export default function QuizOverviewPage() {
         <div><div className="eyebrow">Review paper</div><h1 className="page-title">{quiz.title}</h1><p className="page-description">先查看这套试卷的概览，确认后再开始答题。只有点击开始按钮后才会创建复习记录。</p></div>
         <div className="quiz-overview-actions"><Link className="button button-secondary" href={`/quizzes/${quiz.id}/generation-debug`}><Code2 size={15} />查看出题过程</Link><Link className="button button-secondary" href={`/quizzes/${quiz.id}/preview`}><Eye size={15} />预览题目与答案</Link><button className="button button-secondary" disabled={exporting} onClick={() => void handleExport()} type="button"><Download size={15} />{exporting ? "正在导出……" : "导出题目与答案"}</button><button className="button button-primary" disabled={starting} onClick={() => void handleStart()} type="button"><Play size={15} />{starting ? "正在进入……" : "开始答题"}</button></div>
       </header>
+
+      <QuizQualityReviewPanel quiz={quiz} busy={qualityReviewBusy} onRequest={() => void handleQualityReview()} />
 
       <div className="quiz-choice-layout">
         <section className="content-panel">
@@ -112,3 +145,39 @@ export default function QuizOverviewPage() {
     </div>
   );
 }
+
+function QuizQualityReviewPanel({ quiz, busy, onRequest }: { quiz: Quiz; busy: boolean; onRequest: () => void }) {
+  const status = quiz.quality_review_status || "not_started";
+  const result = quiz.quality_review_result;
+  const statusLabel = status === "processing" ? "审查中" : status === "pending" ? "排队中" : status === "completed" ? "已完成" : status === "failed" ? "审查失败" : "尚未审查";
+  const verdictLabel = result?.overall_verdict === "pass" ? "建议通过" : result?.overall_verdict === "high_risk" ? "存在高风险" : "建议修改";
+  return <section className="content-panel quiz-quality-review">
+    <div className="section-title"><div className="quality-review-title"><ClipboardCheck size={18} /><h2>模型合理性审查</h2></div><span>{statusLabel}</span></div>
+    {status === "not_started" && <div className="quality-review-empty"><p>让模型逐题核对题干、答案、解析、来源和题意，结果只作为人工修改建议，不会自动改题。</p><button className="button button-secondary" disabled={busy} onClick={onRequest} type="button"><ClipboardCheck size={15} />{busy ? "正在提交……" : "开始模型审查"}</button></div>}
+    {(status === "pending" || status === "processing") && <div className="quality-review-progress"><LoaderCircle className="spin" size={17} /><span>模型正在逐题检查，页面会自动更新结果。</span></div>}
+    {status === "failed" && <div className="quality-review-failed"><AlertTriangle size={17} /><span>{quiz.quality_review_error || "模型审查失败，请稍后重试。"}</span><button className="button button-secondary" disabled={busy} onClick={onRequest} type="button">重新审查</button></div>}
+    {status === "completed" && result && <div className="quality-review-result">
+      <div className={`quality-review-verdict ${result.overall_verdict}`}><strong>{verdictLabel}</strong><span>{result.summary || "审查已完成。"}</span></div>
+      {result.strengths.length > 0 && <div className="quality-review-strengths"><strong>做得较好的地方</strong><ul>{result.strengths.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
+      {result.issues.length > 0 ? <div className="quality-review-issues"><strong>需要人工确认或修改（{result.issues.length}）</strong>{result.issues.map((issue, index) => <article className={`quality-review-issue ${issue.severity}`} key={`${issue.question_position || "all"}-${index}`}><div><span className="quality-review-issue-position">{issue.question_position ? `第 ${issue.question_position} 题` : "整套试卷"}</span><span className="quality-review-issue-category">{qualityReviewCategoryLabels[issue.category]}</span><span className="quality-review-issue-severity">{qualityReviewSeverityLabels[issue.severity]}</span></div><p><strong>问题：</strong>{issue.problem}</p><p><strong>建议：</strong>{issue.suggestion}</p>{issue.evidence && <p className="quality-review-issue-evidence"><strong>依据：</strong>{issue.evidence}</p>}</article>)}</div> : <div className="quality-review-no-issues"><CheckCircle2 size={17} /><span>未发现需要立即修改的问题，仍建议人工抽查高风险事实。</span></div>}
+      <button className="button button-secondary quality-review-rerun" disabled={busy} onClick={onRequest} type="button"><ClipboardCheck size={15} />{busy ? "正在提交……" : "重新审查"}</button>
+    </div>}
+  </section>;
+}
+
+const qualityReviewCategoryLabels: Record<NonNullable<Quiz["quality_review_result"]>["issues"][number]["category"], string> = {
+  fact: "事实",
+  answer: "答案",
+  source: "来源",
+  ambiguity: "歧义",
+  duplicate: "重复",
+  wording: "措辞",
+  difficulty: "难度",
+  other: "其他",
+};
+
+const qualityReviewSeverityLabels: Record<NonNullable<Quiz["quality_review_result"]>["issues"][number]["severity"], string> = {
+  high: "高风险",
+  medium: "建议修改",
+  low: "措辞优化",
+};
