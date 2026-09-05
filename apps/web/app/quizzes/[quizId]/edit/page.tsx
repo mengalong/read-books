@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { ErrorState, SourceModeNotice } from "@/components/ui";
 import { QuizQuestionEditList } from "@/components/quiz-question-edit-list";
-import { ApiError, getEditableQuiz, getQuizQualityReview, regenerateQuizQuestion, requestQuizQuestionQualityReview, updateQuizQuestion } from "@/lib/api";
+import { ApiError, getEditableQuiz, getQuizQualityReview, promoteQuestionToBank, regenerateQuizQuestion, requestQuizQuestionQualityReview, updateQuizQuestion } from "@/lib/api";
 import type { Question, Quiz, QuizQualityReview } from "@/lib/types";
 
 const questionTypeLabels: Record<Question["question_type"], string> = {
@@ -130,6 +130,7 @@ export default function QuizEditPage() {
           onRegenerateQuestion={(questionId) => regenerateQuizQuestion(quiz.id, questionId)}
           onSaved={handleQuestionSaved}
           onReviewQuestion={handleQuestionReview}
+          onPromoteQuestion={(questionId) => promoteQuestionToBank(quiz.id, questionId)}
           onUpdateQuestion={(questionId, payload) => updateQuizQuestion(quiz.id, questionId, payload)}
           qualityReviewResult={quiz.quality_review_result}
           questions={quiz.questions}

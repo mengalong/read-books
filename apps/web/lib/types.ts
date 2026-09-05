@@ -473,6 +473,56 @@ export type Question = {
   max_score: number;
   correct_answers: string[] | null;
   source_mode?: SourceMode | null;
+  question_bank_entry_id?: string | null;
+};
+
+export type QuestionBankUsage = {
+  id: string;
+  entry_id: string;
+  quiz_id: string | null;
+  question_id: string | null;
+  quiz_title: string;
+  question_position: number | null;
+  used_at: string;
+};
+
+export type QuestionBankEntry = {
+  id: string;
+  book_id: string;
+  origin_quiz_id: string | null;
+  origin_question_id: string | null;
+  question_type: QuestionType;
+  question_subtype: string;
+  prompt: string;
+  options: QuestionOption[];
+  correct_answers: string[];
+  explanation: string;
+  knowledge_point: string;
+  difficulty: string;
+  estimated_seconds: number;
+  reference_answer: string | null;
+  grading_rubric: { point: string; keywords?: string[]; score?: number }[];
+  source_chunk_ids: string[];
+  quote_entry_ids: string[];
+  plot_event_ids: string[];
+  source_segment_ids: string[];
+  fact_key: string | null;
+  fact_claim: string | null;
+  semantic_signature: Record<string, unknown>;
+  source_evidence: SourceEvidence[];
+  source_mode: SourceMode | null;
+  max_score: number;
+  status: "active" | "disabled";
+  use_count: number;
+  created_at: string;
+  updated_at: string;
+  usages: QuestionBankUsage[];
+};
+
+export type QuestionBankEntryList = {
+  items: QuestionBankEntry[];
+  total: number;
+  unused_count: number;
 };
 
 export type Quiz = {
@@ -574,6 +624,7 @@ export type QuizGenerationTask = {
   single_count: number;
   multiple_count: number;
   short_count: number;
+  use_question_bank: boolean;
   quiz_id: string | null;
   error_message: string | null;
   question_states: QuizGenerationQuestionState[];

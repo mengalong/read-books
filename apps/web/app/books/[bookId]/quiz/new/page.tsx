@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, ArrowLeft, Check, CheckCircle2, ChevronUp, Clock3, Copy, Edit3, FileQuestion, LoaderCircle, MessageSquareQuote, Minus, Plus, RefreshCcw, RotateCcw, Save, Sparkles, Square, Trash2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, CheckCircle2, ChevronUp, Clock3, Copy, Edit3, FileQuestion, LibraryBig, LoaderCircle, MessageSquareQuote, Minus, Plus, RefreshCcw, RotateCcw, Save, Sparkles, Square, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -56,6 +56,7 @@ export default function NewQuizPage() {
   ]);
   const [difficulty, setDifficulty] = useState("medium");
   const [duration, setDuration] = useState(15);
+  const [useQuestionBank, setUseQuestionBank] = useState(true);
   const [counts, setCounts] = useState<Record<CountKey, number>>({ single_count: 5, multiple_count: 3, short_count: 2 });
   const [pageStart, setPageStart] = useState("");
   const [pageEnd, setPageEnd] = useState("");
@@ -82,6 +83,7 @@ export default function NewQuizPage() {
         if (bookData.active_generation_task_id) {
           const task = await getGenerationTask(bookData.active_generation_task_id);
           setGenerationTask(task);
+          setUseQuestionBank(task.use_question_bank ?? true);
           setGenerationCalls((await getGenerationTaskDebug(task.id)).calls);
         }
       })
@@ -140,6 +142,7 @@ export default function NewQuizPage() {
         duration_minutes: duration,
         difficulty,
         ...counts,
+        use_question_bank: useQuestionBank,
         ...(theme === "general" && pageStart ? { page_start: Number(pageStart) } : {}),
         ...(theme === "general" && pageEnd ? { page_end: Number(pageEnd) } : {}),
         generation_theme: theme,
@@ -268,6 +271,7 @@ export default function NewQuizPage() {
           <div className="count-list">{questionTypes.map((type) => <div className="count-row" key={type.key}><div className="count-icon"><FileQuestion size={17} /></div><div className="count-copy"><strong>{type.label}</strong><span>{type.detail}</span></div><div className="stepper"><button aria-label={`减少${type.label}`} onClick={() => adjust(type.key, -1)} type="button"><Minus size={14} /></button><span>{counts[type.key]}</span><button aria-label={`增加${type.label}`} onClick={() => adjust(type.key, 1)} type="button"><Plus size={14} /></button></div></div>)}</div>
 
           <div className="settings-block"><label>难度</label><div className="segmented-control">{[{ value: "easy", label: "基础" }, { value: "medium", label: "适中" }, { value: "hard", label: "深入" }].map((item) => <button className={difficulty === item.value ? "active" : ""} key={item.value} onClick={() => setDifficulty(item.value)} type="button">{difficulty === item.value && <Check size={13} />}{item.label}</button>)}</div></div>
+          <div className="settings-block question-bank-setting"><label className="switch-control" htmlFor="use-question-bank"><input checked={useQuestionBank} id="use-question-bank" onChange={(event) => setUseQuestionBank(event.target.checked)} type="checkbox" /><span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span><span><strong><LibraryBig size={14} />优先复用题库题目</strong><small>优先选择使用次数少且未被本资源其他试卷使用过的题目，再由模型补充不足部分。</small></span></label></div>
           <div className="settings-block"><label htmlFor="duration"><Clock3 size={14} style={{ verticalAlign: "-3px", marginRight: 5 }} />目标时长</label><select id="duration" value={duration} onChange={(event) => setDuration(Number(event.target.value))}><option value={10}>10 分钟</option><option value={15}>15 分钟</option><option value={20}>20 分钟</option><option value={30}>30 分钟</option></select></div>
           {theme === "general" && hasPdfSource && <div className="settings-block"><label>页码范围（可选）</label><div className="page-range"><input min={1} onChange={(event) => setPageStart(event.target.value)} placeholder="起始页" type="number" value={pageStart} /><span>至</span><input min={1} onChange={(event) => setPageEnd(event.target.value)} placeholder="结束页" type="number" value={pageEnd} /></div></div>}
 

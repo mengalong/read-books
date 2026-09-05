@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardCheck, Clock3, Code2, Download, Eye, FileQuestion, LoaderCircle, Play } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardCheck, Clock3, Code2, Download, Eye, FileQuestion, LibraryBig, LoaderCircle, Play } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -122,7 +122,7 @@ export default function QuizOverviewPage() {
       <SourceModeNotice sourceMode={quiz.source_mode} />
       <header className="page-header">
         <div><div className="eyebrow">Review paper</div><h1 className="page-title">{quiz.title}</h1><p className="page-description">先查看这套试卷的概览，确认后再开始答题。只有点击开始按钮后才会创建复习记录。</p></div>
-        <div className="quiz-overview-actions"><Link className="button button-secondary" href={`/quizzes/${quiz.id}/generation-debug`}><Code2 size={15} />查看出题过程</Link><Link className="button button-secondary" href={`/quizzes/${quiz.id}/preview`}><Eye size={15} />预览题目与答案</Link><button className="button button-secondary" disabled={exporting} onClick={() => void handleExport()} type="button"><Download size={15} />{exporting ? "正在导出……" : "导出题目与答案"}</button><button className="button button-primary" disabled={starting} onClick={() => void handleStart()} type="button"><Play size={15} />{starting ? "正在进入……" : "开始答题"}</button></div>
+        <div className="quiz-overview-actions"><Link className="button button-secondary" href={`/quizzes/${quiz.id}/generation-debug`}><Code2 size={15} />查看出题过程</Link><Link className="button button-secondary" href={`/quizzes/${quiz.id}/preview`}><Eye size={15} />预览题目与答案</Link><Link className="button button-secondary" href={`/quizzes/${quiz.id}/edit`}><LibraryBig size={15} />管理题库题目</Link><button className="button button-secondary" disabled={exporting} onClick={() => void handleExport()} type="button"><Download size={15} />{exporting ? "正在导出……" : "导出题目与答案"}</button><button className="button button-primary" disabled={starting} onClick={() => void handleStart()} type="button"><Play size={15} />{starting ? "正在进入……" : "开始答题"}</button></div>
       </header>
 
       <QuizQualityReviewPanel quiz={quiz} busy={qualityReviewBusy} onRequest={() => void handleQualityReview()} />

@@ -1,10 +1,10 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, LoaderCircle, RotateCcw, Save } from "lucide-react";
+import { AlertTriangle, CheckCircle2, LibraryBig, LoaderCircle, RotateCcw, Save } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { ApiError } from "@/lib/api";
-import type { Question, QuestionUpdatePayload, QuizQualityReview, QuizQualityReviewResult } from "@/lib/types";
+import type { Question, QuestionBankEntry, QuestionUpdatePayload, QuizQualityReview, QuizQualityReviewResult } from "@/lib/types";
 
 const OPTION_IDS = ["A", "B", "C", "D"] as const;
 
@@ -21,6 +21,7 @@ type QuizQuestionEditListProps = {
   onRegenerateQuestion: (questionId: string) => Promise<Question>;
   qualityReviewResult?: QuizQualityReviewResult | null;
   onReviewQuestion?: (questionId: string) => Promise<QuizQualityReview>;
+  onPromoteQuestion?: (questionId: string) => Promise<QuestionBankEntry>;
 };
 
 export function QuizQuestionEditList({
@@ -30,6 +31,7 @@ export function QuizQuestionEditList({
   onRegenerateQuestion,
   qualityReviewResult,
   onReviewQuestion,
+  onPromoteQuestion,
 }: QuizQuestionEditListProps) {
   return (
     <div className="quiz-question-edit-list">
@@ -42,6 +44,7 @@ export function QuizQuestionEditList({
           question={question}
           qualityReview={qualityReviewResult?.question_reviews?.find((item) => item.question_position === question.position) || null}
           onReviewQuestion={onReviewQuestion}
+          onPromoteQuestion={onPromoteQuestion}
         />
       ))}
     </div>
@@ -55,6 +58,7 @@ function QuestionEditForm({
   onRegenerateQuestion,
   qualityReview,
   onReviewQuestion,
+  onPromoteQuestion,
 }: {
   question: Question;
   onSaved: (question: Question) => void;
@@ -62,10 +66,13 @@ function QuestionEditForm({
   onRegenerateQuestion: (questionId: string) => Promise<Question>;
   qualityReview: QuizQualityReviewResult["question_reviews"][number] | null;
   onReviewQuestion?: (questionId: string) => Promise<QuizQualityReview>;
+  onPromoteQuestion?: (questionId: string) => Promise<QuestionBankEntry>;
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [reviewing, setReviewing] = useState(false);
+  const [promoting, setPromoting] = useState(false);
+  const [banked, setBanked] = useState(Boolean(question.question_bank_entry_id));
   const [confirmingRegeneration, setConfirmingRegeneration] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -85,6 +92,7 @@ function QuestionEditForm({
     setReferenceAnswer(question.reference_answer || "");
     setOptionTexts(OPTION_IDS.map((id) => question.options.find((option) => option.id === id)?.text || ""));
     setCorrectAnswers(question.correct_answers || []);
+    setBanked(Boolean(question.question_bank_entry_id));
     setError("");
   }, [question]);
 
@@ -177,12 +185,28 @@ function QuestionEditForm({
     }
   }
 
+  async function handlePromote() {
+    if (!onPromoteQuestion || promoting || banked) return;
+    if (!window.confirm("确认将这道题加入本资源题库吗？题目会保留当前版本，后续可在题库中继续修改。")) return;
+    setPromoting(true);
+    setError("");
+    try {
+      await onPromoteQuestion(question.id);
+      setBanked(true);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "加入题库失败");
+    } finally {
+      setPromoting(false);
+    }
+  }
+
   return (
     <form className="question-edit-form" onSubmit={(event) => void handleSubmit(event)}>
       <div className="question-card-header">
         <span className="question-number">第 {question.position} 题 · {question.knowledge_point}</span>
         <div className="question-card-actions">
           <span className="question-type">{questionTypeLabels[question.question_type]}</span>
+          {onPromoteQuestion && <button className="button button-secondary question-edit-trigger" disabled={submitting || regenerating || promoting || banked} onClick={() => void handlePromote()} title={banked ? "已加入题库" : "加入题库"} type="button"><LibraryBig size={14} /><span>{banked ? "已在题库" : promoting ? "加入中……" : "加入题库"}</span></button>}
           <button
             className="button button-secondary question-edit-trigger"
             disabled={submitting || regenerating}

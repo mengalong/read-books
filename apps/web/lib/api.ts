@@ -17,6 +17,8 @@ import type {
   Quiz,
   QuizExport,
   QuizQualityReview,
+  QuestionBankEntry,
+  QuestionBankEntryList,
   QuizGenerationTask,
   QuizGenerationDebug,
   QuizGenerationTaskDebug,
@@ -345,6 +347,7 @@ export function generateQuiz(
     single_count: number;
     multiple_count: number;
     short_count: number;
+    use_question_bank?: boolean;
     page_start?: number;
     page_end?: number;
     generation_theme?: GenerationTheme;
@@ -456,6 +459,38 @@ export function getBookQuizzes(bookId: string) {
 
 export function deleteQuiz(quizId: string) {
   return apiFetch<void>(`/quizzes/${quizId}`, { method: "DELETE" });
+}
+
+export function getQuestionBank(
+  bookId: string,
+  params: { search?: string; questionType?: string; status?: string; unusedOnly?: boolean; page?: number; pageSize?: number } = {},
+) {
+  const query = new URLSearchParams();
+  if (params.search) query.set("search", params.search);
+  if (params.questionType) query.set("question_type", params.questionType);
+  if (params.status) query.set("status", params.status);
+  if (params.unusedOnly) query.set("unused_only", "true");
+  if (params.page) query.set("page", String(params.page));
+  if (params.pageSize) query.set("page_size", String(params.pageSize));
+  return apiFetch<QuestionBankEntryList>(`/books/${bookId}/question-bank${query.toString() ? `?${query}` : ""}`);
+}
+
+export function promoteQuestionToBank(quizId: string, questionId: string) {
+  return apiFetch<QuestionBankEntry>(`/quizzes/${quizId}/questions/${questionId}/question-bank`, { method: "POST" });
+}
+
+export function promoteQuestionsToBank(quizId: string, questionIds: string[]) {
+  return apiFetch<QuestionBankEntry[]>(`/quizzes/${quizId}/question-bank`, {
+    method: "POST",
+    body: JSON.stringify({ question_ids: questionIds }),
+  });
+}
+
+export function updateQuestionBankEntry(bookId: string, entryId: string, payload: Partial<QuestionBankEntry>) {
+  return apiFetch<QuestionBankEntry>(`/books/${bookId}/question-bank/${entryId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function createExamShare(quizId: string, payload: { name?: string; expires_at?: string | null }) {
