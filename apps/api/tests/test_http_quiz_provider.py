@@ -235,6 +235,7 @@ def test_http_provider_reviews_quiz_without_requiring_literal_quote(monkeypatch)
 
     assert result["overall_verdict"] == "pass"
     assert "不要求逐字一致" in requests[0]["json"]["messages"][1]["content"]
+    assert "未标记的选项可以故意为错误或虚构内容" in requests[0]["json"]["messages"][1]["content"]
 
 
 def test_http_provider_generates_validated_questions(monkeypatch):

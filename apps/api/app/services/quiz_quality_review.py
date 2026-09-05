@@ -25,6 +25,7 @@ VALID_CATEGORIES = {
     "source",
     "ambiguity",
     "duplicate",
+    "distractor",
     "wording",
     "difficulty",
     "other",

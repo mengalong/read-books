@@ -555,7 +555,7 @@ export type Quiz = {
 export type QuizQualityReviewIssue = {
   question_position: number | null;
   severity: "high" | "medium" | "low";
-  category: "fact" | "answer" | "source" | "ambiguity" | "duplicate" | "wording" | "difficulty" | "other";
+  category: "fact" | "answer" | "source" | "ambiguity" | "duplicate" | "distractor" | "wording" | "difficulty" | "other";
   problem: string;
   suggestion: string;
   evidence: string | null;

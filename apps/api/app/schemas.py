@@ -499,7 +499,7 @@ class QuestionBankBulkPromoteRequest(BaseModel):
 class QuizQualityReviewIssue(BaseModel):
     question_position: int | None = None
     severity: Literal["high", "medium", "low"] = "medium"
-    category: Literal["fact", "answer", "source", "ambiguity", "duplicate", "wording", "difficulty", "other"] = "other"
+    category: Literal["fact", "answer", "source", "ambiguity", "duplicate", "distractor", "wording", "difficulty", "other"] = "other"
     problem: str
     suggestion: str
     evidence: str | None = None

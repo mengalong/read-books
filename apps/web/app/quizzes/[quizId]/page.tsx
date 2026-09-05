@@ -172,6 +172,7 @@ const qualityReviewCategoryLabels: Record<NonNullable<Quiz["quality_review_resul
   source: "来源",
   ambiguity: "歧义",
   duplicate: "重复",
+  distractor: "干扰项",
   wording: "措辞",
   difficulty: "难度",
   other: "其他",

@@ -1010,8 +1010,11 @@ class HttpQuizAiProvider:
                 {
                     "role": "user",
                     "content": (
-                        "请审查下面这套试卷的合理性，逐题核对题干、选项、正确答案、解析、知识点、"
-                        "参考答案、评分要点和来源依据之间是否一致。优先发现：事实或答案错误、来源不支持、"
+                        "请审查下面这套试卷的合理性，逐题核对题干、正确答案、解析、知识点、参考答案、评分要点"
+                        "和来源依据之间是否一致。选择题必须区分正确选项与干扰项：只有 correct_answers 标记的选项"
+                        "需要得到来源支持；未标记的选项可以故意为错误或虚构内容，不要因为它与剧情不符就判为题目错误。"
+                        "干扰项只检查是否与题干共同构成多解、是否事实上也应为正确答案、是否荒谬到没有迷惑性、"
+                        "是否引入会误导考生的错误前提。优先发现：正确答案或解析错误、来源不支持正确结论、"
                         "题意歧义、选项多解/无解、重复考察同一事实、把精确集数/页码/时间当作考点、"
                         "问答题评分依据不足。题目考察内容理解时，允许对原文或台词进行自然转述，不要求逐字一致。"
                         "有来源时只能依据给出的来源判断；没有来源的 model_knowledge 试卷请标记为需要人工核验，"
@@ -1027,7 +1030,7 @@ class HttpQuizAiProvider:
                         '{"schema_version":"quiz_quality_review.v2","overall_verdict":"pass|needs_revision|high_risk",'
                         '"score":0,"summary":"","strengths":[],"question_reviews":[{"question_position":1,"score":0,'
                         '"verdict":"pass|needs_revision|high_risk","summary":"","strengths":[],"issues":[{'
-                        '"question_position":1,"severity":"high|medium|low","category":"fact|answer|source|ambiguity|duplicate|wording|difficulty|other",'
+                        '"question_position":1,"severity":"high|medium|low","category":"fact|answer|source|ambiguity|duplicate|distractor|wording|difficulty|other",'
                         '"problem":"","suggestion":"","evidence":"","suggested_prompt":null,"suggested_options":[],'
                         '"suggested_correct_answers":[],"suggested_explanation":null,"suggested_knowledge_point":null,'
                         '"suggested_reference_answer":null,"suggested_grading_rubric":[]}]}],"issues":[],"reviewed_question_count":0}'
