@@ -233,6 +233,11 @@ test("出题任务中断后保留逐题状态并支持人工确认", async ({ pa
 
   await page.goto("/books/book-task/quiz/new");
   await expect(page.getByText("本次出题需要人工处理")).toBeVisible();
+  await page.getByRole("button", { name: "人工调整本题" }).first().click();
+  await expect(page.getByLabel("第1题人工题干")).toHaveValue("第一题草稿");
+  await page.getByRole("button", { name: "收起编辑" }).first().click();
+  await expect(page.getByLabel("第1题人工题干")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "人工调整本题" }).first()).toBeVisible();
   await expect(page.getByLabel("第2题人工题干")).toHaveValue("第二题草稿");
   await page.getByText("查看完整题目草稿").nth(1).click();
   await expect(page.getByText("A. 正确（正确答案）")).toBeVisible();
