@@ -29,11 +29,12 @@ export default function BookDetailPage() {
   const [uploading, setUploading] = useState(false);
   const [materialDialogOpen, setMaterialDialogOpen] = useState(false);
   const [materialType, setMaterialType] = useState<ResourceMaterial["material_type"]>("subtitle");
-  const [materialFile, setMaterialFile] = useState<File | null>(null);
+  const [materialFiles, setMaterialFiles] = useState<File[]>([]);
   const [materialSeason, setMaterialSeason] = useState("");
   const [materialEpisode, setMaterialEpisode] = useState("");
   const [materialVersion, setMaterialVersion] = useState("");
   const [uploadingMaterial, setUploadingMaterial] = useState(false);
+  const [materialUploadProgress, setMaterialUploadProgress] = useState({ completed: 0, total: 0 });
   const [managingMaterialId, setManagingMaterialId] = useState<string | null>(null);
   const [deletingQuizId, setDeletingQuizId] = useState<string | null>(null);
   const [managingBook, setManagingBook] = useState(false);
@@ -122,7 +123,7 @@ export default function BookDetailPage() {
   function openMaterialDialog() {
     if (!book) return;
     setMaterialType(book.resource_type === "book" ? "book_text" : "subtitle");
-    setMaterialFile(null);
+    setMaterialFiles([]);
     setMaterialSeason("");
     setMaterialEpisode("");
     setMaterialVersion("");
@@ -131,22 +132,48 @@ export default function BookDetailPage() {
 
   async function handleMaterialUpload(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!materialFile) return;
+    if (materialFiles.length === 0) return;
     setUploadingMaterial(true);
     setError("");
     try {
-      await uploadMaterial(bookId, materialFile, {
-        material_type: materialType,
-        ...(materialSeason ? { season_number: Number(materialSeason) } : {}),
-        ...(materialEpisode.trim() ? { episode_label: materialEpisode.trim() } : {}),
-        ...(materialVersion.trim() ? { version_label: materialVersion.trim() } : {}),
-      });
-      setMaterialDialogOpen(false);
-      await refresh(false);
+      const files = materialFiles;
+      setMaterialUploadProgress({ completed: 0, total: files.length });
+      let uploaded = 0;
+      const failedFiles: File[] = [];
+      const failures: string[] = [];
+      for (const file of files) {
+        try {
+          await uploadMaterial(bookId, file, {
+            material_type: materialType,
+            ...(materialSeason ? { season_number: Number(materialSeason) } : {}),
+            ...(materialEpisode.trim() ? { episode_label: materialEpisode.trim() } : {}),
+            ...(materialVersion.trim() ? { version_label: materialVersion.trim() } : {}),
+          });
+          uploaded += 1;
+        } catch (reason: unknown) {
+          const message = reason instanceof ApiError ? reason.message : "上传失败";
+          failedFiles.push(file);
+          failures.push(`${file.name}：${message}`);
+        } finally {
+          setMaterialUploadProgress({ completed: uploaded + failures.length, total: files.length });
+        }
+      }
+      if (failures.length > 0) {
+        if (uploaded > 0) {
+          setMaterialFiles(failedFiles);
+          await refresh(false);
+        }
+        setError(`已上传 ${uploaded}/${files.length} 个文件。${failures.join("；")}`);
+      } else {
+        setMaterialDialogOpen(false);
+        setMaterialFiles([]);
+        await refresh(false);
+      }
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "可信资料上传失败");
     } finally {
       setUploadingMaterial(false);
+      setMaterialUploadProgress({ completed: 0, total: 0 });
     }
   }
 
@@ -447,15 +474,16 @@ export default function BookDetailPage() {
         <section aria-labelledby="material-upload-title" aria-modal="true" className="modal-panel material-upload-modal" role="dialog">
           <div className="modal-heading"><div><h2 id="material-upload-title">上传可信资料</h2><p>系统会在后台解析文件，并把需要确认的角色台词送到校对页。</p></div><button aria-label="关闭上传资料弹窗" className="modal-close" disabled={uploadingMaterial} onClick={() => setMaterialDialogOpen(false)} title="关闭" type="button"><X size={18} /></button></div>
           <form onSubmit={handleMaterialUpload}>
-            <label className="field"><span>资料类型</span><select onChange={(event) => { setMaterialType(event.target.value as ResourceMaterial["material_type"]); setMaterialFile(null); }} value={materialType}>{book.resource_type === "book" && <option value="book_text">原文资料（PDF、TXT）</option>}<option value="script">剧本或整理稿（PDF、TXT）</option><option value="subtitle">字幕（SRT、VTT、ASS）</option><option value="quote_sheet">结构化台词表（CSV、XLSX）</option><option value="plot_summary">分级剧情梗概（JSON）</option></select></label>
-            <label className="field"><span>选择文件</span><input accept={materialAccept(materialType)} key={materialType} onChange={(event) => setMaterialFile(event.target.files?.[0] || null)} required type="file" /></label>
+            <label className="field"><span>资料类型</span><select onChange={(event) => { setMaterialType(event.target.value as ResourceMaterial["material_type"]); setMaterialFiles([]); }} value={materialType}>{book.resource_type === "book" && <option value="book_text">原文资料（PDF、TXT）</option>}<option value="script">剧本或整理稿（PDF、TXT）</option><option value="subtitle">字幕（SRT、VTT、ASS）</option><option value="quote_sheet">结构化台词表（CSV、XLSX）</option><option value="plot_summary">分级剧情梗概（JSON）</option></select></label>
+            <label className="field"><span>选择文件</span><input accept={materialAccept(materialType)} key={materialType} multiple={materialType === "plot_summary"} onChange={(event) => setMaterialFiles(Array.from(event.target.files || []))} required type="file" /></label>
+            {materialType === "plot_summary" && materialFiles.length > 0 && <p className="field-hint">已选择 {materialFiles.length} 个剧情梗概文件，将按顺序上传并分别解析。</p>}
             <div className="form-grid compact-grid">
               <label className="field"><span>季数（可选）</span><input max={999} min={1} onChange={(event) => setMaterialSeason(event.target.value)} type="number" value={materialSeason} /></label>
               <label className="field"><span>集数或范围（可选）</span><input maxLength={80} onChange={(event) => setMaterialEpisode(event.target.value)} placeholder="例如：第 1 集" value={materialEpisode} /></label>
             </div>
             <label className="field"><span>版本说明（可选）</span><input maxLength={120} onChange={(event) => setMaterialVersion(event.target.value)} placeholder="例如：DVD 字幕版" value={materialVersion} /></label>
             {materialType === "quote_sheet" && <p className="field-hint">台词表必须包含“台词”和“角色”两列；可以从 <a href={getQuoteSheetTemplateUrl()}>模板文件</a> 开始整理。</p>}{materialType === "plot_summary" && <p className="field-hint">请上传提示词生成的 plot_summary.v1 JSON；导入后会按剧情事件保存，可信度不足的事件需要校对。</p>}
-            <div className="modal-actions"><button className="button button-secondary" disabled={uploadingMaterial} onClick={() => setMaterialDialogOpen(false)} type="button">取消</button><button className="button button-primary" disabled={uploadingMaterial || !materialFile} type="submit"><UploadCloud size={15} />{uploadingMaterial ? "正在上传……" : "上传并解析"}</button></div>
+            <div className="modal-actions"><button className="button button-secondary" disabled={uploadingMaterial} onClick={() => setMaterialDialogOpen(false)} type="button">取消</button><button className="button button-primary" disabled={uploadingMaterial || materialFiles.length === 0} type="submit"><UploadCloud size={15} />{uploadingMaterial ? `正在上传 ${materialUploadProgress.completed}/${materialUploadProgress.total}……` : materialFiles.length > 1 ? `上传并解析 ${materialFiles.length} 个文件` : "上传并解析"}</button></div>
           </form>
         </section>
       </div>}

@@ -150,6 +150,41 @@ test("资源详情支持上传可信台词资料", async ({ page }) => {
   await expect(page.getByText("吴站长台词.csv")).toBeVisible();
 });
 
+test("分级剧情梗概支持一次选择多个文件并逐个上传", async ({ page }) => {
+  await mockAdminIdentity(page);
+  await mockBookAndMaterials(page, []);
+  let uploadCount = 0;
+  await page.route(`**/api/books/${book.id}/materials`, async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fulfill({ contentType: "application/json", body: "[]" });
+      return;
+    }
+    uploadCount += 1;
+    await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({
+      ...material,
+      id: `plot-material-${uploadCount}`,
+      material_type: "plot_summary",
+      file_format: "json",
+      file_name: `第${uploadCount}集.json`,
+      parse_status: "pending",
+      segment_count: 0,
+      quote_count: 0,
+    }) });
+  });
+
+  await page.goto(`/books/${book.id}`);
+  await page.getByRole("button", { name: "上传资料" }).click();
+  await page.getByLabel("资料类型").selectOption("plot_summary");
+  await page.getByLabel("选择文件").setInputFiles([
+    { name: "第1集.json", mimeType: "application/json", buffer: Buffer.from('{"schema_version":"plot_summary.v1","events":[]}') },
+    { name: "第2集.json", mimeType: "application/json", buffer: Buffer.from('{"schema_version":"plot_summary.v1","events":[]}') },
+  ]);
+  await expect(page.getByText("已选择 2 个剧情梗概文件")).toBeVisible();
+  await expect(page.getByRole("button", { name: "上传并解析 2 个文件" })).toBeVisible();
+  await page.getByRole("button", { name: "上传并解析 2 个文件" }).click();
+  await expect.poll(() => uploadCount).toBe(2);
+});
+
 test("台词校对支持修正角色并确认", async ({ page }) => {
   await mockAdminIdentity(page);
   await mockBookAndMaterials(page);

@@ -362,6 +362,14 @@ def _parse_plot_summary(material: ResourceMaterial) -> tuple[list[dict[str, Any]
     source_registry = payload.get("source_registry")
     if not isinstance(source_registry, list):
         source_registry = []
+    source_registry = [
+        item
+        for item in source_registry
+        if isinstance(item, dict) and str(item.get("source_id") or "").strip()
+    ]
+    registered_source_ids = {
+        str(item["source_id"]).strip() for item in source_registry
+    }
     normalized_events: list[dict[str, Any]] = []
     seen_event_ids: set[str] = set()
     for index, raw in enumerate(events, start=1):
@@ -374,6 +382,17 @@ def _parse_plot_summary(material: ResourceMaterial) -> tuple[list[dict[str, Any]
         if event_id in seen_event_ids:
             raise ValueError(f"剧情事件存在重复 event_id：{event_id}")
         seen_event_ids.add(event_id)
+        source_refs = _string_list(raw.get("source_refs"))
+        unknown_source_refs = [
+            source_id for source_id in source_refs if source_id not in registered_source_ids
+        ]
+        if unknown_source_refs:
+            raise ValueError(
+                f"剧情事件 {event_id} 引用了未登记的 source_id：{', '.join(unknown_source_refs[:3])}"
+            )
+        question_usable = str(raw.get("question_usable") or "needs_review").lower()[:20]
+        if question_usable == "true" and not source_refs:
+            question_usable = "needs_review"
         normalized_events.append(
             {
                 "event_id": event_id[:160],
@@ -392,9 +411,9 @@ def _parse_plot_summary(material: ResourceMaterial) -> tuple[list[dict[str, Any]
                 "conflict_tags": _string_list(raw.get("conflict_tags")),
                 "theme_tags": _string_list(raw.get("theme_tags")),
                 "importance": str(raw.get("importance") or "medium")[:20],
-                "source_refs": _string_list(raw.get("source_refs")),
+                "source_refs": source_refs,
                 "confidence": str(raw.get("confidence") or "unknown")[:20],
-                "question_usable": str(raw.get("question_usable") or "needs_review").lower()[:20],
+                "question_usable": question_usable,
             }
         )
     return normalized_events, [item for item in source_registry if isinstance(item, dict)]
