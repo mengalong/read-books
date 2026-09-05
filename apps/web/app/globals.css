@@ -4215,6 +4215,112 @@ p {
   padding: 11px 12px;
 }
 
+.plot-event-filter-panel {
+  margin-top: 22px;
+}
+
+.plot-event-counts {
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.plot-event-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.plot-event-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 18px 20px;
+}
+
+.plot-event-card > header {
+  align-items: flex-start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.plot-event-card h2 {
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.5;
+  margin-top: 5px;
+}
+
+.plot-event-meta {
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 10px;
+  gap: 12px;
+  margin: 7px 0 14px;
+}
+
+.plot-event-card form {
+  border-top: 1px solid #edf1ee;
+  display: grid;
+  gap: 10px;
+  padding-top: 13px;
+}
+
+.plot-event-card label {
+  color: var(--muted);
+  display: grid;
+  font-size: 10px;
+  gap: 5px;
+}
+
+.plot-event-card input,
+.plot-event-card textarea {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.5;
+  padding: 8px 9px;
+  resize: vertical;
+}
+
+.plot-event-card input:focus,
+.plot-event-card textarea:focus {
+  border-color: var(--green);
+  outline: 2px solid rgba(47, 107, 95, 0.12);
+}
+
+.plot-event-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  justify-content: flex-end;
+  margin-top: 3px;
+}
+
+.plot-prompt-modal {
+  max-width: 860px;
+}
+
+.plot-prompt-textarea {
+  background: #f7faf8;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  min-height: 420px;
+  padding: 12px;
+  resize: vertical;
+  width: 100%;
+}
+
 .quiz-settings-summary dd {
   align-items: center;
   display: flex;

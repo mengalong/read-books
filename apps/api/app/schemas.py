@@ -340,6 +340,7 @@ class QuizGenerationQuestionState(BaseModel):
     question_type: Literal["single", "multiple", "short"]
     status: Literal["pending", "generating", "ready", "awaiting_intervention", "confirmed"]
     attempts: int = 0
+    source_focus: Literal["content", "dialogue", "integrated"] | None = None
     error_message: str | None = None
     question: dict[str, Any] | None = None
     updated_at: datetime | None = None

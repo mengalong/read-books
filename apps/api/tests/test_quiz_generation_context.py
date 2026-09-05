@@ -4,7 +4,10 @@ from app.services.quiz_generation import (
     HISTORICAL_FACT_PROMPT_LIMIT,
     _historical_question_exclusions,
     _question_exclusion_payload,
+    _source_focus_for_question,
 )
+from app.models import ContentChunk
+from app.services.quiz_provider import TrustedQuoteSource
 
 
 def make_question(index: int, *, topic: str = "主动回忆") -> SimpleNamespace:
@@ -50,3 +53,29 @@ def test_historical_exclusions_are_relevant_and_capped():
 
     assert len(exclusions) <= HISTORICAL_FACT_PROMPT_LIMIT
     assert exclusions[0]["fact_claim"] == "间隔练习需要主动提取"
+
+
+def test_combined_source_focus_defaults_to_seventy_twenty_ten():
+    content = ContentChunk(
+        id="chunk-1",
+        book_id="book-1",
+        pdf_id="pdf-1",
+        page_number=1,
+        sequence=1,
+        content="剧情内容",
+        char_count=4,
+    )
+    quote = TrustedQuoteSource(
+        id="quote-1",
+        material_id="material-1",
+        file_name="台词.csv",
+        material_type="quote_sheet",
+        content="一条台词",
+        source_segment_ids=[],
+    )
+    focuses = [
+        _source_focus_for_question("combined", [content, quote], position, 10)
+        for position in range(1, 11)
+    ]
+
+    assert focuses == ["content"] * 7 + ["dialogue"] * 2 + ["integrated"]

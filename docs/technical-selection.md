@@ -303,6 +303,8 @@ export type AppConfig = {
 
 剧情梗概资料使用 `plot_summary.v1` JSON。资源主页生成的提示词要求模型输出 `source_registry`、分集信息和原子化 `events`；上传接口以 `plot_summary` 资料类型接收 JSON，解析后写入 `plot_events`，事件经过可信度和 `question_usable` 检查，确认启用后才能进入剧情题来源池。管理接口为 `GET/PATCH /api/books/{book_id}/plot-events`，支持按资料、集数、状态和关键词筛选及逐条编辑确认。剧情事件与 QuoteEntry、PDF 片段保持独立来源 ID，后续综合出题按来源方向分别召回。
 
+综合内容任务在 `run_generation_task` 中为每道题生成来源方向计划：默认 70% `content`、20% `dialogue`、10% `integrated`。`HttpQuizAiProvider` 和 Mock Provider 按方向过滤候选：`content` 只使用 PDF/剧情事件，`dialogue` 只使用可信台词，`integrated` 强制同时提供两类来源。模型返回后 `_validate_questions` 校验对应 ID 是否齐全，题目仍禁止把集数、时间码或资料位置作为考点。
+
 一次手动出题或后台预出题是一个任务，各道题的首次生成和结构修正重试分别按调用序号记录；一次提交中的多个问答题评分共享提交任务 ID，并按调用序号展开。连接测试也作为独立任务记录，便于排查模型连通性。接口没有返回 usage 时对应 Token 为空，统计页面显示“未报告”，不将未知值假定为零。
 
 预生成采用分层配置边界：书籍实体维护是否开启、当前状态、失败信息和结果题目 ID；平台或未来租户设置维护默认题量、题型、目标时长、并发和资源预算；书籍级参数可以覆盖租户默认值。未来增加 `tenant_id` 后，任务和用量记录沿用租户维度查询，避免把书籍运行状态塞进全局模型配置表。

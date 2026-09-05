@@ -152,6 +152,7 @@ class QuizAiProvider(Protocol):
         theme_requirements: str = "",
         allowed_question_subtypes: list[str] | None = None,
         background_context: str = "",
+        source_focus: str = "",
     ) -> list[GeneratedQuestion]: ...
 
     def grade_short_answer(self, question: Question, answer: str) -> GradeResult: ...
@@ -269,12 +270,26 @@ class MockQuizAiProvider:
         theme_requirements: str = "",
         allowed_question_subtypes: list[str] | None = None,
         background_context: str = "",
+        source_focus: str = "",
     ) -> list[GeneratedQuestion]:
         if not chunks:
             raise RuntimeError("没有 PDF 时需要启用已配置的大模型，当前模拟接口不支持资源知识出题")
 
-        fresh = [chunk for chunk in chunks if chunk.id not in recent_chunk_ids]
-        repeated = [chunk for chunk in chunks if chunk.id in recent_chunk_ids]
+        focus_chunks = list(chunks)
+        if source_focus == "dialogue":
+            focused = [chunk for chunk in focus_chunks if isinstance(chunk, TrustedQuoteSource)]
+        elif source_focus == "content":
+            focused = [
+                chunk
+                for chunk in focus_chunks
+                if isinstance(chunk, (ContentChunk, TrustedPlotSource))
+            ]
+        else:
+            focused = focus_chunks
+        if focused:
+            focus_chunks = focused
+        fresh = [chunk for chunk in focus_chunks if chunk.id not in recent_chunk_ids]
+        repeated = [chunk for chunk in focus_chunks if chunk.id in recent_chunk_ids]
         random.Random(generation_number).shuffle(fresh)
         random.Random(generation_number + 97).shuffle(repeated)
         pool = fresh + repeated
@@ -1408,6 +1423,7 @@ class HttpQuizAiProvider:
         resource_type: str,
         generation_theme: str = "general",
         allowed_question_subtypes: list[str] | None = None,
+        source_focus: str = "",
     ) -> list[GeneratedQuestion]:
         raw_questions = payload.get("questions")
         total = single_count + multiple_count + short_count
@@ -1443,6 +1459,14 @@ class HttpQuizAiProvider:
             ):
                 raise RuntimeError(f"真实模型第 {position} 道题的剧情来源格式不正确")
             unique_plot_ids = list(dict.fromkeys(raw_plot_ids))
+            has_content_source = bool(unique_source_ids or unique_plot_ids)
+            has_dialogue_source = bool(unique_quote_ids)
+            if source_focus == "content" and not has_content_source:
+                raise RuntimeError(f"真实模型第 {position} 道题缺少剧情内容来源")
+            if source_focus == "dialogue" and not has_dialogue_source:
+                raise RuntimeError(f"真实模型第 {position} 道题缺少台词来源")
+            if source_focus == "integrated" and not (has_content_source and has_dialogue_source):
+                raise RuntimeError(f"真实模型第 {position} 道题必须同时引用剧情和台词来源")
             if source_mode == "pdf" and not unique_source_ids:
                 raise RuntimeError(f"真实模型第 {position} 道题缺少原文片段来源")
             if source_mode == "material" and not unique_quote_ids:
@@ -1769,14 +1793,48 @@ class HttpQuizAiProvider:
         theme_requirements: str = "",
         allowed_question_subtypes: list[str] | None = None,
         background_context: str = "",
+        source_focus: str = "",
     ) -> list[GeneratedQuestion]:
         total = single_count + multiple_count + short_count
         relevance_query = " ".join(
             part for part in (theme_requirements, regeneration_guidance) if part.strip()
         )
-        candidates = self._candidate_chunks(
-            chunks, total, generation_number, recent_chunk_ids, relevance_query
-        )
+        focus_chunks = list(chunks)
+        if source_focus == "dialogue":
+            focused = [chunk for chunk in focus_chunks if isinstance(chunk, TrustedQuoteSource)]
+        elif source_focus == "content":
+            focused = [
+                chunk
+                for chunk in focus_chunks
+                if isinstance(chunk, (ContentChunk, TrustedPlotSource))
+            ]
+        else:
+            focused = focus_chunks
+        if focused:
+            focus_chunks = focused
+        if source_focus == "integrated":
+            content_pool = [
+                chunk
+                for chunk in focus_chunks
+                if isinstance(chunk, (ContentChunk, TrustedPlotSource))
+            ]
+            dialogue_pool = [chunk for chunk in focus_chunks if isinstance(chunk, TrustedQuoteSource)]
+            if content_pool and dialogue_pool:
+                content_candidates = self._candidate_chunks(
+                    content_pool, total, generation_number, recent_chunk_ids, relevance_query
+                )
+                dialogue_candidates = self._candidate_chunks(
+                    dialogue_pool, total, generation_number + 1, recent_chunk_ids, relevance_query
+                )
+                candidates = (content_candidates[:2] + dialogue_candidates[:2])[: max(total + 2, 4)]
+            else:
+                candidates = self._candidate_chunks(
+                    focus_chunks, total, generation_number, recent_chunk_ids, relevance_query
+                )
+        else:
+            candidates = self._candidate_chunks(
+                focus_chunks, total, generation_number, recent_chunk_ids, relevance_query
+            )
         if source_mode == "pdf" and len(candidates) < 1:
             return []
         generation_values = self._generation_values(
@@ -1809,6 +1867,11 @@ class HttpQuizAiProvider:
             "来源定位只用于后端核验和答题后的依据展示；不要让考生回答台词或情节出自哪一集、哪一页、"
             "哪一章、具体时间点或其他精确出处位置。对话场景题应考察语境、人物处境和事件背景。"
         )
+        source_focus_guidance = {
+            "content": "本题方向是剧情内容理解：优先考察人物行动、事件因果、冲突发展或剧情结果，必须引用 source_chunk_ids 或 plot_event_ids，不要只围绕台词措辞出题。",
+            "dialogue": "本题方向是台词理解：考察说话人、语境或含义，必须引用 quote_entry_ids。",
+            "integrated": "本题方向是剧情与台词关联：必须同时引用剧情来源（source_chunk_ids 或 plot_event_ids）和 quote_entry_ids，考察台词在事件中的作用。",
+        }.get(source_focus, "")
         background_guidance = (
             f"背景理解（仅用于理解剧情/内容脉络，不得作为可引用来源，不得把其中的具体表述当作答案依据，"
             f"所有可引用内容仍必须来自 SOURCE_MATERIAL）：\n{background_context}"
@@ -1858,6 +1921,7 @@ class HttpQuizAiProvider:
                     + semantic_dedup_guidance
                     + "\n\n"
                     + location_guidance
+                    + (f"\n\n{source_focus_guidance}" if source_focus_guidance else "")
                     + (f"\n\n{background_guidance}" if background_guidance else "")
                 ),
             },
@@ -1876,6 +1940,7 @@ class HttpQuizAiProvider:
                 resource_type,
                 generation_theme,
                 allowed_question_subtypes,
+                source_focus,
             )
         except RuntimeError as first_error:
             repaired_content = self._chat_completion(
@@ -1900,6 +1965,7 @@ class HttpQuizAiProvider:
                     resource_type,
                     generation_theme,
                     allowed_question_subtypes,
+                    source_focus,
                 )
             except RuntimeError as repair_error:
                 raise RuntimeError(f"真实模型出题结果修正失败：{repair_error}") from repair_error
@@ -1922,9 +1988,13 @@ class HttpQuizAiProvider:
                     "material（基于用户上传并确认的可信资料）"
                     if source_mode == "material"
                     else (
+                        "plot（基于已确认剧情梗概事件）"
+                        if source_mode == "plot"
+                        else (
                         "combined（基于已解析 PDF 原文和用户上传并确认的可信资料）"
                         if source_mode == "combined"
                         else "model_knowledge（无 PDF 原文依据）"
+                        )
                     )
                 )
             ),

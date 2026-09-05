@@ -1272,6 +1272,26 @@ def _question_types(task: QuizGenerationTask) -> Iterable[str]:
         yield from (question_type for _ in range(count))
 
 
+def _source_focus_for_question(
+    source_mode: str,
+    chunks: list[ContentChunk | TrustedQuoteSource | TrustedPlotSource],
+    position: int,
+    total_questions: int,
+) -> str:
+    """Allocate general-comprehension questions across content and dialogue sources."""
+    has_dialogue = any(isinstance(chunk, TrustedQuoteSource) for chunk in chunks)
+    has_content = any(isinstance(chunk, (ContentChunk, TrustedPlotSource)) for chunk in chunks)
+    if not (has_dialogue and has_content):
+        return "dialogue" if has_dialogue else "content"
+    content_count = max(1, round(total_questions * 0.7))
+    dialogue_count = max(1, round(total_questions * 0.2))
+    if position <= content_count:
+        return "content"
+    if position <= content_count + dialogue_count:
+        return "dialogue"
+    return "integrated"
+
+
 def _initial_question_states(task: QuizGenerationTask) -> list[dict[str, Any]]:
     return [
         {
@@ -1374,6 +1394,7 @@ def _latest_model_draft(
     draft.setdefault("grading_rubric", [])
     draft.setdefault("source_chunk_ids", [])
     draft.setdefault("quote_entry_ids", [])
+    draft.setdefault("plot_event_ids", [])
     draft.setdefault("source_segment_ids", [])
     draft.setdefault("source_evidence", [])
     draft.setdefault("fact_key", "")
@@ -1515,6 +1536,9 @@ def run_generation_task(task_id: str) -> None:
                 if _finalized_state_status(state.get("status")) and state.get("question"):
                     continue
                 task.current_question_position = position
+                state["source_focus"] = _source_focus_for_question(
+                    task.source_mode, chunks, position, task.total_questions
+                )
                 task.current_phase = f"正在生成第 {position} / {task.total_questions} 道{question_type_label(question_type)}"
                 state["status"] = "generating"
                 state["error_message"] = None
@@ -1571,6 +1595,12 @@ def run_generation_task(task_id: str) -> None:
                                 theme_config.get("question_subtypes", [])
                             ),
                             background_context=background_context,
+                            source_focus=_source_focus_for_question(
+                                task.source_mode,
+                                chunks,
+                                position,
+                                task.total_questions,
+                            ),
                         )
                         if _task_was_cancelled(db, task_id):
                             return

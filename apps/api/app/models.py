@@ -362,7 +362,7 @@ class MaterialSegment(TimestampMixin, Base):
 class PlotEvent(TimestampMixin, Base):
     __tablename__ = "plot_events"
     __table_args__ = (
-        UniqueConstraint("book_id", "event_id", name="uq_plot_event_book_event"),
+        UniqueConstraint("material_id", "event_id", name="uq_plot_event_material_event"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)

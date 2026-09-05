@@ -479,6 +479,7 @@ def test_http_provider_combined_mode_accepts_pdf_and_quote_sources(monkeypatch):
         book_title="潜伏",
         resource_type="tv_series",
         source_mode="combined",
+        source_focus="integrated",
     )
 
     assert questions[0].source_chunk_ids == [pdf_source.id]
@@ -489,6 +490,7 @@ def test_http_provider_combined_mode_accepts_pdf_and_quote_sources(monkeypatch):
     }
     assert "combined" in requests[0]["json"]["messages"][1]["content"]
     assert "quote-1" in requests[0]["json"]["messages"][1]["content"]
+    assert "必须同时引用剧情来源" in requests[0]["json"]["messages"][1]["content"]
 
 
 def test_precise_episode_questions_are_rejected(monkeypatch):

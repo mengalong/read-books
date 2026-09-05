@@ -530,6 +530,7 @@ export type QuizGenerationQuestionState = {
   question_type: QuestionType;
   status: "pending" | "generating" | "ready" | "awaiting_intervention" | "confirmed";
   attempts: number;
+  source_focus?: "content" | "dialogue" | "integrated" | null;
   error_message: string | null;
   question: Partial<Question> | null;
   updated_at: string | null;
