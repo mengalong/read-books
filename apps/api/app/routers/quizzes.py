@@ -53,6 +53,7 @@ from app.services.quiz_generation import (
 )
 from app.services.quiz_quality_review import (
     start_quiz_quality_review,
+    start_quiz_question_quality_review,
     run_quiz_quality_review,
 )
 from app.services.quiz_provider import GradeResult, get_quiz_provider, key_sentence
@@ -184,6 +185,7 @@ def to_quiz_response(quiz: Quiz, reveal_answers: bool = False) -> QuizResponse:
         next_review_date=None,
         quality_review_status=quiz.quality_review_status or "not_started",
         quality_review_task_id=quiz.quality_review_task_id,
+        quality_review_question_id=quiz.quality_review_question_id,
         quality_review_result=quiz.quality_review_result,
         quality_review_error=quiz.quality_review_error,
         quality_review_requested_at=quiz.quality_review_requested_at,
@@ -197,6 +199,7 @@ def to_quality_review_response(quiz: Quiz) -> QuizQualityReviewResponse:
     return QuizQualityReviewResponse(
         status=quiz.quality_review_status or "not_started",
         task_id=quiz.quality_review_task_id,
+        question_id=quiz.quality_review_question_id,
         result=quiz.quality_review_result,
         error=quiz.quality_review_error,
         requested_at=quiz.quality_review_requested_at,
@@ -566,6 +569,30 @@ def request_quiz_quality_review(
     threading.Thread(
         target=run_quiz_quality_review,
         args=(quiz.id, task_id),
+        daemon=True,
+    ).start()
+    return to_quality_review_response(quiz)
+
+
+@router.post(
+    "/quizzes/{quiz_id}/questions/{question_id}/quality-review",
+    response_model=QuizQualityReviewResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def request_question_quality_review(
+    quiz_id: str,
+    question_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> QuizQualityReviewResponse:
+    quiz = get_quiz_or_404(quiz_id=quiz_id, db=db, identity=identity, for_write=True)
+    try:
+        task_id = start_quiz_question_quality_review(db, quiz, question_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    threading.Thread(
+        target=run_quiz_quality_review,
+        args=(quiz.id, task_id, question_id),
         daemon=True,
     ).start()
     return to_quality_review_response(quiz)

@@ -255,38 +255,49 @@ class MockQuizAiProvider:
     def review_quiz(self, quiz_payload: dict[str, Any]) -> dict[str, Any]:
         questions = quiz_payload.get("questions", [])
         issues: list[dict[str, Any]] = []
+        question_reviews: list[dict[str, Any]] = []
         source_mode = str(quiz_payload.get("source_mode") or "")
         for question in questions:
             if not isinstance(question, dict):
                 continue
             position = question.get("position")
+            question_issues: list[dict[str, Any]] = []
             if source_mode != "model_knowledge" and not question.get("source_evidence"):
-                issues.append(
-                    {
-                        "question_position": position,
-                        "severity": "high",
-                        "category": "source",
-                        "problem": "题目没有保存可核对的来源依据。",
-                        "suggestion": "补充可信来源或改写为有来源支持的题目后再使用。",
-                    }
-                )
+                question_issues.append({
+                    "question_position": position,
+                    "severity": "high",
+                    "category": "source",
+                    "problem": "题目没有保存可核对的来源依据。",
+                    "suggestion": "补充可信来源或改写为有来源支持的题目后再使用。",
+                })
             if question.get("question_type") == "short" and not question.get("reference_answer"):
-                issues.append(
-                    {
-                        "question_position": position,
-                        "severity": "medium",
-                        "category": "answer",
-                        "problem": "问答题缺少参考答案。",
-                        "suggestion": "补充参考答案和评分要点，避免评分标准不明确。",
-                    }
-                )
+                question_issues.append({
+                    "question_position": position,
+                    "severity": "medium",
+                    "category": "answer",
+                    "problem": "问答题缺少参考答案。",
+                    "suggestion": "补充参考答案和评分要点，避免评分标准不明确。",
+                })
+            issues.extend(question_issues)
+            score = 40 if any(item["severity"] == "high" for item in question_issues) else 70 if question_issues else 100
+            question_reviews.append({
+                "question_position": position,
+                "score": score,
+                "verdict": "high_risk" if score < 50 else "needs_revision" if score < 85 else "pass",
+                "summary": "发现需要人工确认的问题。" if question_issues else "未发现结构性问题。",
+                "strengths": ["题目字段完整。"] if not question_issues else [],
+                "issues": question_issues,
+            })
+        score = round(sum(item["score"] for item in question_reviews) / len(question_reviews)) if question_reviews else 0
         return {
-            "schema_version": "quiz_quality_review.v1",
-            "overall_verdict": "high_risk" if any(item["severity"] == "high" for item in issues) else "pass",
+            "schema_version": "quiz_quality_review.v2",
+            "overall_verdict": "high_risk" if any(item["verdict"] == "high_risk" for item in question_reviews) else "needs_revision" if any(item["verdict"] == "needs_revision" for item in question_reviews) else "pass",
+            "score": score,
             "summary": "模拟模式已完成结构化检查；真实模型配置下可进一步审查事实、答案和题意。",
             "strengths": ["已检查题型、答案字段、来源依据和问答题评分信息。"],
             "issues": issues,
             "reviewed_question_count": len(questions),
+            "question_reviews": question_reviews,
         }
 
     def generate_questions(
@@ -1003,13 +1014,22 @@ class HttpQuizAiProvider:
                         "题意歧义、选项多解/无解、重复考察同一事实、把精确集数/页码/时间当作考点、"
                         "问答题评分依据不足。题目考察内容理解时，允许对原文或台词进行自然转述，不要求逐字一致。"
                         "有来源时只能依据给出的来源判断；没有来源的 model_knowledge 试卷请标记为需要人工核验，"
-                        "但不要自行补充外部事实。severity=high 表示不应直接使用，medium 表示建议修改，low 表示措辞优化。"
+                        "但不要自行补充外部事实。请为每道题给出 0-100 的质量分数：100 表示事实、答案、题意和来源均清楚；"
+                        "90-99 表示只有轻微措辞问题；70-89 表示有明确修改建议但仍可人工修正；50-69 表示存在较大歧义或依据不足；"
+                        "0-49 表示答案/事实/来源存在高风险，不建议直接使用。severity=high 表示不应直接使用，"
+                        "medium 表示建议修改，low 表示措辞优化。对于每个需要修改的问题，必须尽量提供可直接采用的"
+                        "suggested_prompt、suggested_options（完整选项列表）、suggested_correct_answers、"
+                        "suggested_explanation、suggested_knowledge_point；问答题还要提供 suggested_reference_answer 和"
+                        "suggested_grading_rubric。建议稿只能重写现有题目并使用给出的来源，不得新增未被来源支持的事实。"
                         f"\n来源模式：{source_mode}\n试卷：{json.dumps({k: v for k, v in quiz_payload.items() if k != 'questions'}, ensure_ascii=False)}"
                         f"\n题目：{question_text}\n\n只返回："
-                        '{"schema_version":"quiz_quality_review.v1","overall_verdict":"pass|needs_revision|high_risk",'
-                        '"summary":"","strengths":[],"issues":[{"question_position":1,"severity":"high|medium|low",'
-                        '"category":"fact|answer|source|ambiguity|duplicate|wording|difficulty|other",'
-                        '"problem":"","suggestion":"","evidence":""}],"reviewed_question_count":0}'
+                        '{"schema_version":"quiz_quality_review.v2","overall_verdict":"pass|needs_revision|high_risk",'
+                        '"score":0,"summary":"","strengths":[],"question_reviews":[{"question_position":1,"score":0,'
+                        '"verdict":"pass|needs_revision|high_risk","summary":"","strengths":[],"issues":[{'
+                        '"question_position":1,"severity":"high|medium|low","category":"fact|answer|source|ambiguity|duplicate|wording|difficulty|other",'
+                        '"problem":"","suggestion":"","evidence":"","suggested_prompt":null,"suggested_options":[],'
+                        '"suggested_correct_answers":[],"suggested_explanation":null,"suggested_knowledge_point":null,'
+                        '"suggested_reference_answer":null,"suggested_grading_rubric":[]}]}],"issues":[],"reviewed_question_count":0}'
                     ),
                 },
             ],

@@ -435,21 +435,42 @@ class QuizQualityReviewIssue(BaseModel):
     problem: str
     suggestion: str
     evidence: str | None = None
+    suggested_prompt: str | None = None
+    suggested_options: list[QuestionOption] = Field(default_factory=list)
+    suggested_correct_answers: list[str] = Field(default_factory=list)
+    suggested_explanation: str | None = None
+    suggested_knowledge_point: str | None = None
+    suggested_reference_answer: str | None = None
+    suggested_grading_rubric: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class QuizQuestionQualityReview(BaseModel):
+    question_position: int
+    score: int = Field(ge=0, le=100)
+    verdict: Literal["pass", "needs_revision", "high_risk"] = "needs_revision"
+    summary: str = ""
+    strengths: list[str] = Field(default_factory=list)
+    issues: list[QuizQualityReviewIssue] = Field(default_factory=list)
 
 
 class QuizQualityReviewResult(BaseModel):
-    schema_version: str = "quiz_quality_review.v1"
+    schema_version: str = "quiz_quality_review.v2"
     overall_verdict: Literal["pass", "needs_revision", "high_risk"] = "needs_revision"
+    score: int = Field(default=0, ge=0, le=100)
     summary: str = ""
     strengths: list[str] = Field(default_factory=list)
     issues: list[QuizQualityReviewIssue] = Field(default_factory=list)
     reviewed_question_count: int = 0
+    total_question_count: int = 0
+    reviewed_question_positions: list[int] = Field(default_factory=list)
+    question_reviews: list[QuizQuestionQualityReview] = Field(default_factory=list)
     generated_at: datetime | None = None
 
 
 class QuizQualityReviewResponse(BaseModel):
     status: Literal["not_started", "pending", "processing", "completed", "failed"]
     task_id: str | None = None
+    question_id: str | None = None
     result: QuizQualityReviewResult | None = None
     error: str | None = None
     requested_at: datetime | None = None
@@ -474,6 +495,7 @@ class QuizResponse(ApiModel):
     next_review_date: date | None
     quality_review_status: Literal["not_started", "pending", "processing", "completed", "failed"] = "not_started"
     quality_review_task_id: str | None = None
+    quality_review_question_id: str | None = None
     quality_review_result: QuizQualityReviewResult | None = None
     quality_review_error: str | None = None
     quality_review_requested_at: datetime | None = None

@@ -315,6 +315,7 @@ class ResourceMaterial(TimestampMixin, Base):
     segment_count: Mapped[int] = mapped_column(Integer, default=0)
     quote_count: Mapped[int] = mapped_column(Integer, default=0)
     source_registry: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    structured_content: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
     book: Mapped[Book] = relationship(back_populates="materials")
     created_by_user: Mapped[User | None] = relationship(
@@ -472,6 +473,7 @@ class Quiz(TimestampMixin, Base):
         String(20), default="not_started", index=True
     )
     quality_review_task_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    quality_review_question_id: Mapped[str | None] = mapped_column(String(36), index=True)
     quality_review_result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     quality_review_error: Mapped[str | None] = mapped_column(Text)
     quality_review_requested_at: Mapped[datetime | None] = mapped_column(

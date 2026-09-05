@@ -81,9 +81,11 @@ async def lifespan(_: FastAPI):
         launch_exam_grading(attempt_id)
     with SessionLocal() as db:
         pending_quality_review_tasks = recover_quality_review_tasks(db)
-    for quiz_id, task_id in pending_quality_review_tasks:
+    for quiz_id, task_id, question_id in pending_quality_review_tasks:
         threading.Thread(
-            target=run_quiz_quality_review, args=(quiz_id, task_id), daemon=True
+            target=run_quiz_quality_review,
+            args=(quiz_id, task_id, question_id),
+            daemon=True,
         ).start()
     yield
 
