@@ -18,11 +18,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("resource_materials") as batch_op:
-        batch_op.add_column(sa.Column("source_registry", sa.JSON(), nullable=True))
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if "source_registry" not in {column["name"] for column in inspector.get_columns("resource_materials")}:
+        with op.batch_alter_table("resource_materials") as batch_op:
+            batch_op.add_column(sa.Column("source_registry", sa.JSON(), nullable=True))
 
-    with op.batch_alter_table("questions") as batch_op:
-        batch_op.add_column(sa.Column("plot_event_ids", sa.JSON(), nullable=True))
+    if "plot_event_ids" not in {column["name"] for column in inspector.get_columns("questions")}:
+        with op.batch_alter_table("questions") as batch_op:
+            batch_op.add_column(sa.Column("plot_event_ids", sa.JSON(), nullable=True))
+
+    if "plot_events" in inspector.get_table_names():
+        return
 
     op.create_table(
         "plot_events",
