@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { mockAdminIdentity } from "./test-helpers";
+import { mockAdminIdentity, mockInsecureClipboard, readCopiedText } from "./test-helpers";
 
 test("试卷编辑页可直接修正题干、选项和标准答案", async ({ page }) => {
   await mockAdminIdentity(page);
@@ -164,6 +164,7 @@ test("试卷出题过程页展示每道题的 prompt、模型回复和 token", a
 
 test("出题任务中断后保留逐题状态并支持人工确认", async ({ page }) => {
   await mockAdminIdentity(page);
+  await mockInsecureClipboard(page);
   let taskResponse: Record<string, any> = {
     id: "task-intervention",
     book_id: "book-task",
@@ -202,7 +203,22 @@ test("出题任务中断后保留逐题状态并支持人工确认", async ({ pa
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [], total: 0, speakers: [], pending_count: 0, confirmed_count: 0 }) });
   });
   await page.route("**/api/quiz-generation-tasks/task-intervention", async (route) => {
+    if (route.request().method() === "DELETE") {
+      await route.fulfill({ status: 204, body: "" });
+      return;
+    }
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(taskResponse) });
+  });
+  await page.route("**/api/quiz-generation-tasks/task-intervention/debug", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      task_id: "task-intervention",
+      calls: [{
+        id: "call-2", question_position: 2, phase: "quiz_generation", call_number: 1,
+        model_name: "test-model", request_messages: [{ role: "user", content: "第二题输入 Prompt" }],
+        model_response: "第二题模型回复", input_tokens: 100, output_tokens: 20, total_tokens: 120,
+        status: "success", error_message: null, latency_ms: 200, created_at: "2026-09-04T08:00:00Z",
+      }],
+    }) });
   });
   let action = "";
   await page.route("**/api/quiz-generation-tasks/task-intervention/questions/2/intervene", async (route) => {
@@ -210,13 +226,34 @@ test("出题任务中断后保留逐题状态并支持人工确认", async ({ pa
     taskResponse = { ...taskResponse, status: "pending", error_message: null, current_phase: "等待继续处理第 2 道题", question_states: taskResponse.question_states.map((state: any) => state.position === 2 ? { ...state, status: "confirmed", error_message: null } : state) };
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(taskResponse) });
   });
+  await page.route("**/api/quiz-generation-tasks/task-intervention/cancel", async (route) => {
+    taskResponse = { ...taskResponse, status: "cancelled", error_message: "出题任务已由用户手动终止", current_phase: "已手动终止" };
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(taskResponse) });
+  });
 
   await page.goto("/books/book-task/quiz/new");
   await expect(page.getByText("本次出题需要人工处理")).toBeVisible();
-  await expect(page.getByText("第二题草稿")).toBeVisible();
+  await expect(page.getByLabel("第2题人工题干")).toHaveValue("第二题草稿");
+  await page.getByText("查看完整题目草稿").nth(1).click();
+  await expect(page.getByText("A. 正确（正确答案）")).toBeVisible();
+  await expect(page.getByText("解析", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("知识点", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "复制当前出题内容" }).click();
+  await expect(page.getByRole("button", { name: "已复制出题内容" })).toBeVisible();
+  expect(await readCopiedText(page)).toContain("第二题输入 Prompt");
+  expect(await readCopiedText(page)).toContain("第二题模型回复");
+  expect(await readCopiedText(page)).toContain("第二题草稿");
+  await expect(page.getByRole("button", { name: "删除任务" })).toBeVisible();
   await page.getByRole("button", { name: "确认题目可用" }).click();
   await expect(page.getByText("已确认")).toBeVisible();
   expect(action).toBe("accept");
+  await expect(page.getByRole("button", { name: "终止出题" })).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "终止出题" }).click();
+  await expect(page.getByText("本次出题已手动终止")).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "删除任务" }).click();
+  await expect(page.getByRole("button", { name: "复制当前出题内容" })).toHaveCount(0);
 });
 
 test("试卷编辑页支持单题重出并刷新当前题目", async ({ page }) => {
