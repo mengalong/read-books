@@ -1,9 +1,9 @@
 "use client";
 
-import { ArrowLeft, Clock3, Code2, FileQuestion } from "lucide-react";
+import { AlertCircle, ArrowLeft, Clock3, Code2, FileQuestion } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ErrorState, SourceModeNotice } from "@/components/ui";
 import { QuizQuestionEditList } from "@/components/quiz-question-edit-list";
@@ -19,6 +19,7 @@ const questionTypeLabels: Record<Question["question_type"], string> = {
 export default function QuizEditPage() {
   const params = useParams<{ quizId: string }>();
   const [quiz, setQuiz] = useState<Quiz | null>(null);
+  const [dirtyQuestionIds, setDirtyQuestionIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -39,6 +40,16 @@ export default function QuizEditPage() {
     return () => window.clearInterval(timer);
   }, [params.quizId, quiz?.quality_review_status]);
 
+  useEffect(() => {
+    if (dirtyQuestionIds.size === 0) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [dirtyQuestionIds.size]);
+
   const counts = useMemo(() => {
     if (!quiz) return [];
     return (["single", "multiple", "short"] as const)
@@ -57,6 +68,15 @@ export default function QuizEditPage() {
       };
     });
   }
+
+  const handleDirtyChange = useCallback((questionId: string, dirty: boolean) => {
+    setDirtyQuestionIds((current) => {
+      const next = new Set(current);
+      if (dirty) next.add(questionId);
+      else next.delete(questionId);
+      return next;
+    });
+  }, []);
 
   function applyQualityReview(review: QuizQualityReview) {
     setQuiz((current) => current ? {
@@ -94,8 +114,9 @@ export default function QuizEditPage() {
 
   return (
     <div className="page-wrap">
-      <Link className="back-link" href={`/books/${quiz.book_id}`}><ArrowLeft size={14} />返回《{quiz.book_title}》</Link>
+      <Link className="back-link" href={`/books/${quiz.book_id}`} onClick={(event) => { if (dirtyQuestionIds.size > 0 && !window.confirm("还有题目未保存，确定离开吗？未保存内容会丢失。")) event.preventDefault(); }}><ArrowLeft size={14} />返回《{quiz.book_title}》</Link>
       {error && <div className="toast-error">{error}</div>}
+      {dirtyQuestionIds.size > 0 && <div className="question-edit-unsaved-banner"><AlertCircle size={17} /><div><strong>有未保存修改</strong><span>{dirtyQuestionIds.size} 道题已发生变化，请逐题点击“保存本题”。离开页面时系统会再次提醒。</span></div></div>}
       <SourceModeNotice sourceMode={quiz.source_mode} />
       <header className="page-header">
         <div>
@@ -103,7 +124,7 @@ export default function QuizEditPage() {
           <h1 className="page-title">{quiz.title}</h1>
           <p className="page-description">这里用于调整试卷题目内容，不会进入答题流程。</p>
         </div>
-        <div className="quiz-editor-summary"><Link className="button button-secondary" href={`/quizzes/${quiz.id}/generation-debug`}><Code2 size={15} />查看出题过程</Link>
+        <div className="quiz-editor-summary"><Link className="button button-secondary" href={`/quizzes/${quiz.id}/generation-debug`} onClick={(event) => { if (dirtyQuestionIds.size > 0 && !window.confirm("还有题目未保存，确定离开吗？未保存内容会丢失。")) event.preventDefault(); }}><Code2 size={15} />查看出题过程</Link>{dirtyQuestionIds.size > 0 && <div className="quiz-editor-dirty-summary"><AlertCircle size={14} />{dirtyQuestionIds.size} 道题待保存</div>}
           <div><Clock3 size={16} />{quiz.duration_minutes} 分钟</div>
           <div><FileQuestion size={16} />{quiz.questions.length} 道题</div>
         </div>
@@ -131,6 +152,7 @@ export default function QuizEditPage() {
           onSaved={handleQuestionSaved}
           onReviewQuestion={handleQuestionReview}
           onPromoteQuestion={(questionId) => promoteQuestionToBank(quiz.id, questionId)}
+          onDirtyChange={handleDirtyChange}
           onUpdateQuestion={(questionId, payload) => updateQuizQuestion(quiz.id, questionId, payload)}
           qualityReviewResult={quiz.quality_review_result}
           questions={quiz.questions}

@@ -395,7 +395,7 @@ test("考试编辑页可以修改题目、重出单题并删除历史版本", as
   await page.locator(".question-answer-choice").nth(1).click();
   await page.getByRole("button", { name: "保存本题" }).click();
 
-  await expect(page.getByText("已保存")).toBeVisible();
+  await expect(page.getByText("本题修改已保存", { exact: true })).toBeVisible();
   expect(savedPayload).toMatchObject({
     prompt: "修正后的题干",
     knowledge_point: "修正后的知识点",

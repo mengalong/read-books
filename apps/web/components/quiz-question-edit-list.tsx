@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, LibraryBig, LoaderCircle, RotateCcw, Save } from "lucide-react";
+import { AlertCircle, AlertTriangle, CheckCircle2, LibraryBig, LoaderCircle, RotateCcw, Save } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { ApiError } from "@/lib/api";
@@ -22,6 +22,7 @@ type QuizQuestionEditListProps = {
   qualityReviewResult?: QuizQualityReviewResult | null;
   onReviewQuestion?: (questionId: string) => Promise<QuizQualityReview>;
   onPromoteQuestion?: (questionId: string) => Promise<QuestionBankEntry>;
+  onDirtyChange?: (questionId: string, dirty: boolean) => void;
 };
 
 export function QuizQuestionEditList({
@@ -32,6 +33,7 @@ export function QuizQuestionEditList({
   qualityReviewResult,
   onReviewQuestion,
   onPromoteQuestion,
+  onDirtyChange,
 }: QuizQuestionEditListProps) {
   return (
     <div className="quiz-question-edit-list">
@@ -45,6 +47,7 @@ export function QuizQuestionEditList({
           qualityReview={qualityReviewResult?.question_reviews?.find((item) => item.question_position === question.position) || null}
           onReviewQuestion={onReviewQuestion}
           onPromoteQuestion={onPromoteQuestion}
+          onDirtyChange={onDirtyChange}
         />
       ))}
     </div>
@@ -59,6 +62,7 @@ function QuestionEditForm({
   qualityReview,
   onReviewQuestion,
   onPromoteQuestion,
+  onDirtyChange,
 }: {
   question: Question;
   onSaved: (question: Question) => void;
@@ -67,6 +71,7 @@ function QuestionEditForm({
   qualityReview: QuizQualityReviewResult["question_reviews"][number] | null;
   onReviewQuestion?: (questionId: string) => Promise<QuizQualityReview>;
   onPromoteQuestion?: (questionId: string) => Promise<QuestionBankEntry>;
+  onDirtyChange?: (questionId: string, dirty: boolean) => void;
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -84,6 +89,28 @@ function QuestionEditForm({
     OPTION_IDS.map((id) => question.options.find((option) => option.id === id)?.text || ""),
   );
   const [correctAnswers, setCorrectAnswers] = useState<string[]>(question.correct_answers || []);
+
+  const questionSnapshot = useMemo(() => JSON.stringify({
+    prompt: question.prompt,
+    knowledgePoint: question.knowledge_point,
+    explanation: question.explanation || "",
+    referenceAnswer: question.reference_answer || "",
+    options: OPTION_IDS.map((id) => question.options.find((option) => option.id === id)?.text || ""),
+    correctAnswers: question.correct_answers || [],
+  }), [question]);
+  const draftSnapshot = useMemo(() => JSON.stringify({
+    prompt,
+    knowledgePoint,
+    explanation,
+    referenceAnswer,
+    options: optionTexts,
+    correctAnswers,
+  }), [correctAnswers, explanation, knowledgePoint, optionTexts, prompt, referenceAnswer]);
+  const dirty = draftSnapshot !== questionSnapshot;
+
+  useEffect(() => {
+    onDirtyChange?.(question.id, dirty);
+  }, [dirty, onDirtyChange, question.id]);
 
   useEffect(() => {
     setPrompt(question.prompt);
@@ -203,7 +230,7 @@ function QuestionEditForm({
   return (
     <form className="question-edit-form" onSubmit={(event) => void handleSubmit(event)}>
       <div className="question-card-header">
-        <span className="question-number">第 {question.position} 题 · {question.knowledge_point}</span>
+        <div className="question-card-heading"><span className="question-number">第 {question.position} 题 · {question.knowledge_point}</span><span className={`question-edit-status ${dirty ? "dirty" : saved ? "saved" : "clean"}`}>{dirty ? <><AlertCircle size={13} />有未保存修改</> : saved ? <><CheckCircle2 size={13} />已保存修改</> : "未修改"}</span></div>
         <div className="question-card-actions">
           <span className="question-type">{questionTypeLabels[question.question_type]}</span>
           {onPromoteQuestion && <button className="button button-secondary question-edit-trigger" disabled={submitting || regenerating || promoting || banked} onClick={() => void handlePromote()} title={banked ? "已加入题库" : "加入题库"} type="button"><LibraryBig size={14} /><span>{banked ? "已在题库" : promoting ? "加入中……" : "加入题库"}</span></button>}
@@ -220,7 +247,7 @@ function QuestionEditForm({
         </div>
       </div>
       {error && <div className="toast-error">{error}</div>}
-      {saved && <div className="question-edit-saved"><CheckCircle2 size={14} />已保存</div>}
+      {saved && !dirty && <div className="question-edit-saved"><CheckCircle2 size={14} />本题修改已保存</div>}
       {(qualityReview || onReviewQuestion) && <QuestionQualityReviewCard review={qualityReview} reviewing={reviewing} onReview={onReviewQuestion ? () => void handleReview() : undefined} />}
       <div className="form-grid question-editor-grid">
         <label className="field field-full">
@@ -319,9 +346,9 @@ function QuestionEditForm({
         )}
       </div>
       <div className="question-edit-form-actions">
-        <button className="button button-primary" disabled={submitting || !canSave} type="submit">
+        <button className="button button-primary" disabled={submitting || !canSave || !dirty} type="submit">
           <Save size={15} />
-          {submitting ? "正在保存……" : "保存本题"}
+          {submitting ? "正在保存……" : dirty ? "保存本题" : saved ? "已保存" : "保存本题"}
         </button>
       </div>
       {confirmingRegeneration && (

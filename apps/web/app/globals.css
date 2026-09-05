@@ -3258,6 +3258,46 @@ p {
   justify-content: space-between;
 }
 
+.question-card-heading {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.question-edit-status {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  display: inline-flex;
+  font-size: 10px;
+  gap: 4px;
+  line-height: 1;
+  padding: 6px 8px;
+  white-space: nowrap;
+}
+
+.question-edit-status.clean {
+  background: #f2f4f2;
+  border-color: #e1e7e3;
+  color: var(--muted);
+}
+
+.question-edit-status.dirty {
+  background: var(--yellow-soft);
+  border-color: #e8d2a3;
+  color: #8a5f28;
+  font-weight: 700;
+}
+
+.question-edit-status.saved {
+  background: var(--green-soft);
+  border-color: #b7d4c5;
+  color: var(--green);
+  font-weight: 700;
+}
+
 .question-card-actions {
   align-items: center;
   display: flex;
@@ -3312,6 +3352,45 @@ p {
   display: inline-flex;
   font-size: 12px;
   gap: 6px;
+}
+
+.question-edit-unsaved-banner {
+  align-items: flex-start;
+  background: var(--yellow-soft);
+  border: 1px solid #e8d2a3;
+  border-radius: 5px;
+  color: #8a5f28;
+  display: flex;
+  gap: 10px;
+  line-height: 1.55;
+  margin-bottom: 18px;
+  padding: 11px 13px;
+}
+
+.question-edit-unsaved-banner > div {
+  display: grid;
+  gap: 2px;
+}
+
+.question-edit-unsaved-banner strong {
+  font-size: 13px;
+}
+
+.question-edit-unsaved-banner span {
+  font-size: 12px;
+}
+
+.quiz-editor-dirty-summary {
+  align-items: center;
+  background: var(--yellow-soft);
+  border: 1px solid #e8d2a3;
+  border-radius: 4px;
+  color: #8a5f28;
+  display: inline-flex !important;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 5px;
+  padding: 6px 8px;
 }
 
 .question-quality-review {
@@ -7515,6 +7594,20 @@ p {
   .quiz-overview-actions .button {
     justify-content: center;
     margin-top: 0;
+  }
+
+  .question-card-header {
+    align-items: flex-start;
+    display: grid;
+    gap: 10px;
+  }
+
+  .question-card-actions {
+    flex-wrap: wrap;
+  }
+
+  .question-edit-unsaved-banner {
+    margin-top: 12px;
   }
 
   .quality-review-empty,

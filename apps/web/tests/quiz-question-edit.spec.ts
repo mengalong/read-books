@@ -91,10 +91,13 @@ test("试卷编辑页可直接修正题干、选项和标准答案", async ({ pa
   await page.getByPlaceholder("选项 C").fill("干扰项一");
   await page.getByPlaceholder("选项 D").fill("干扰项二");
   await page.locator(".question-answer-choice").nth(1).click();
+  await expect(page.getByText("有未保存修改").first()).toBeVisible();
+  await expect(page.getByText("1 道题待保存")).toBeVisible();
   await page.getByRole("button", { name: "保存本题" }).click();
 
   await expect(page.getByText("修正后的题干")).toBeVisible();
-  await expect(page.getByText("已保存")).toBeVisible();
+  await expect(page.getByText("本题修改已保存", { exact: true })).toBeVisible();
+  await expect(page.getByText("已保存修改")).toBeVisible();
   expect(savedPayload).toMatchObject({
     prompt: "修正后的题干",
     knowledge_point: "修正后的知识点",
