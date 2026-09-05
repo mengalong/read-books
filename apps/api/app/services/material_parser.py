@@ -346,7 +346,9 @@ def _string_list(value: Any) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()]
 
 
-def _parse_plot_summary(material: ResourceMaterial) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _parse_plot_summary(
+    material: ResourceMaterial,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     try:
         payload = json.loads(_decode_text(Path(material.file_path)))
     except json.JSONDecodeError as exc:
@@ -416,7 +418,22 @@ def _parse_plot_summary(material: ResourceMaterial) -> tuple[list[dict[str, Any]
                 "question_usable": question_usable,
             }
         )
-    return normalized_events, [item for item in source_registry if isinstance(item, dict)]
+    structured_content: dict[str, Any] = {}
+    for key in (
+        "work",
+        "series_overview",
+        "seasons",
+        "character_profiles",
+        "relationship_arcs",
+        "major_story_arcs",
+        "global_facts",
+        "uncertainties",
+        "quote_candidates",
+    ):
+        value = payload.get(key)
+        if isinstance(value, (dict, list)):
+            structured_content[key] = value
+    return normalized_events, source_registry, structured_content
 
 
 def parse_material_file(material: ResourceMaterial) -> list[ParsedSegment]:
@@ -463,7 +480,7 @@ def parse_material_document(material_id: str) -> None:
 
         try:
             if material.material_type == "plot_summary":
-                events, source_registry = _parse_plot_summary(material)
+                events, source_registry, structured_content = _parse_plot_summary(material)
                 db.execute(delete(PlotEvent).where(PlotEvent.material_id == material.id))
                 db.execute(delete(QuoteEntry).where(QuoteEntry.material_id == material.id))
                 db.execute(delete(MaterialSegment).where(MaterialSegment.material_id == material.id))
@@ -483,6 +500,7 @@ def parse_material_document(material_id: str) -> None:
                     )
                     usable_count += int(usable)
                 material.source_registry = source_registry
+                material.structured_content = structured_content
                 material.segment_count = len(events)
                 material.quote_count = 0
                 material.parse_status = "completed" if usable_count == len(events) else "needs_review"

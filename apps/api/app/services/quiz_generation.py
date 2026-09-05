@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import copy
+import json
 import re
 import threading
 from dataclasses import asdict
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Iterable
 
@@ -667,7 +669,88 @@ def _background_context_for_chunks(
         if isinstance(chunk, (TrustedQuoteSource, TrustedPlotSource))
         and chunk.episode_number is not None
     }
-    return get_understanding_context(db, book_id, episode_numbers=episode_numbers or None)
+    understanding = get_understanding_context(
+        db, book_id, episode_numbers=episode_numbers or None
+    )
+    plot_context = _plot_summary_context(db, book_id, episode_numbers)
+    return compact_text("\n".join(part for part in (understanding, plot_context) if part), 12_000)
+
+
+def _plot_summary_context(
+    db: Session, book_id: str, episode_numbers: set[int]
+) -> str:
+    """Expose rich plot-summary sections as bounded, non-citable model background."""
+    materials = list(
+        db.scalars(
+            select(ResourceMaterial).where(
+                ResourceMaterial.book_id == book_id,
+                ResourceMaterial.material_type == "plot_summary",
+                ResourceMaterial.parse_status.in_(["needs_review", "completed"]),
+            )
+        ).all()
+    )
+    parts: list[str] = []
+    for material in materials:
+        content = material.structured_content or {}
+        if not content:
+            try:
+                raw_content = json.loads(Path(material.file_path).read_text(encoding="utf-8"))
+                content = {
+                    key: raw_content[key]
+                    for key in (
+                        "series_overview",
+                        "seasons",
+                        "character_profiles",
+                        "relationship_arcs",
+                        "major_story_arcs",
+                        "global_facts",
+                        "quote_candidates",
+                    )
+                    if isinstance(raw_content, dict)
+                    and isinstance(raw_content.get(key), (dict, list))
+                }
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                content = {}
+        if not isinstance(content, dict):
+            continue
+        overview = content.get("series_overview")
+        if isinstance(overview, dict):
+            parts.append(
+                "剧情资料全剧理解："
+                + compact_text(json.dumps(overview, ensure_ascii=False), 2_000)
+            )
+        profiles = content.get("character_profiles")
+        if isinstance(profiles, list):
+            selected = [item for item in profiles[:20] if isinstance(item, dict)]
+            if selected:
+                parts.append(
+                    "人物身份、动机与命运背景："
+                    + compact_text(json.dumps(selected, ensure_ascii=False), 2_400)
+                )
+        for key, label, limit in (
+            ("relationship_arcs", "人物关系变化背景", 1_800),
+            ("major_story_arcs", "主要故事线背景", 1_800),
+            ("global_facts", "全局事实背景", 1_500),
+            ("quote_candidates", "经典金句理解背景（不可直接作为引用）", 1_500),
+        ):
+            value = content.get(key)
+            if isinstance(value, (dict, list)) and value:
+                parts.append(f"{label}：" + compact_text(json.dumps(value, ensure_ascii=False), limit))
+        seasons = content.get("seasons")
+        if isinstance(seasons, list) and episode_numbers:
+            episodes = []
+            for season in seasons:
+                if not isinstance(season, dict):
+                    continue
+                for episode in season.get("episodes", []) if isinstance(season.get("episodes"), list) else []:
+                    if isinstance(episode, dict) and episode.get("episode_number") in episode_numbers:
+                        episodes.append(episode)
+            if episodes:
+                parts.append(
+                    "命中集数的剧情概览："
+                    + compact_text(json.dumps(episodes[:8], ensure_ascii=False), 2_400)
+                )
+    return "\n".join(parts)
 
 
 def _combined_sources(

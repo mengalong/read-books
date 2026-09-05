@@ -641,6 +641,9 @@ def test_plot_summary_json_is_parsed_managed_and_used_as_source(client, monkeypa
     payload = {
         "schema_version": "plot_summary.v1",
         "source_registry": [{"source_id": "src-001", "title": "百科资料", "url": "https://example.com"}],
+        "character_profiles": [{"character_id": "char-001", "name": "余则成", "fate": "继续潜伏", "source_refs": ["src-001"]}],
+        "relationship_arcs": [{"relationship_id": "rel-001", "characters": ["余则成", "翠平"], "ending_state": "共同执行任务", "source_refs": ["src-001"]}],
+        "quote_candidates": [{"quote_id": "quote-001", "speaker": "吴站长", "quote_text": "会议开始", "exact_quote_verified": False}],
         "events": [
             {
                 "event_id": "s01e01-event-001",
@@ -679,6 +682,10 @@ def test_plot_summary_json_is_parsed_managed_and_used_as_source(client, monkeypa
     with SessionLocal() as db:
         stored = db.query(PlotEvent).filter(PlotEvent.material_id == material["id"]).one()
         assert stored.source_refs == ["src-001"]
+        stored_material = db.get(ResourceMaterial, material["id"])
+        assert stored_material.structured_content["character_profiles"][0]["name"] == "余则成"
+        assert stored_material.structured_content["relationship_arcs"]
+        assert stored_material.structured_content["quote_candidates"]
         assert resolve_source_mode(
             db,
             book["id"],
