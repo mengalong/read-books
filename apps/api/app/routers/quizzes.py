@@ -15,6 +15,7 @@ from app.models import (
     ExamShare,
     ModelUsageRecord,
     Question,
+    QuestionBankUsage,
     Quiz,
     QuizGenerationTask,
     ReviewAnswer,
@@ -163,6 +164,7 @@ def to_question_response(question: Question, reveal_answers: bool) -> QuestionRe
         max_score=question.max_score,
         correct_answers=question.correct_answers if reveal_answers else None,
         source_mode=question.source_mode,
+        question_bank_entry_id=question.question_bank_entry_id,
     )
 
 
@@ -268,6 +270,7 @@ def to_generation_response(
         single_count=task.single_count,
         multiple_count=task.multiple_count,
         short_count=task.short_count,
+        use_question_bank=task.use_question_bank,
         quiz_id=task.quiz_id,
         error_message=task.error_message,
         question_states=(
@@ -834,6 +837,11 @@ def delete_quiz(
         update(ExamShare)
         .where(ExamShare.quiz_id == quiz.id)
         .values(status="source_deleted", quiz_id=None, stopped_at=datetime.now(timezone.utc))
+    )
+    db.execute(
+        update(QuestionBankUsage)
+        .where(QuestionBankUsage.quiz_id == quiz.id)
+        .values(quiz_id=None, question_id=None)
     )
     db.delete(quiz)
     db.commit()

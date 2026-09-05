@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import re
 import threading
 from dataclasses import asdict
@@ -21,6 +22,7 @@ from app.models import (
     ModelUsageRecord,
     PdfDocument,
     PlotEvent,
+    QuestionBankEntry,
     QuoteEntry,
     Question,
     Quiz,
@@ -38,6 +40,11 @@ from app.services.quiz_provider import (
     compact_text,
     get_quiz_provider,
     parse_json_object,
+)
+from app.services.question_bank import (
+    entry_to_generated_question,
+    find_bank_candidates,
+    record_question_bank_usage,
 )
 from app.services.material_understanding import get_understanding_context
 from app.services.question_dedup import (
@@ -254,6 +261,7 @@ def create_generation_task(
         single_count=payload.single_count,
         multiple_count=payload.multiple_count,
         short_count=payload.short_count,
+        use_question_bank=payload.use_question_bank,
         page_start=payload.page_start,
         page_end=payload.page_end,
     )
@@ -1418,6 +1426,7 @@ def _generated_question_from_state(value: dict[str, Any]) -> GeneratedQuestion:
         "fact_claim": str(value.get("fact_claim") or ""),
         "semantic_signature": dict(value.get("semantic_signature") or {}),
         "validation_warnings": list(value.get("validation_warnings") or []),
+        "question_bank_entry_id": value.get("question_bank_entry_id"),
     }
     return GeneratedQuestion(**fields)
 
@@ -1637,6 +1646,68 @@ def run_generation_task(task_id: str) -> None:
                 item: GeneratedQuestion | None = None
                 last_candidate: GeneratedQuestion | None = None
                 state_was_updated_while_generating = False
+                if task.use_question_bank:
+                    selected_bank_entry_ids = {
+                        current.question_bank_entry_id
+                        for current in generated
+                        if current.question_bank_entry_id
+                    }
+                    bank_origin_counts: dict[str, int] = {}
+                    for selected_id in selected_bank_entry_ids:
+                        selected_entry = db.get(QuestionBankEntry, selected_id)
+                        if selected_entry and selected_entry.origin_quiz_id:
+                            origin_id = selected_entry.origin_quiz_id
+                            bank_origin_counts[origin_id] = bank_origin_counts.get(origin_id, 0) + 1
+                    max_per_origin = max(1, math.ceil(task.total_questions * 0.4))
+                    for bank_entry in find_bank_candidates(
+                        db,
+                        task.book_id,
+                        task.source_mode,
+                        state["source_focus"],
+                        question_type,
+                        generation_theme=task.generation_theme,
+                    ):
+                        if bank_entry.id in selected_bank_entry_ids:
+                            continue
+                        if (
+                            bank_entry.origin_quiz_id
+                            and bank_origin_counts.get(bank_entry.origin_quiz_id, 0) >= max_per_origin
+                        ):
+                            continue
+                        candidate = entry_to_generated_question(bank_entry)
+                        if any(
+                            questions_test_same_fact(candidate, current)
+                            for current in [*generated, *rejected_candidates]
+                        ):
+                            continue
+                        if _is_duplicate_question(
+                            candidate,
+                            generated,
+                            rejected_candidates,
+                            historical_questions,
+                        ) and (bank_entry.use_count or 0) > 1:
+                            continue
+                        item = candidate
+                        if bank_entry.origin_quiz_id:
+                            origin_id = bank_entry.origin_quiz_id
+                            bank_origin_counts[origin_id] = bank_origin_counts.get(origin_id, 0) + 1
+                        break
+                if item is not None:
+                    generated.append(item)
+                    state["status"] = "ready"
+                    state["question"] = _state_question_payload(item)
+                    state["error_message"] = None
+                    recent_chunk_ids.update(item.source_chunk_ids)
+                    recent_chunk_ids.update(item.quote_entry_ids)
+                    recent_chunk_ids.update(item.plot_event_ids)
+                    task.completed_questions = sum(
+                        _finalized_state_status(current.get("status"))
+                        for current in question_states
+                    )
+                    task.current_phase = f"已从题库复用第 {position} / {task.total_questions} 道题"
+                    task.question_states = copy.deepcopy(question_states)
+                    db.commit()
+                    continue
                 for attempt in range(3):
                     if _task_was_cancelled(db, task_id):
                         return
@@ -1820,33 +1891,40 @@ def run_generation_task(task_id: str) -> None:
             )
             db.add(quiz)
             db.flush()
+            created_questions: list[Question] = []
             for position, item in enumerate(generated, start=1):
-                db.add(
-                    Question(
-                        quiz_id=quiz.id,
-                        position=position,
-                        question_type=item.question_type,
-                        question_subtype=item.question_subtype,
-                        prompt=item.prompt,
-                        options=item.options,
-                        correct_answers=item.correct_answers,
-                        explanation=item.explanation,
-                        knowledge_point=item.knowledge_point,
-                        difficulty=task.difficulty,
-                        estimated_seconds=item.estimated_seconds,
-                        reference_answer=item.reference_answer,
-                        grading_rubric=item.grading_rubric,
-                        source_chunk_ids=item.source_chunk_ids,
-                        quote_entry_ids=item.quote_entry_ids,
-                        plot_event_ids=item.plot_event_ids,
-                        source_segment_ids=item.source_segment_ids,
-                        fact_key=item.fact_key,
-                        fact_claim=item.fact_claim,
-                        semantic_signature=item.semantic_signature,
-                        source_evidence=item.source_evidence,
-                        max_score=item.max_score,
-                    )
+                question = Question(
+                    quiz_id=quiz.id,
+                    position=position,
+                    question_type=item.question_type,
+                    question_subtype=item.question_subtype,
+                    prompt=item.prompt,
+                    options=item.options,
+                    correct_answers=item.correct_answers,
+                    explanation=item.explanation,
+                    knowledge_point=item.knowledge_point,
+                    difficulty=task.difficulty,
+                    estimated_seconds=item.estimated_seconds,
+                    reference_answer=item.reference_answer,
+                    grading_rubric=item.grading_rubric,
+                    source_chunk_ids=item.source_chunk_ids,
+                    quote_entry_ids=item.quote_entry_ids,
+                    plot_event_ids=item.plot_event_ids,
+                    source_segment_ids=item.source_segment_ids,
+                    fact_key=item.fact_key,
+                    fact_claim=item.fact_claim,
+                    semantic_signature=item.semantic_signature,
+                    source_evidence=item.source_evidence,
+                    max_score=item.max_score,
+                    question_bank_entry_id=item.question_bank_entry_id,
                 )
+                db.add(question)
+                db.flush()
+                created_questions.append(question)
+                if item.question_bank_entry_id:
+                    entry = db.get(QuestionBankEntry, item.question_bank_entry_id)
+                    if entry is not None:
+                        record_question_bank_usage(db, entry, quiz, question)
             db.commit()
             attach_quiz_to_usage(usage_context.task_id, quiz.id)
             task = db.get(QuizGenerationTask, task.id)

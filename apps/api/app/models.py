@@ -240,6 +240,12 @@ class Book(TimestampMixin, Base):
     generation_tasks: Mapped[list[QuizGenerationTask]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
     )
+    question_bank_entries: Mapped[list[QuestionBankEntry]] = relationship(
+        back_populates="book", cascade="all, delete-orphan"
+    )
+    question_bank_usages: Mapped[list[QuestionBankUsage]] = relationship(
+        back_populates="book", cascade="all, delete-orphan"
+    )
     review_tasks: Mapped[list[ReviewTask]] = relationship(
         back_populates="book", cascade="all, delete-orphan"
     )
@@ -523,14 +529,87 @@ class Question(TimestampMixin, Base):
     source_evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     max_score: Mapped[float] = mapped_column(Float)
     source_mode: Mapped[str | None] = mapped_column(String(30))
+    question_bank_entry_id: Mapped[str | None] = mapped_column(
+        ForeignKey("question_bank_entries.id", ondelete="SET NULL"), index=True
+    )
 
     quiz: Mapped[Quiz] = relationship(back_populates="questions")
+    question_bank_entry: Mapped["QuestionBankEntry | None"] = relationship(
+        back_populates="questions"
+    )
     answer: Mapped[Answer | None] = relationship(
         back_populates="question", cascade="all, delete-orphan", uselist=False
     )
     review_answers: Mapped[list[ReviewAnswer]] = relationship(
         back_populates="question", cascade="all, delete-orphan"
     )
+
+
+class QuestionBankEntry(TimestampMixin, Base):
+    __tablename__ = "question_bank_entries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    book_id: Mapped[str] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    origin_quiz_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    origin_question_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    question_type: Mapped[str] = mapped_column(String(20), index=True)
+    question_subtype: Mapped[str] = mapped_column(String(40), default="general", index=True)
+    prompt: Mapped[str] = mapped_column(Text)
+    options: Mapped[list[dict[str, str]]] = mapped_column(JSON, default=list)
+    correct_answers: Mapped[list[str]] = mapped_column(JSON, default=list)
+    explanation: Mapped[str] = mapped_column(Text, default="")
+    knowledge_point: Mapped[str] = mapped_column(String(120), default="")
+    difficulty: Mapped[str] = mapped_column(String(20), default="medium")
+    estimated_seconds: Mapped[int] = mapped_column(Integer, default=45)
+    reference_answer: Mapped[str | None] = mapped_column(Text)
+    grading_rubric: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    source_chunk_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    quote_entry_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    plot_event_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    source_segment_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    fact_key: Mapped[str | None] = mapped_column(String(1000), index=True)
+    fact_claim: Mapped[str | None] = mapped_column(Text)
+    semantic_signature: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    source_evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    source_mode: Mapped[str | None] = mapped_column(String(30))
+    max_score: Mapped[float] = mapped_column(Float, default=0)
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    use_count: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    book: Mapped[Book] = relationship(back_populates="question_bank_entries")
+    questions: Mapped[list[Question]] = relationship(back_populates="question_bank_entry")
+    usages: Mapped[list[QuestionBankUsage]] = relationship(
+        back_populates="entry", cascade="all, delete-orphan"
+    )
+
+
+class QuestionBankUsage(Base):
+    __tablename__ = "question_bank_usages"
+    __table_args__ = (UniqueConstraint("entry_id", "quiz_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    book_id: Mapped[str] = mapped_column(ForeignKey("books.id", ondelete="CASCADE"), index=True)
+    entry_id: Mapped[str] = mapped_column(
+        ForeignKey("question_bank_entries.id", ondelete="CASCADE"), index=True
+    )
+    quiz_id: Mapped[str | None] = mapped_column(
+        ForeignKey("quizzes.id", ondelete="SET NULL"), index=True
+    )
+    question_id: Mapped[str | None] = mapped_column(
+        ForeignKey("questions.id", ondelete="SET NULL"), index=True
+    )
+    quiz_title_snapshot: Mapped[str] = mapped_column(String(200), default="")
+    question_position: Mapped[int | None] = mapped_column(Integer)
+    used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+    book: Mapped[Book] = relationship(back_populates="question_bank_usages")
+    entry: Mapped[QuestionBankEntry] = relationship(back_populates="usages")
+    quiz: Mapped[Quiz | None] = relationship()
+    question: Mapped[Question | None] = relationship()
 
 
 class Answer(TimestampMixin, Base):
@@ -576,6 +655,7 @@ class QuizGenerationTask(TimestampMixin, Base):
     single_count: Mapped[int] = mapped_column(Integer, default=0)
     multiple_count: Mapped[int] = mapped_column(Integer, default=0)
     short_count: Mapped[int] = mapped_column(Integer, default=0)
+    use_question_bank: Mapped[bool] = mapped_column(Boolean, default=True)
     page_start: Mapped[int | None] = mapped_column(Integer)
     page_end: Mapped[int | None] = mapped_column(Integer)
     quiz_id: Mapped[str | None] = mapped_column(String(36), index=True)

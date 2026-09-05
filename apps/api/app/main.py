@@ -12,6 +12,7 @@ from app.routers.auth import router as auth_router
 from app.routers.books import admin_router as admin_books_router
 from app.routers.books import router as books_router
 from app.routers.quizzes import router as quizzes_router
+from app.routers.question_bank import router as question_bank_router
 from app.routers.materials import router as materials_router
 from app.routers.site import router as site_router
 from app.routers.settings import router as settings_router
@@ -109,6 +110,7 @@ app.include_router(books_router, prefix="/api")
 app.include_router(materials_router, prefix="/api")
 app.include_router(admin_books_router, prefix="/api")
 app.include_router(quizzes_router, prefix="/api")
+app.include_router(question_bank_router, prefix="/api")
 app.include_router(site_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(wechat_router, prefix="/api")

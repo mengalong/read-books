@@ -52,6 +52,7 @@ class GeneratedQuestion:
     fact_claim: str = ""
     semantic_signature: dict[str, Any] = field(default_factory=dict)
     validation_warnings: list[str] = field(default_factory=list)
+    question_bank_entry_id: str | None = None
 
 
 @dataclass(frozen=True)

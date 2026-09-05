@@ -305,6 +305,7 @@ class QuizGenerateRequest(BaseModel):
     single_count: int = Field(default=5, ge=0, le=15)
     multiple_count: int = Field(default=3, ge=0, le=10)
     short_count: int = Field(default=2, ge=0, le=8)
+    use_question_bank: bool = True
     page_start: int | None = Field(default=None, ge=1)
     page_end: int | None = Field(default=None, ge=1)
     generation_theme: GenerationTheme = "general"
@@ -328,6 +329,7 @@ class QuizGenerationTaskResponse(BaseModel):
     single_count: int
     multiple_count: int
     short_count: int
+    use_question_bank: bool = True
     quiz_id: str | None
     error_message: str | None
     question_states: list["QuizGenerationQuestionState"] = Field(default_factory=list)
@@ -426,6 +428,72 @@ class QuestionResponse(ApiModel):
     max_score: float
     correct_answers: list[str] | None = None
     source_mode: SourceMode | None = None
+    question_bank_entry_id: str | None = None
+
+
+class QuestionBankUsageResponse(ApiModel):
+    id: str
+    entry_id: str
+    quiz_id: str | None = None
+    question_id: str | None = None
+    quiz_title: str
+    question_position: int | None = None
+    used_at: datetime
+
+
+class QuestionBankEntryResponse(ApiModel):
+    id: str
+    book_id: str
+    origin_quiz_id: str | None = None
+    origin_question_id: str | None = None
+    question_type: Literal["single", "multiple", "short"]
+    question_subtype: str
+    prompt: str
+    options: list[QuestionOption] = Field(default_factory=list)
+    correct_answers: list[str] = Field(default_factory=list)
+    explanation: str = ""
+    knowledge_point: str
+    difficulty: str
+    estimated_seconds: int
+    reference_answer: str | None = None
+    grading_rubric: list[dict[str, Any]] = Field(default_factory=list)
+    source_chunk_ids: list[str] = Field(default_factory=list)
+    quote_entry_ids: list[str] = Field(default_factory=list)
+    plot_event_ids: list[str] = Field(default_factory=list)
+    source_segment_ids: list[str] = Field(default_factory=list)
+    fact_key: str | None = None
+    fact_claim: str | None = None
+    semantic_signature: dict[str, Any] = Field(default_factory=dict)
+    source_evidence: list[SourceEvidence] = Field(default_factory=list)
+    source_mode: SourceMode | None = None
+    max_score: float
+    status: Literal["active", "disabled"]
+    use_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+    usages: list[QuestionBankUsageResponse] = Field(default_factory=list)
+
+
+class QuestionBankEntryListResponse(BaseModel):
+    items: list[QuestionBankEntryResponse]
+    total: int
+    unused_count: int = 0
+
+
+class QuestionBankEntryUpdateRequest(BaseModel):
+    prompt: str | None = Field(default=None, min_length=1)
+    options: list[QuestionOption] | None = None
+    correct_answers: list[str] | None = None
+    explanation: str | None = None
+    knowledge_point: str | None = Field(default=None, min_length=1, max_length=120)
+    reference_answer: str | None = None
+    grading_rubric: list[dict[str, Any]] | None = None
+    difficulty: Literal["easy", "medium", "hard"] | None = None
+    status: Literal["active", "disabled"] | None = None
+
+
+class QuestionBankBulkPromoteRequest(BaseModel):
+    question_ids: list[str] = Field(min_length=1, max_length=200)
 
 
 class QuizQualityReviewIssue(BaseModel):
