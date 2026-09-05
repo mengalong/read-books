@@ -26,6 +26,7 @@ from app.services.quiz_generation import recover_generation_tasks, run_generatio
 from app.services.material_parser import parse_material_document, recover_material_tasks
 from app.services.material_understanding import refresh_material_understanding
 from app.services.exam_sharing import recover_exam_grading_tasks, launch_exam_grading
+from app.services.quiz_quality_review import recover_quality_review_tasks, run_quiz_quality_review
 
 settings = get_settings()
 
@@ -78,6 +79,12 @@ async def lifespan(_: FastAPI):
         pending_exam_attempt_ids = recover_exam_grading_tasks(db)
     for attempt_id in pending_exam_attempt_ids:
         launch_exam_grading(attempt_id)
+    with SessionLocal() as db:
+        pending_quality_review_tasks = recover_quality_review_tasks(db)
+    for quiz_id, task_id in pending_quality_review_tasks:
+        threading.Thread(
+            target=run_quiz_quality_review, args=(quiz_id, task_id), daemon=True
+        ).start()
     yield
 
 

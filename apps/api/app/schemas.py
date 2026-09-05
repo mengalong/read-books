@@ -428,6 +428,34 @@ class QuestionResponse(ApiModel):
     source_mode: SourceMode | None = None
 
 
+class QuizQualityReviewIssue(BaseModel):
+    question_position: int | None = None
+    severity: Literal["high", "medium", "low"] = "medium"
+    category: Literal["fact", "answer", "source", "ambiguity", "duplicate", "wording", "difficulty", "other"] = "other"
+    problem: str
+    suggestion: str
+    evidence: str | None = None
+
+
+class QuizQualityReviewResult(BaseModel):
+    schema_version: str = "quiz_quality_review.v1"
+    overall_verdict: Literal["pass", "needs_revision", "high_risk"] = "needs_revision"
+    summary: str = ""
+    strengths: list[str] = Field(default_factory=list)
+    issues: list[QuizQualityReviewIssue] = Field(default_factory=list)
+    reviewed_question_count: int = 0
+    generated_at: datetime | None = None
+
+
+class QuizQualityReviewResponse(BaseModel):
+    status: Literal["not_started", "pending", "processing", "completed", "failed"]
+    task_id: str | None = None
+    result: QuizQualityReviewResult | None = None
+    error: str | None = None
+    requested_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
 class QuizResponse(ApiModel):
     id: str
     book_id: str
@@ -444,6 +472,12 @@ class QuizResponse(ApiModel):
     elapsed_seconds: int | None
     submitted_at: datetime | None
     next_review_date: date | None
+    quality_review_status: Literal["not_started", "pending", "processing", "completed", "failed"] = "not_started"
+    quality_review_task_id: str | None = None
+    quality_review_result: QuizQualityReviewResult | None = None
+    quality_review_error: str | None = None
+    quality_review_requested_at: datetime | None = None
+    quality_review_completed_at: datetime | None = None
     created_at: datetime
     questions: list[QuestionResponse]
 

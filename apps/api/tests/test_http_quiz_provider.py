@@ -207,6 +207,36 @@ def test_key_sentence_prefers_long_matching_phrase():
     )
 
 
+def test_http_provider_reviews_quiz_without_requiring_literal_quote(monkeypatch):
+    requests = install_chat_responses(
+        monkeypatch,
+        [
+            '{"schema_version":"quiz_quality_review.v1","overall_verdict":"pass",'
+            '"summary":"题目考察了内容理解。","strengths":["题意清楚"],"issues":[],'
+            '"reviewed_question_count":1}'
+        ],
+    )
+    provider = HttpQuizAiProvider(make_configuration())
+
+    result = provider.review_quiz(
+        {
+            "title": "测试试卷",
+            "source_mode": "material",
+            "questions": [
+                {
+                    "position": 1,
+                    "prompt": "这句台词反映了人物怎样的处境？",
+                    "correct_answers": ["A"],
+                    "source_evidence": [{"excerpt": "人物在压力下仍然坚持。"}],
+                }
+            ],
+        }
+    )
+
+    assert result["overall_verdict"] == "pass"
+    assert "不要求逐字一致" in requests[0]["json"]["messages"][1]["content"]
+
+
 def test_http_provider_generates_validated_questions(monkeypatch):
     chunks = make_chunks()
     payload = generated_payload([chunk.id for chunk in chunks])

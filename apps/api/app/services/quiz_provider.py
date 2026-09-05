@@ -132,6 +132,8 @@ class QuizAiProvider(Protocol):
         description: str,
     ) -> ResourceKnowledgeCheckResult: ...
 
+    def review_quiz(self, quiz_payload: dict[str, Any]) -> dict[str, Any]: ...
+
     def generate_questions(
         self,
         chunks: list[ContentChunk | TrustedQuoteSource | TrustedPlotSource],
@@ -249,6 +251,43 @@ class MockQuizAiProvider:
             message="模拟模式无法验证资源真实性，请在真实模型环境中重新检查。",
             raw_response=None,
         )
+
+    def review_quiz(self, quiz_payload: dict[str, Any]) -> dict[str, Any]:
+        questions = quiz_payload.get("questions", [])
+        issues: list[dict[str, Any]] = []
+        source_mode = str(quiz_payload.get("source_mode") or "")
+        for question in questions:
+            if not isinstance(question, dict):
+                continue
+            position = question.get("position")
+            if source_mode != "model_knowledge" and not question.get("source_evidence"):
+                issues.append(
+                    {
+                        "question_position": position,
+                        "severity": "high",
+                        "category": "source",
+                        "problem": "题目没有保存可核对的来源依据。",
+                        "suggestion": "补充可信来源或改写为有来源支持的题目后再使用。",
+                    }
+                )
+            if question.get("question_type") == "short" and not question.get("reference_answer"):
+                issues.append(
+                    {
+                        "question_position": position,
+                        "severity": "medium",
+                        "category": "answer",
+                        "problem": "问答题缺少参考答案。",
+                        "suggestion": "补充参考答案和评分要点，避免评分标准不明确。",
+                    }
+                )
+        return {
+            "schema_version": "quiz_quality_review.v1",
+            "overall_verdict": "high_risk" if any(item["severity"] == "high" for item in issues) else "pass",
+            "summary": "模拟模式已完成结构化检查；真实模型配置下可进一步审查事实、答案和题意。",
+            "strengths": ["已检查题型、答案字段、来源依据和问答题评分信息。"],
+            "issues": issues,
+            "reviewed_question_count": len(questions),
+        }
 
     def generate_questions(
         self,
@@ -942,6 +981,41 @@ class HttpQuizAiProvider:
             message=f"{confidence.strip()}: {reason.strip()}",
             raw_response=content.strip(),
         )
+
+    def review_quiz(self, quiz_payload: dict[str, Any]) -> dict[str, Any]:
+        questions = quiz_payload.get("questions", [])
+        question_text = json.dumps(questions, ensure_ascii=False, separators=(",", ":"))
+        source_mode = str(quiz_payload.get("source_mode") or "pdf")
+        content = self._chat_completion(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是读书复习试卷的质量审查员。只返回合法 JSON，不输出 Markdown 或额外说明。"
+                        "审查目标是帮助人工改进题目，不要直接修改题目，也不要因为题干没有逐字复制原文就判错。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "请审查下面这套试卷的合理性，逐题核对题干、选项、正确答案、解析、知识点、"
+                        "参考答案、评分要点和来源依据之间是否一致。优先发现：事实或答案错误、来源不支持、"
+                        "题意歧义、选项多解/无解、重复考察同一事实、把精确集数/页码/时间当作考点、"
+                        "问答题评分依据不足。题目考察内容理解时，允许对原文或台词进行自然转述，不要求逐字一致。"
+                        "有来源时只能依据给出的来源判断；没有来源的 model_knowledge 试卷请标记为需要人工核验，"
+                        "但不要自行补充外部事实。severity=high 表示不应直接使用，medium 表示建议修改，low 表示措辞优化。"
+                        f"\n来源模式：{source_mode}\n试卷：{json.dumps({k: v for k, v in quiz_payload.items() if k != 'questions'}, ensure_ascii=False)}"
+                        f"\n题目：{question_text}\n\n只返回："
+                        '{"schema_version":"quiz_quality_review.v1","overall_verdict":"pass|needs_revision|high_risk",'
+                        '"summary":"","strengths":[],"issues":[{"question_position":1,"severity":"high|medium|low",'
+                        '"category":"fact|answer|source|ambiguity|duplicate|wording|difficulty|other",'
+                        '"problem":"","suggestion":"","evidence":""}],"reviewed_question_count":0}'
+                    ),
+                },
+            ],
+            phase="quiz_quality_review",
+        )
+        return parse_json_object(content)
 
     def __init__(
         self,

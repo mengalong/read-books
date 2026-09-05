@@ -468,6 +468,18 @@ class Quiz(TimestampMixin, Base):
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_review_date: Mapped[date | None] = mapped_column(Date)
     generation_task_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    quality_review_status: Mapped[str] = mapped_column(
+        String(20), default="not_started", index=True
+    )
+    quality_review_task_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    quality_review_result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    quality_review_error: Mapped[str | None] = mapped_column(Text)
+    quality_review_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    quality_review_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
     book: Mapped[Book] = relationship(back_populates="quizzes")
     questions: Mapped[list[Question]] = relationship(
