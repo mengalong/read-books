@@ -79,6 +79,7 @@ class TrustedPlotSource:
     file_name: str
     material_type: str
     content: str
+    summary: str = ""
     source_segment_ids: list[str] = field(default_factory=list)
     level: str = "event"
     season_number: int | None = None

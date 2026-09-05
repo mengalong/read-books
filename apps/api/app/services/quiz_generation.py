@@ -602,6 +602,7 @@ def _get_plot_sources(db: Session, book_id: str) -> list[TrustedPlotSource]:
                 )
                 if value
             ),
+            summary=event.summary,
             level=event.level,
             season_number=event.season_number,
             episode_number=event.episode_number,

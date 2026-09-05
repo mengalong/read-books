@@ -627,3 +627,22 @@ def test_plot_summary_json_is_parsed_managed_and_used_as_source(client, monkeypa
             book["id"],
             QuizGenerateRequest(single_count=1, multiple_count=0, short_count=0),
         ) == "plot"
+
+    generated = client.post(
+        f"/api/books/{book['id']}/quizzes",
+        json={"single_count": 1, "multiple_count": 0, "short_count": 0},
+    )
+    assert generated.status_code == 202
+    task_id = generated.json()["id"]
+    for _ in range(500):
+        task_response = client.get(f"/api/quiz-generation-tasks/{task_id}")
+        assert task_response.status_code == 200
+        task = task_response.json()
+        if task["status"] in {"completed", "failed"}:
+            break
+        time.sleep(0.01)
+    assert task["status"] == "completed", task.get("error_message")
+    assert task["source_mode"] == "plot"
+    quiz = client.get(f"/api/quizzes/{task['quiz_id']}")
+    assert quiz.status_code == 200
+    assert quiz.json()["questions"][0]["plot_event_ids"]
