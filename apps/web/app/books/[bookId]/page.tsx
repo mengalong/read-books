@@ -409,7 +409,6 @@ export default function BookDetailPage() {
               {isActive && <Link className="button button-secondary" href={`/quizzes/${quiz.id}`}><Play size={15} />选择这套</Link>}
               {isActive && <button className="button button-quiet" onClick={() => openShare(quiz)} title="分享考试" type="button"><Share2 size={16} /></button>}
               {isActive && <Link aria-label={`查看${quiz.title}的出题过程`} className="button button-quiet" href={`/quizzes/${quiz.id}/generation-debug`} title="查看出题过程"><Code2 size={16} /></Link>}
-              {isActive && <Link aria-label={`回流${quiz.title}题目到题库`} className="button button-quiet" href={`/quizzes/${quiz.id}/edit`} title="回流题目到题库"><LibraryBig size={16} /></Link>}
               {isActive && <Link aria-label={`编辑${quiz.title}`} className="button button-quiet" href={`/quizzes/${quiz.id}/edit`} title="编辑试卷"><PencilLine size={16} /></Link>}
               <button
                 aria-label={`删除${quiz.title}`}

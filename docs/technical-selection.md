@@ -394,7 +394,7 @@ Mock 不是随便造页面假数据，而是要模拟真实链路的数据结构
 - 试卷摘要按题目类型统计单选、多选和问答数量；删除试卷时级联删除题目、复习任务和答案。
 - 删除试卷时解除 `QuizGenerationTask.quiz_id` 与 `Book.pre_generation_quiz_id` 引用，并将 `QuestionBankUsage.quiz_id/question_id` 置空保留试卷名称快照；不删除题库条目和 `ModelUsageRecord` 审计数据。
 
-题库使用独立的 `question_bank_entries` 快照表和 `question_bank_usages` 引用表。试卷编辑页通过 `POST /api/quizzes/{quiz_id}/questions/{question_id}/question-bank` 逐题回流，也支持 `POST /api/quizzes/{quiz_id}/question-bank` 批量回流；资源题库页面通过 `GET/PATCH /api/books/{book_id}/question-bank` 查询和编辑。条目按 `book_id + fact_key` 去重，保存完整题干、选项、答案、解析、评分依据、事实签名和来源证据；每次进入新试卷都会写入使用关系并增加 `use_count`，按使用次数和最近使用时间优先选择低频条目。综合出题的题库候选仍按来源方向过滤，已多次被其他试卷使用的重复事实会让位给模型生成或其他候选，避免整套试卷大量重复。
+题库使用独立的 `question_bank_entries` 快照表和 `question_bank_usages` 引用表。已完成试卷的预览页通过 `POST /api/quizzes/{quiz_id}/questions/{question_id}/question-bank` 逐题回流，并按剩余题目逐个调用同一接口实现带进度的“一键回流”；试卷列表不直接提供回流入口。资源题库页面通过 `GET/PATCH /api/books/{book_id}/question-bank` 查询和编辑。条目按 `book_id + fact_key` 去重，保存完整题干、选项、答案、解析、评分依据、事实签名和来源证据；每次进入新试卷都会写入使用关系并增加 `use_count`，按使用次数和最近使用时间优先选择低频条目。综合出题的题库候选仍按来源方向过滤，已多次被其他试卷使用的重复事实会让位给模型生成或其他候选，避免整套试卷大量重复。
 
 ### 10.2 端到端测试
 

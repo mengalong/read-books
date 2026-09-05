@@ -80,7 +80,7 @@ export default function QuestionBankPage() {
       <label className="question-bank-unused-filter"><input checked={unusedOnly} onChange={(event) => { const next = event.target.checked; setUnusedOnly(next); setLoading(true); void refresh(search, next); }} type="checkbox" />只看未使用</label>
       <button className="button button-secondary" type="submit"><Search size={15} />搜索</button>
     </form>
-    {entries.length === 0 ? <div className="empty-state"><LibraryBig size={22} /><strong>{search || unusedOnly ? "没有符合条件的题库题目" : "题库还是空的"}</strong><span>可以从试卷编辑页逐题确认后加入题库。</span></div> : <section className="question-bank-list">{entries.map((entry) => <BankEntryCard entry={entry} key={entry.id} onSaved={handleSaved} />)}</section>}
+    {entries.length === 0 ? <div className="empty-state"><LibraryBig size={22} /><strong>{search || unusedOnly ? "没有符合条件的题库题目" : "题库还是空的"}</strong><span>可以在已完成试卷的预览页一键或逐题加入题库。</span></div> : <section className="question-bank-list">{entries.map((entry) => <BankEntryCard entry={entry} key={entry.id} onSaved={handleSaved} />)}</section>}
   </div>;
 }
 

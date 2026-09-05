@@ -480,10 +480,29 @@ test("书籍页选择试卷先看概览，再开始答题进入复习", async ({
             difficulty: "medium", estimated_seconds: 45, reference_answer: null,
             grading_rubric: [], source_evidence: [], quote_entry_ids: [], source_segment_ids: [],
             max_score: 6,
+          }, {
+            id: "q2", position: 2, question_type: "single", question_subtype: "general",
+            prompt: "第二题干", options: [{ id: "A", text: "第二题选项 A" }, { id: "B", text: "第二题选项 B" }],
+            correct_answers: ["B"], explanation: "第二题解析", knowledge_point: "第二题知识点",
+            difficulty: "medium", estimated_seconds: 45, reference_answer: null,
+            grading_rubric: [], source_evidence: [], quote_entry_ids: [], source_segment_ids: [],
+            max_score: 6,
           }],
         },
       }),
     });
+  });
+  await page.route("**/api/quizzes/quiz-1/questions/*/question-bank", async (route) => {
+    const questionId = route.request().url().split("/").at(-2);
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({
+      id: `bank-${questionId}`, book_id: "book-1", origin_quiz_id: "quiz-1", origin_question_id: questionId,
+      question_type: "single", question_subtype: "general", prompt: "题干", options: [], correct_answers: ["A"],
+      explanation: "解析", knowledge_point: "知识点", difficulty: "medium", estimated_seconds: 45,
+      reference_answer: null, grading_rubric: [], source_chunk_ids: [], quote_entry_ids: [], plot_event_ids: [],
+      source_segment_ids: [], fact_key: questionId, fact_claim: "事实", semantic_signature: {}, source_evidence: [],
+      source_mode: "pdf", max_score: 6, status: "active", use_count: 1,
+      created_at: "2026-09-05T08:00:00Z", updated_at: "2026-09-05T08:00:00Z", usages: [],
+    }) });
   });
 
   await page.route("**/api/quizzes/quiz-1/reviews", async (route) => {
@@ -588,6 +607,7 @@ test("书籍页选择试卷先看概览，再开始答题进入复习", async ({
   await page.goto("/books/book-1");
 
   await expect(page.getByRole("button", { name: "分享考试" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "回流第一套试卷题目到题库" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "编辑第一套试卷" })).toHaveAttribute("href", "/quizzes/quiz-1/edit");
 
   await page.getByRole("link", { name: "选择这套" }).click();
@@ -599,9 +619,15 @@ test("书籍页选择试卷先看概览，再开始答题进入复习", async ({
   expect(download.suggestedFilename()).toContain("题目答案校验.json");
   await page.getByRole("link", { name: "预览题目与答案" }).click();
   await expect(page).toHaveURL(/\/quizzes\/quiz-1\/preview$/);
-  await expect(page.getByText("正确答案", { exact: true })).toBeVisible();
+  await expect(page.getByText("正确答案", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("解析", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText(/选项 A/)).toBeVisible();
+  await expect(page.getByText(/选项 A/).first()).toBeVisible();
+  await page.getByRole("button", { name: "将第1题加入题库" }).click();
+  await expect(page.getByRole("button", { name: "第1题已在题库" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "一键回流剩余 1 题" })).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "一键回流剩余 1 题" }).click();
+  await expect(page.getByRole("button", { name: "已全部回流题库" })).toBeVisible();
   await page.getByRole("link", { name: "返回试卷概览" }).click();
   expect(reviewRequests).toBe(0);
   await expect(page.getByRole("button", { name: "编辑题目" })).toHaveCount(0);
