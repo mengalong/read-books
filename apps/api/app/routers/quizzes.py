@@ -43,6 +43,8 @@ from app.services.prompt_config import get_effective_prompt_templates
 from app.services.question_dedup import refresh_question_signature
 from app.services.quiz_generation import (
     apply_generation_intervention,
+    cancel_generation_task,
+    delete_generation_task,
     regenerate_quiz_question,
     start_generation_task,
 )
@@ -366,6 +368,54 @@ def get_generation_task(
     if not task:
         raise HTTPException(status_code=404, detail="未找到这次出题任务")
     return to_generation_response(task)
+
+
+@router.post(
+    "/quiz-generation-tasks/{task_id}/cancel",
+    response_model=QuizGenerationTaskResponse,
+)
+def cancel_generation(
+    task_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> QuizGenerationTaskResponse:
+    task = db.scalar(
+        select(QuizGenerationTask)
+        .join(QuizGenerationTask.book)
+        .where(
+            QuizGenerationTask.id == task_id,
+            Book.workspace_id == identity.workspace.id,
+        )
+    )
+    if task is None:
+        raise HTTPException(status_code=404, detail="未找到这次出题任务")
+    try:
+        updated = cancel_generation_task(db, task.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return to_generation_response(updated, db)
+
+
+@router.delete("/quiz-generation-tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_generation_task(
+    task_id: str,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> None:
+    task = db.scalar(
+        select(QuizGenerationTask)
+        .join(QuizGenerationTask.book)
+        .where(
+            QuizGenerationTask.id == task_id,
+            Book.workspace_id == identity.workspace.id,
+        )
+    )
+    if task is None:
+        raise HTTPException(status_code=404, detail="未找到这次出题任务")
+    try:
+        delete_generation_task(db, task.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post(

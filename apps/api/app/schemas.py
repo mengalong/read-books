@@ -267,7 +267,7 @@ class QuizGenerationTaskResponse(BaseModel):
     id: str
     book_id: str
     task_type: str
-    status: Literal["pending", "processing", "completed", "failed", "awaiting_intervention"]
+    status: Literal["pending", "processing", "completed", "failed", "awaiting_intervention", "cancelled"]
     source_mode: SourceMode
     generation_theme: GenerationTheme = "general"
     theme_config: dict[str, Any] = Field(default_factory=dict)

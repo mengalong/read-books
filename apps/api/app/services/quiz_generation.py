@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Iterable
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -16,6 +16,7 @@ from app.database import SessionLocal
 from app.models import (
     Book,
     ContentChunk,
+    ModelUsageRecord,
     PdfDocument,
     QuoteEntry,
     Question,
@@ -32,6 +33,7 @@ from app.services.quiz_provider import (
     TrustedQuoteSource,
     compact_text,
     get_quiz_provider,
+    parse_json_object,
 )
 from app.services.material_understanding import get_understanding_context
 from app.services.question_dedup import (
@@ -278,6 +280,59 @@ def resume_generation_task(db: Session, task_id: str) -> QuizGenerationTask:
     return task
 
 
+def _task_was_cancelled(db: Session, task_id: str) -> bool:
+    """Read cancellation state from a fresh query while a worker is calling the model."""
+    status = db.scalar(
+        select(QuizGenerationTask.status)
+        .where(QuizGenerationTask.id == task_id)
+        .execution_options(populate_existing=True)
+    )
+    return status in {None, "cancelled"}
+
+
+def cancel_generation_task(db: Session, task_id: str) -> QuizGenerationTask:
+    task = db.get(QuizGenerationTask, task_id)
+    if task is None:
+        raise ValueError("未找到这次出题任务")
+    if task.status == "completed":
+        raise ValueError("已经完成的出题任务不能终止")
+    if task.status == "cancelled":
+        return task
+    task.status = "cancelled"
+    task.current_phase = "已手动终止"
+    task.error_message = "出题任务已由用户手动终止"
+    if task.task_type == "pre_generation":
+        book = db.get(Book, task.book_id)
+        if book:
+            book.pre_generation_status = "failed"
+            book.pre_generation_error = task.error_message
+            book.pre_generation_quiz_id = None
+    db.commit()
+    db.refresh(task)
+    return task
+
+
+def delete_generation_task(db: Session, task_id: str) -> None:
+    task = db.get(QuizGenerationTask, task_id)
+    if task is None:
+        raise ValueError("未找到这次出题任务")
+    if task.status in {"pending", "processing"}:
+        raise ValueError("进行中的任务请先手动终止，再删除任务")
+    book = db.get(Book, task.book_id)
+    if task.task_type == "pre_generation" and book:
+        book.pre_generation_enabled = False
+        book.pre_generation_status = "disabled"
+        book.pre_generation_error = None
+        book.pre_generation_quiz_id = None
+    if task.quiz_id:
+        quiz = db.get(Quiz, task.quiz_id)
+        if quiz and quiz.generation_task_id == task.id:
+            quiz.generation_task_id = None
+    db.execute(delete(ModelUsageRecord).where(ModelUsageRecord.task_id == task.id))
+    db.delete(task)
+    db.commit()
+
+
 def apply_generation_intervention(
     db: Session,
     task_id: str,
@@ -289,8 +344,15 @@ def apply_generation_intervention(
     task = db.get(QuizGenerationTask, task_id)
     if task is None:
         raise ValueError("未找到这次出题任务")
-    if task.status not in {"awaiting_intervention", "failed"}:
-        raise ValueError("当前出题任务不需要人工介入")
+    if task.status == "cancelled":
+        raise ValueError("已终止的出题任务不能继续人工处理")
+    if task.status == "completed":
+        raise ValueError("已经完成的出题任务不能继续人工处理")
+    if task.status not in {"pending", "processing", "awaiting_intervention", "failed"}:
+        raise ValueError("当前出题任务不支持人工介入")
+    was_running = task.status in {"pending", "processing"}
+    if was_running and action in {"retry", "replace"}:
+        raise ValueError("进行中的任务只能人工调整或确认题目，不能重试或换题")
     states = copy.deepcopy(task.question_states or _initial_question_states(task))
     if position < 1 or position > len(states):
         raise ValueError("未找到需要处理的题目")
@@ -338,11 +400,17 @@ def apply_generation_intervention(
     task.completed_questions = sum(
         _finalized_state_status(current.get("status")) for current in states
     )
-    task.status = "pending"
-    task.error_message = None
-    task.current_phase = f"等待继续处理第 {position} 道题"
+    if was_running and action in {"edit", "accept"}:
+        task.status = "processing"
+        task.error_message = None
+        task.current_phase = f"已人工更新第 {position} 道题，继续生成其余题目"
+    else:
+        task.status = "pending"
+        task.error_message = None
+        task.current_phase = f"等待继续处理第 {position} 道题"
     db.commit()
-    threading.Thread(target=run_generation_task, args=(task.id,), daemon=True).start()
+    if not was_running:
+        threading.Thread(target=run_generation_task, args=(task.id,), daemon=True).start()
     db.refresh(task)
     return task
 
@@ -1150,6 +1218,9 @@ def _set_task_failure(db: Session, task_id: str, error: Exception) -> None:
     task = db.get(QuizGenerationTask, task_id)
     if not task:
         return
+    db.refresh(task)
+    if task.status == "cancelled":
+        return
     task.status = "failed"
     task.current_phase = "生成失败"
     task.error_message = str(getattr(error, "detail", error))[:1_000]
@@ -1163,10 +1234,53 @@ def _set_task_failure(db: Session, task_id: str, error: Exception) -> None:
             db.commit()
 
 
+def _latest_model_draft(
+    db: Session, task_id: str, position: int, question_type: str
+) -> dict[str, Any] | None:
+    """Recover the raw question fields when structural/source validation rejects a call."""
+    record = db.scalar(
+        select(ModelUsageRecord)
+        .where(
+            ModelUsageRecord.task_id == task_id,
+            ModelUsageRecord.question_position == position,
+        )
+        .order_by(ModelUsageRecord.created_at.desc(), ModelUsageRecord.call_number.desc())
+    )
+    if record is None or not record.model_response:
+        return None
+    try:
+        payload = parse_json_object(record.model_response)
+    except (RuntimeError, ValueError, TypeError):
+        return None
+    questions = payload.get("questions") if isinstance(payload, dict) else None
+    if not isinstance(questions, list) or not questions or not isinstance(questions[0], dict):
+        return None
+    draft = dict(questions[0])
+    draft["question_type"] = question_type
+    draft.setdefault("options", [])
+    draft.setdefault("correct_answers", [])
+    draft.setdefault("explanation", "")
+    draft.setdefault("knowledge_point", "人工调整")
+    draft.setdefault("estimated_seconds", 45)
+    draft.setdefault("reference_answer", None)
+    draft.setdefault("grading_rubric", [])
+    draft.setdefault("source_chunk_ids", [])
+    draft.setdefault("quote_entry_ids", [])
+    draft.setdefault("source_segment_ids", [])
+    draft.setdefault("source_evidence", [])
+    draft.setdefault("fact_key", "")
+    draft.setdefault("fact_claim", draft.get("prompt", ""))
+    draft.setdefault("semantic_signature", {})
+    draft.setdefault("max_score", 0)
+    return draft
+
+
 def run_generation_task(task_id: str) -> None:
     with SessionLocal() as db:
         task = db.get(QuizGenerationTask, task_id)
         if not task or task.status not in {"pending", "processing"}:
+            return
+        if _task_was_cancelled(db, task_id):
             return
         task.status = "processing"
         task.current_phase = (
@@ -1264,6 +1378,23 @@ def run_generation_task(task_id: str) -> None:
                 if isinstance(rejected, dict)
             ]
             for position, question_type in enumerate(_question_types(task), start=1):
+                if _task_was_cancelled(db, task_id):
+                    return
+                db.refresh(task)
+                question_states = copy.deepcopy(
+                    task.question_states or _initial_question_states(task)
+                )
+                generated = [
+                    _generated_question_from_state(state["question"])
+                    for state in question_states
+                    if _finalized_state_status(state.get("status")) and state.get("question")
+                ]
+                rejected_candidates = [
+                    _generated_question_from_state(rejected)
+                    for state in question_states
+                    for rejected in state.get("rejected_questions", [])
+                    if isinstance(rejected, dict)
+                ]
                 state = question_states[position - 1]
                 if _finalized_state_status(state.get("status")) and state.get("question"):
                     continue
@@ -1276,7 +1407,10 @@ def run_generation_task(task_id: str) -> None:
                 db.commit()
                 item: GeneratedQuestion | None = None
                 last_candidate: GeneratedQuestion | None = None
+                state_was_updated_while_generating = False
                 for attempt in range(3):
+                    if _task_was_cancelled(db, task_id):
+                        return
                     provider.set_question_position(position)
                     state["attempts"] = int(state.get("attempts") or 0) + 1
                     task.question_states = copy.deepcopy(question_states)
@@ -1322,10 +1456,42 @@ def run_generation_task(task_id: str) -> None:
                             ),
                             background_context=background_context,
                         )
+                        if _task_was_cancelled(db, task_id):
+                            return
+                        db.refresh(task)
+                        latest_states = copy.deepcopy(
+                            task.question_states or _initial_question_states(task)
+                        )
+                        latest_state = latest_states[position - 1]
+                        if (
+                            _finalized_state_status(latest_state.get("status"))
+                            and latest_state.get("question")
+                        ):
+                            question_states = latest_states
+                            generated = [
+                                _generated_question_from_state(current["question"])
+                                for current in question_states
+                                if _finalized_state_status(current.get("status"))
+                                and current.get("question")
+                            ]
+                            rejected_candidates = [
+                                _generated_question_from_state(rejected)
+                                for current in question_states
+                                for rejected in current.get("rejected_questions", [])
+                                if isinstance(rejected, dict)
+                            ]
+                            state_was_updated_while_generating = True
+                            item = _generated_question_from_state(latest_state["question"])
+                            break
                         if len(result) != 1:
                             raise RuntimeError(f"第 {position} 道题生成结果数量不正确")
                         candidate = _prepare_generated_question(result[0])
                     except Exception as exc:
+                        if _task_was_cancelled(db, task_id):
+                            return
+                        state["question"] = _latest_model_draft(
+                            db, task_id, position, question_type
+                        )
                         state["status"] = "awaiting_intervention"
                         state["error_message"] = str(exc)[:1_000]
                         state["updated_at"] = utc_now().isoformat()
@@ -1350,6 +1516,8 @@ def run_generation_task(task_id: str) -> None:
                     item = candidate
                     break
                 if item is None:
+                    if _task_was_cancelled(db, task_id):
+                        return
                     state["status"] = "awaiting_intervention"
                     state["question"] = (
                         _state_question_payload(last_candidate) if last_candidate else None
@@ -1365,7 +1533,11 @@ def run_generation_task(task_id: str) -> None:
                     task.question_states = copy.deepcopy(question_states)
                     db.commit()
                     return
+                if state_was_updated_while_generating:
+                    continue
                 generated.append(item)
+                if _task_was_cancelled(db, task_id):
+                    return
                 state["status"] = "ready"
                 state["question"] = _state_question_payload(item)
                 state["error_message"] = None
@@ -1380,6 +1552,8 @@ def run_generation_task(task_id: str) -> None:
                 task.question_states = copy.deepcopy(question_states)
                 db.commit()
 
+            if _task_was_cancelled(db, task_id):
+                return
             allocated_scores = allocate_question_scores(
                 item.question_type for item in generated
             )
@@ -1394,6 +1568,8 @@ def run_generation_task(task_id: str) -> None:
                 "classic_quotes": "经典台词专题",
                 "character": "角色专题",
             }.get(task.generation_theme, "复习试卷")
+            if _task_was_cancelled(db, task_id):
+                return
             quiz = Quiz(
                 book_id=task.book_id,
                 title=f"第 {generation_number + 1} 套{theme_label}",

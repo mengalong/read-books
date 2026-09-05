@@ -332,6 +332,16 @@ export function getGenerationTask(taskId: string) {
   return apiFetch<QuizGenerationTask>(`/quiz-generation-tasks/${taskId}`);
 }
 
+export function cancelGenerationTask(taskId: string) {
+  return apiFetch<QuizGenerationTask>(`/quiz-generation-tasks/${taskId}/cancel`, {
+    method: "POST",
+  });
+}
+
+export function deleteGenerationTask(taskId: string) {
+  return apiFetch<void>(`/quiz-generation-tasks/${taskId}`, { method: "DELETE" });
+}
+
 export function interveneGenerationTask(
   taskId: string,
   position: number,

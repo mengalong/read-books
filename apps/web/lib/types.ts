@@ -461,7 +461,7 @@ export type QuizGenerationTask = {
   id: string;
   book_id: string;
   task_type: string;
-  status: "pending" | "processing" | "completed" | "failed" | "awaiting_intervention";
+  status: "pending" | "processing" | "completed" | "failed" | "awaiting_intervention" | "cancelled";
   source_mode: SourceMode;
   generation_theme: GenerationTheme;
   theme_config: QuizThemeConfig;

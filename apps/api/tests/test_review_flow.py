@@ -24,6 +24,7 @@ from app.services.model_usage import ModelUsageEvent, new_usage_context, record_
 from app.services.pdf_parser import parse_pdf_document
 from app.services.pre_generation import recover_pre_generation_tasks
 from app.services.quiz_provider import GeneratedQuestion, HttpQuizAiProvider, MockQuizAiProvider
+from app.services.quiz_generation import _latest_model_draft
 
 
 def create_source_book(
@@ -309,6 +310,146 @@ def test_generation_intervention_confirms_draft_and_resumes_task(client, monkeyp
     book = client.get(f"/api/books/{book_id}").json()
     assert book["active_generation_task_id"] == task_id
     assert book["active_generation_status"] == "pending"
+
+
+def test_generation_task_can_be_cancelled_and_deleted(client):
+    book_id, _ = create_source_book(client, "终止出题任务测试书")
+    with SessionLocal() as db:
+        task = QuizGenerationTask(
+            book_id=book_id,
+            task_type="manual_quiz_generation",
+            status="processing",
+            source_mode="pdf",
+            total_questions=2,
+            completed_questions=1,
+            current_question_position=2,
+            current_phase="正在调用模型生成第 2 题",
+            single_count=2,
+            question_states=[
+                {"position": 1, "question_type": "single", "status": "ready", "attempts": 1},
+                {"position": 2, "question_type": "single", "status": "generating", "attempts": 1},
+            ],
+        )
+        db.add(task)
+        db.flush()
+        db.add(
+            ModelUsageRecord(
+                task_id=task.id,
+                task_type="manual_quiz_generation",
+                task_label="终止任务测试",
+                phase="quiz_generation",
+                call_number=1,
+                model_name="test-model",
+                status="success",
+                latency_ms=10,
+                book_id=book_id,
+                question_position=2,
+                model_response='{"questions": []}',
+            )
+        )
+        db.commit()
+        task_id = task.id
+
+    blocked = client.delete(f"/api/quiz-generation-tasks/{task_id}")
+    assert blocked.status_code == 409
+    cancelled = client.post(f"/api/quiz-generation-tasks/{task_id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["current_phase"] == "已手动终止"
+
+    deleted = client.delete(f"/api/quiz-generation-tasks/{task_id}")
+    assert deleted.status_code == 204
+    assert client.get(f"/api/quiz-generation-tasks/{task_id}").status_code == 404
+    with SessionLocal() as db:
+        assert db.query(ModelUsageRecord).filter(ModelUsageRecord.task_id == task_id).count() == 0
+
+
+def test_processing_generation_task_allows_editing_ready_question(client):
+    book_id, _ = create_source_book(client, "进行中人工调整测试书")
+    with SessionLocal() as db:
+        task = QuizGenerationTask(
+            book_id=book_id,
+            task_type="manual_quiz_generation",
+            status="processing",
+            source_mode="pdf",
+            total_questions=2,
+            completed_questions=1,
+            current_question_position=2,
+            current_phase="正在生成第 2 题",
+            single_count=2,
+            question_states=[
+                {
+                    "position": 1,
+                    "question_type": "single",
+                    "status": "ready",
+                    "attempts": 1,
+                    "question": {
+                        "question_type": "single",
+                        "prompt": "原始题干",
+                        "options": [{"id": "A", "text": "原始答案"}],
+                        "correct_answers": ["A"],
+                        "explanation": "原始解析",
+                        "knowledge_point": "原始知识点",
+                    },
+                },
+                {"position": 2, "question_type": "single", "status": "generating", "attempts": 1},
+            ],
+        )
+        db.add(task)
+        db.commit()
+        task_id = task.id
+
+    response = client.post(
+        f"/api/quiz-generation-tasks/{task_id}/questions/1/intervene",
+        json={"action": "edit", "question": {"prompt": "人工调整后的题干"}},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "processing"
+    assert body["question_states"][0]["status"] == "confirmed"
+    assert body["question_states"][0]["question"]["prompt"] == "人工调整后的题干"
+
+
+def test_failed_generation_recovers_model_draft_for_manual_edit(client):
+    book_id, _ = create_source_book(client, "失败草稿恢复测试书")
+    with SessionLocal() as db:
+        task = QuizGenerationTask(
+            book_id=book_id,
+            task_type="manual_quiz_generation",
+            status="awaiting_intervention",
+            source_mode="pdf",
+            total_questions=1,
+            current_question_position=1,
+            question_states=[
+                {"position": 1, "question_type": "single", "status": "generating", "attempts": 1}
+            ],
+        )
+        db.add(task)
+        db.flush()
+        db.add(
+            ModelUsageRecord(
+                task_id=task.id,
+                task_type="manual_quiz_generation",
+                task_label="失败草稿测试",
+                phase="quiz_generation_repair",
+                call_number=2,
+                model_name="test-model",
+                status="failed",
+                latency_ms=10,
+                book_id=book_id,
+                question_position=1,
+                model_response='{"questions":[{"prompt":"检测失败但保留的题干","options":[{"id":"A","text":"答案"}],"correct_answers":["A"],"explanation":"原始解析","knowledge_point":"原始知识点"}]}',
+            )
+        )
+        db.commit()
+        draft = _latest_model_draft(db, task.id, 1, "single")
+
+    assert draft is not None
+    assert draft["prompt"] == "检测失败但保留的题干"
+    assert draft["options"][0]["text"] == "答案"
+    assert draft["correct_answers"] == ["A"]
+    assert draft["explanation"] == "原始解析"
+    assert draft["knowledge_point"] == "原始知识点"
 
 
 def test_health_and_book_crud(client):

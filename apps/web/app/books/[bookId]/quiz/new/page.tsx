@@ -1,14 +1,15 @@
 "use client";
 
-import { AlertCircle, ArrowLeft, Check, CheckCircle2, Clock3, Edit3, FileQuestion, LoaderCircle, MessageSquareQuote, Minus, Plus, RefreshCcw, RotateCcw, Save, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, CheckCircle2, Clock3, Copy, Edit3, FileQuestion, LoaderCircle, MessageSquareQuote, Minus, Plus, RefreshCcw, RotateCcw, Save, Sparkles, Square, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { ErrorState, SourceModeNotice } from "@/components/ui";
-import { ApiError, generateQuiz, getBook, getGenerationTask, getGenerationTaskDebug, getMaterials, getQuotes, interveneGenerationTask } from "@/lib/api";
+import { ApiError, cancelGenerationTask, deleteGenerationTask, generateQuiz, getBook, getGenerationTask, getGenerationTaskDebug, getMaterials, getQuotes, interveneGenerationTask } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
 import { materialTypeLabel, resourceTypeLabel } from "@/lib/format";
-import type { BookDetail, GenerationTheme, QuestionSubtype, QuizGenerationCall, QuizGenerationQuestionState, QuizGenerationTask, QuoteEntryList, ResourceMaterial } from "@/lib/types";
+import type { BookDetail, GenerationTheme, Question, QuestionSubtype, QuizGenerationCall, QuizGenerationQuestionState, QuizGenerationTask, QuoteEntryList, ResourceMaterial } from "@/lib/types";
 
 type CountKey = "single_count" | "multiple_count" | "short_count";
 
@@ -62,6 +63,8 @@ export default function NewQuizPage() {
   const [generating, setGenerating] = useState(false);
   const [generationTask, setGenerationTask] = useState<QuizGenerationTask | null>(null);
   const [generationCalls, setGenerationCalls] = useState<QuizGenerationCall[]>([]);
+  const [taskCopyState, setTaskCopyState] = useState<"idle" | "copied">("idle");
+  const [taskActionBusy, setTaskActionBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -185,6 +188,49 @@ export default function NewQuizPage() {
     }
   }
 
+  async function handleCopyGeneration() {
+    if (!generationTask || !book) return;
+    setError("");
+    try {
+      await copyText(formatGenerationTaskTrace(book.title, generationTask, generationCalls));
+      setTaskCopyState("copied");
+      window.setTimeout(() => setTaskCopyState("idle"), 1500);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : "复制出题内容失败");
+    }
+  }
+
+  async function handleCancelGeneration() {
+    if (!generationTask || !["pending", "processing"].includes(generationTask.status)) return;
+    if (!window.confirm("确定要终止当前出题任务吗？已生成的中间结果和调试记录会保留。")) return;
+    setTaskActionBusy(true);
+    setError("");
+    try {
+      setGenerationTask(await cancelGenerationTask(generationTask.id));
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "终止出题任务失败");
+    } finally {
+      setTaskActionBusy(false);
+    }
+  }
+
+  async function handleDeleteGeneration() {
+    if (!generationTask || ["pending", "processing", "completed"].includes(generationTask.status)) return;
+    if (!window.confirm("确定删除这次出题任务及其调试记录吗？此操作不可撤销。")) return;
+    setTaskActionBusy(true);
+    setError("");
+    try {
+      await deleteGenerationTask(generationTask.id);
+      setGenerationTask(null);
+      setGenerationCalls([]);
+      setTaskCopyState("idle");
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "删除出题任务失败");
+    } finally {
+      setTaskActionBusy(false);
+    }
+  }
+
   return (
     <div className="page-wrap">
       <Link className="back-link" href={`/books/${book.id}`}><ArrowLeft size={14} />返回《{book.title}》</Link>
@@ -196,11 +242,11 @@ export default function NewQuizPage() {
       {(canGenerate || sourceMode === "material") && <SourceModeNotice sourceMode={sourceMode} />}
 
       {generationTask && <section className={`generation-progress ${generationTask.status}`}>
-        <div className="generation-progress-heading"><div><strong>{generationTask.status === "completed" ? "复习试卷已经准备好" : generationTask.status === "awaiting_intervention" ? "本次出题需要人工处理" : generationTask.status === "failed" ? "本次出题未完成" : generationTask.current_phase}</strong></div>{generationTask.status === "completed" ? <CheckCircle2 size={21} /> : generationTask.status === "awaiting_intervention" || generationTask.status === "failed" ? <AlertCircle size={21} /> : <LoaderCircle className={["pending", "processing"].includes(generationTask.status) ? "spin" : ""} size={21} />}</div>
+        <div className="generation-progress-heading"><div><strong>{generationTask.status === "completed" ? "复习试卷已经准备好" : generationTask.status === "awaiting_intervention" ? "本次出题需要人工处理" : generationTask.status === "failed" ? "本次出题未完成" : generationTask.status === "cancelled" ? "本次出题已手动终止" : generationTask.current_phase}</strong></div>{generationTask.status === "completed" ? <CheckCircle2 size={21} /> : generationTask.status === "awaiting_intervention" || generationTask.status === "failed" || generationTask.status === "cancelled" ? <AlertCircle size={21} /> : <LoaderCircle className={["pending", "processing"].includes(generationTask.status) ? "spin" : ""} size={21} />}</div>
         <div className="progress-track"><div className="progress-fill" style={{ width: `${generationTask.total_questions ? generationTask.completed_questions / generationTask.total_questions * 100 : 0}%` }} /></div>
         <div className="generation-progress-meta"><span>{generationTask.completed_questions} / {generationTask.total_questions} 道题</span><span>{generationTask.error_message || generationTask.current_phase}</span></div>
         <GenerationQuestionStates task={generationTask} calls={generationCalls} onIntervention={handleIntervention} />
-        {generationTask.status === "completed" && generationTask.quiz_id && <div className="generation-progress-actions"><Link className="button button-primary" href={`/quizzes/${generationTask.quiz_id}`}><CheckCircle2 size={15} />查看并开始复习</Link></div>}
+        <div className="generation-progress-actions"><button className="button button-secondary" disabled={taskActionBusy} onClick={() => void handleCopyGeneration()} type="button"><Copy size={15} />{taskCopyState === "copied" ? "已复制出题内容" : "复制当前出题内容"}</button>{["pending", "processing"].includes(generationTask.status) && <button className="button button-secondary" disabled={taskActionBusy} onClick={() => void handleCancelGeneration()} type="button"><Square size={14} />终止出题</button>}{!["pending", "processing", "completed"].includes(generationTask.status) && <button className="button button-danger" disabled={taskActionBusy} onClick={() => void handleDeleteGeneration()} type="button"><Trash2 size={14} />删除任务</button>}{generationTask.status === "completed" && generationTask.quiz_id && <Link className="button button-primary" href={`/quizzes/${generationTask.quiz_id}`}><CheckCircle2 size={15} />查看并开始复习</Link>}</div>
       </section>}
 
       <div className="quiz-settings-grid">
@@ -256,16 +302,77 @@ const generationQuestionStatusLabels: Record<QuizGenerationQuestionState["status
 
 function GenerationQuestionStates({ task, calls, onIntervention }: { task: QuizGenerationTask; calls: QuizGenerationCall[]; onIntervention: (position: number, action: "retry" | "accept" | "replace" | "edit", question?: Record<string, unknown>) => Promise<void> }) {
   if (!task.question_states?.length) return null;
-  return <div className="generation-question-states"><div className="generation-question-states-heading"><strong>逐题出题过程</strong><span>可实时查看单题调用、已生成草稿，失败题目可以人工介入</span></div>{task.question_states.map((state) => <article className={`generation-question-state ${state.status}`} key={state.position}><div className="generation-question-state-heading"><div><strong>第 {state.position} 题</strong><span>{state.question_type === "single" ? "单选题" : state.question_type === "multiple" ? "多选题" : "问答题"} · 第 {state.attempts} 次调用</span></div><span className="generation-question-state-status">{generationQuestionStatusLabels[state.status]}</span></div>{state.error_message && <div className="generation-question-state-error"><AlertCircle size={14} />{state.error_message}</div>}<GenerationQuestionCalls calls={calls.filter((call) => call.question_position === state.position)} />{state.question && state.status !== "awaiting_intervention" && <details className="generation-question-preview"><summary>查看题目草稿</summary><strong>{String(state.question.prompt || "尚未生成题干")}</strong></details>}{state.status === "awaiting_intervention" && <GenerationInterventionEditor state={state} onIntervention={onIntervention} />}</article>)}</div>;
+  return <div className="generation-question-states"><div className="generation-question-states-heading"><strong>逐题出题过程</strong><span>可实时查看单题调用、完整草稿，失败题目可以人工介入</span></div>{task.question_states.map((state) => { const questionCalls = calls.filter((call) => call.question_position === state.position); const editable = !["completed", "cancelled"].includes(task.status) && (Boolean(state.question) || state.status === "awaiting_intervention"); return <article className={`generation-question-state ${state.status}`} key={state.position}><div className="generation-question-state-heading"><div><strong>第 {state.position} 题</strong><span>{state.question_type === "single" ? "单选题" : state.question_type === "multiple" ? "多选题" : "问答题"} · 第 {state.attempts} 次调用</span></div><span className="generation-question-state-status">{generationQuestionStatusLabels[state.status]}</span></div>{state.error_message && <div className="generation-question-state-error"><AlertCircle size={14} />{state.error_message}</div>}<GenerationQuestionCalls calls={questionCalls} /><QuestionDraftPreview question={state.question} />{editable && <GenerationInterventionEditor state={state} taskStatus={task.status} onIntervention={onIntervention} />}</article>; })}</div>;
 }
 
 function GenerationQuestionCalls({ calls }: { calls: QuizGenerationCall[] }) {
+  const [copied, setCopied] = useState(false);
   if (!calls.length) return null;
   const latest = calls[calls.length - 1];
-  return <details className="generation-question-call-preview"><summary>查看本题模型信息（{calls.length} 次调用 · {calls.reduce((sum, call) => sum + (call.total_tokens || 0), 0).toLocaleString()} token）</summary><div className="generation-question-call-meta"><span>{latest.phase}</span><span>输入 {latest.input_tokens === null ? "—" : latest.input_tokens.toLocaleString()}</span><span>输出 {latest.output_tokens === null ? "—" : latest.output_tokens.toLocaleString()}</span><span>总计 {latest.total_tokens === null ? "—" : latest.total_tokens.toLocaleString()}</span></div><div className="generation-question-call-messages">{latest.request_messages.map((message, index) => <div key={`${latest.id}-${index}`}><strong>{message.role}</strong><pre>{message.content}</pre></div>)}</div><div className="generation-question-call-response"><strong>模型回复</strong><pre>{latest.model_response || "模型尚未返回文本"}</pre></div>{latest.error_message && <div className="generation-question-state-error">{latest.error_message}</div>}</details>;
+  async function copyCalls(event: React.MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    await copyText(formatGenerationCalls(calls));
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  }
+  return <details className="generation-question-call-preview"><summary>查看本题模型信息（{calls.length} 次调用 · {calls.reduce((sum, call) => sum + (call.total_tokens || 0), 0).toLocaleString()} token）</summary><div className="generation-question-call-actions"><button className="button button-quiet" onClick={(event) => void copyCalls(event)} type="button"><Copy size={13} />{copied ? "已复制" : "复制本题出题内容"}</button></div><div className="generation-question-call-meta"><span>{latest.phase}</span><span>输入 {latest.input_tokens === null ? "—" : latest.input_tokens.toLocaleString()}</span><span>输出 {latest.output_tokens === null ? "—" : latest.output_tokens.toLocaleString()}</span><span>总计 {latest.total_tokens === null ? "—" : latest.total_tokens.toLocaleString()}</span></div><div className="generation-question-call-messages">{latest.request_messages.map((message, index) => <div key={`${latest.id}-${index}`}><strong>{message.role}</strong><pre>{message.content}</pre></div>)}</div><div className="generation-question-call-response"><strong>模型回复</strong><pre>{latest.model_response || "模型尚未返回文本"}</pre></div>{latest.error_message && <div className="generation-question-state-error">{latest.error_message}</div>}</details>;
 }
 
-function GenerationInterventionEditor({ state, onIntervention }: { state: QuizGenerationQuestionState; onIntervention: (position: number, action: "retry" | "accept" | "replace" | "edit", question?: Record<string, unknown>) => Promise<void> }) {
+function formatGenerationCalls(calls: QuizGenerationCall[]): string {
+  const lines: string[] = [];
+  calls.forEach((call, index) => {
+    lines.push(
+      `===== 第 ${index + 1} 次模型调用 =====`,
+      `阶段：${call.phase}`,
+      `时间：${call.created_at}`,
+      `模型：${call.model_name || "未记录"}`,
+      `状态：${call.status === "success" ? "成功" : "失败"}`,
+      `输入 token：${call.input_tokens === null ? "未返回" : call.input_tokens.toLocaleString()}`,
+      `输出 token：${call.output_tokens === null ? "未返回" : call.output_tokens.toLocaleString()}`,
+      `总 token：${call.total_tokens === null ? "未返回" : call.total_tokens.toLocaleString()}`,
+      "",
+      "--- 输入 Prompt ---",
+    );
+    call.request_messages.forEach((message) => lines.push(`[${message.role}]`, message.content));
+    lines.push("", "--- 模型回复 ---", call.model_response || "模型尚未返回文本");
+    if (call.error_message) lines.push("", "--- 错误 ---", call.error_message);
+    lines.push("");
+  });
+  return lines.join("\n");
+}
+
+function formatGenerationTaskTrace(bookTitle: string, task: QuizGenerationTask, calls: QuizGenerationCall[]): string {
+  const lines = [
+    `资源：${bookTitle}`,
+    `任务 ID：${task.id}`,
+    `任务状态：${task.status}`,
+    `当前阶段：${task.current_phase}`,
+    `进度：${task.completed_questions} / ${task.total_questions} 道题`,
+  ];
+  task.question_states.forEach((state) => {
+    lines.push("", `===== 第 ${state.position} 题 =====`, `状态：${generationQuestionStatusLabels[state.status]}`, `调用次数：${state.attempts}`);
+    if (state.error_message) lines.push(`错误：${state.error_message}`);
+    if (state.question) lines.push("", "--- 题目草稿 ---", JSON.stringify(state.question, null, 2));
+    const questionCalls = calls.filter((call) => call.question_position === state.position);
+    if (questionCalls.length) lines.push("", formatGenerationCalls(questionCalls));
+  });
+  const unassigned = calls.filter((call) => call.question_position === null);
+  if (unassigned.length) lines.push("", "===== 未关联题目调用 =====", formatGenerationCalls(unassigned));
+  return lines.join("\n");
+}
+
+function QuestionDraftPreview({ question }: { question: Partial<Question> | null }) {
+  if (!question) return null;
+  const draft = question as Record<string, unknown>;
+  const options = Array.isArray(draft.options) ? draft.options as { id?: string; text?: string }[] : [];
+  const correctAnswers = Array.isArray(draft.correct_answers) ? draft.correct_answers.map(String) : [];
+  const rubric = Array.isArray(draft.grading_rubric) ? draft.grading_rubric as Record<string, unknown>[] : [];
+  const sourceChunks = Array.isArray(draft.source_chunk_ids) ? draft.source_chunk_ids.map(String) : [];
+  const quoteEntries = Array.isArray(draft.quote_entry_ids) ? draft.quote_entry_ids.map(String) : [];
+  return <details className="generation-question-preview"><summary>查看完整题目草稿</summary><div className="generation-question-draft"><strong>题干</strong><p>{String(draft.prompt || "尚未生成题干")}</p>{options.length > 0 && <><strong>选项</strong><ol>{options.map((option) => <li key={String(option.id)}>{String(option.id || "")}. {String(option.text || "")}{option.id && correctAnswers.includes(option.id) ? "（正确答案）" : ""}</li>)}</ol></>}{<><strong>正确答案</strong><p>{correctAnswers.length ? correctAnswers.join("、") : "无（问答题）"}</p></>}{typeof draft.explanation === "string" && draft.explanation && <><strong>解析</strong><p>{draft.explanation}</p></>}{typeof draft.knowledge_point === "string" && draft.knowledge_point && <><strong>知识点</strong><p>{draft.knowledge_point}</p></>}{typeof draft.reference_answer === "string" && draft.reference_answer && <><strong>参考答案</strong><p>{draft.reference_answer}</p></>}{rubric.length > 0 && <><strong>评分要点</strong><ul>{rubric.map((item, index) => <li key={index}>{String(item.point || "评分要点")}{item.score !== undefined ? `（${String(item.score)}分）` : ""}</li>)}</ul></>}{(sourceChunks.length > 0 || quoteEntries.length > 0) && <><strong>来源 ID</strong><p>{sourceChunks.length > 0 ? `PDF：${sourceChunks.join("、")}` : ""}{sourceChunks.length > 0 && quoteEntries.length > 0 ? "；" : ""}{quoteEntries.length > 0 ? `台词：${quoteEntries.join("、")}` : ""}</p></>}</div></details>;
+}
+
+function GenerationInterventionEditor({ state, taskStatus, onIntervention }: { state: QuizGenerationQuestionState; taskStatus: QuizGenerationTask["status"]; onIntervention: (position: number, action: "retry" | "accept" | "replace" | "edit", question?: Record<string, unknown>) => Promise<void> }) {
   const draft = state.question || {};
   const [prompt, setPrompt] = useState(String(draft.prompt || ""));
   const [optionsText, setOptionsText] = useState((draft.options || []).map((option) => `${option.id}. ${option.text}`).join("\n"));
@@ -274,6 +381,7 @@ function GenerationInterventionEditor({ state, onIntervention }: { state: QuizGe
   const [knowledgePoint, setKnowledgePoint] = useState(String(draft.knowledge_point || ""));
   const [referenceAnswer, setReferenceAnswer] = useState(String(draft.reference_answer || ""));
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(state.status === "awaiting_intervention");
 
   useEffect(() => {
     setPrompt(String(draft.prompt || ""));
@@ -283,6 +391,10 @@ function GenerationInterventionEditor({ state, onIntervention }: { state: QuizGe
     setKnowledgePoint(String(draft.knowledge_point || ""));
     setReferenceAnswer(String(draft.reference_answer || ""));
   }, [state.position, state.updated_at]);
+
+  useEffect(() => {
+    if (state.status === "awaiting_intervention") setEditing(true);
+  }, [state.status]);
 
   async function run(action: "retry" | "accept" | "replace" | "edit", question?: Record<string, unknown>) {
     setBusy(true);
@@ -314,5 +426,6 @@ function GenerationInterventionEditor({ state, onIntervention }: { state: QuizGe
     });
   }
 
-  return <form className="generation-intervention-editor" onSubmit={(event) => void saveEdit(event)}><div className="generation-intervention-editor-heading"><Edit3 size={14} /><strong>人工处理第 {state.position} 题</strong></div><label>题干<textarea aria-label={`第${state.position}题人工题干`} onChange={(event) => setPrompt(event.target.value)} rows={2} value={prompt} /></label>{state.question_type !== "short" && <><label>选项（每行一个，例如 A. 选项内容）<textarea aria-label={`第${state.position}题选项`} onChange={(event) => setOptionsText(event.target.value)} rows={4} value={optionsText} /></label><label>正确答案（用逗号分隔）<input aria-label={`第${state.position}题正确答案`} onChange={(event) => setCorrectAnswers(event.target.value)} value={correctAnswers} /></label></>}{state.question_type === "short" && <label>参考答案<textarea aria-label={`第${state.position}题参考答案`} onChange={(event) => setReferenceAnswer(event.target.value)} rows={3} value={referenceAnswer} /></label>}<label>解析<textarea aria-label={`第${state.position}题解析`} onChange={(event) => setExplanation(event.target.value)} rows={2} value={explanation} /></label><label>知识点<input aria-label={`第${state.position}题知识点`} onChange={(event) => setKnowledgePoint(event.target.value)} value={knowledgePoint} /></label><div className="generation-intervention-actions"><button className="button button-primary" disabled={busy || !prompt.trim()} type="submit"><Save size={14} />保存调整并继续</button>{state.question && <button className="button button-secondary" disabled={busy} onClick={() => void run("accept")} type="button"><Check size={14} />确认题目可用</button>}<button className="button button-secondary" disabled={busy} onClick={() => void run("retry")} type="button"><RotateCcw size={14} />重试本题</button><button className="button button-secondary" disabled={busy} onClick={() => void run("replace")} type="button"><RefreshCcw size={14} />换题重出</button></div></form>;
+  if (!editing && state.question) return <button className="button button-quiet generation-question-edit-trigger" onClick={() => setEditing(true)} type="button"><Edit3 size={14} />人工调整本题</button>;
+  return <form className="generation-intervention-editor" onSubmit={(event) => void saveEdit(event)}><div className="generation-intervention-editor-heading"><Edit3 size={14} /><strong>人工处理第 {state.position} 题</strong></div><label>题干<textarea aria-label={`第${state.position}题人工题干`} onChange={(event) => setPrompt(event.target.value)} rows={2} value={prompt} /></label>{state.question_type !== "short" && <><label>选项（每行一个，例如 A. 选项内容）<textarea aria-label={`第${state.position}题选项`} onChange={(event) => setOptionsText(event.target.value)} rows={4} value={optionsText} /></label><label>正确答案（用逗号分隔）<input aria-label={`第${state.position}题正确答案`} onChange={(event) => setCorrectAnswers(event.target.value)} value={correctAnswers} /></label></>}{state.question_type === "short" && <label>参考答案<textarea aria-label={`第${state.position}题人工参考答案`} onChange={(event) => setReferenceAnswer(event.target.value)} rows={3} value={referenceAnswer} /></label>}<label>解析<textarea aria-label={`第${state.position}题解析`} onChange={(event) => setExplanation(event.target.value)} rows={2} value={explanation} /></label><label>知识点<input aria-label={`第${state.position}题知识点`} onChange={(event) => setKnowledgePoint(event.target.value)} value={knowledgePoint} /></label><div className="generation-intervention-actions"><button className="button button-primary" disabled={busy || !prompt.trim()} type="submit"><Save size={14} />保存调整并继续</button>{state.question && <button className="button button-secondary" disabled={busy} onClick={() => void run("accept")} type="button"><Check size={14} />确认题目可用</button>}{["awaiting_intervention", "failed"].includes(taskStatus) && <><button className="button button-secondary" disabled={busy} onClick={() => void run("retry")} type="button"><RotateCcw size={14} />重试本题</button><button className="button button-secondary" disabled={busy} onClick={() => void run("replace")} type="button"><RefreshCcw size={14} />换题重出</button></>}</div></form>;
 }
