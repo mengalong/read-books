@@ -6,7 +6,8 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { ErrorState, SourceModeNotice } from "@/components/ui";
-import { ApiError, getQuizExport, promoteQuestionToBank } from "@/lib/api";
+import { QuizQualityReviewPanel } from "@/components/quiz-quality-review-panel";
+import { ApiError, getQuizExport, getQuizQualityReview, promoteQuestionToBank, requestQuizQualityReview } from "@/lib/api";
 import type { Question, Quiz } from "@/lib/types";
 
 const questionTypeLabels: Record<Question["question_type"], string> = {
@@ -25,6 +26,7 @@ export default function QuizPreviewPage() {
   const [bulkPromoting, setBulkPromoting] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ completed: 0, total: 0 });
   const [bankError, setBankError] = useState("");
+  const [qualityReviewBusy, setQualityReviewBusy] = useState(false);
 
   useEffect(() => {
     getQuizExport(params.quizId)
@@ -36,11 +38,48 @@ export default function QuizPreviewPage() {
       .finally(() => setLoading(false));
   }, [params.quizId]);
 
+  useEffect(() => {
+    if (!quiz || !["pending", "processing"].includes(quiz.quality_review_status)) return;
+    const timer = window.setInterval(() => {
+      getQuizQualityReview(params.quizId)
+        .then((review) => applyQualityReview(review))
+        .catch(() => undefined);
+    }, 2200);
+    return () => window.clearInterval(timer);
+  }, [params.quizId, quiz?.quality_review_status]);
+
   if (loading) return <div className="page-wrap"><div className="loading-state">正在打开试卷预览……</div></div>;
   if (!quiz) return <div className="page-wrap"><ErrorState message={error || "未找到这套试卷"} /></div>;
 
   const quizId = quiz.id;
   const remainingQuestions = quiz.questions.filter((question) => !bankedQuestionIds.has(question.id));
+
+  function applyQualityReview(review: Awaited<ReturnType<typeof getQuizQualityReview>>) {
+    setQuiz((current) => current ? {
+      ...current,
+      quality_review_status: review.status,
+      quality_review_task_id: review.task_id,
+      quality_review_question_id: review.question_id,
+      quality_review_result: review.result,
+      quality_review_error: review.error,
+      quality_review_requested_at: review.requested_at,
+      quality_review_completed_at: review.completed_at,
+    } : current);
+  }
+
+  async function handleQualityReview() {
+    if (!quiz || qualityReviewBusy) return;
+    setQualityReviewBusy(true);
+    setError("");
+    try {
+      const review = await requestQuizQualityReview(quiz.id);
+      applyQualityReview(review);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "试卷审查任务创建失败");
+    } finally {
+      setQualityReviewBusy(false);
+    }
+  }
 
   async function promoteOne(question: Question) {
     if (bankedQuestionIds.has(question.id) || promotingQuestionIds.has(question.id)) return;
@@ -97,6 +136,7 @@ export default function QuizPreviewPage() {
         <div className="quiz-overview-actions"><Link className="button button-secondary" href={`/quizzes/${quiz.id}/generation-debug`}><Code2 size={15} />查看出题过程</Link><Link className="button button-secondary" href={`/quizzes/${quiz.id}/edit?return_to=preview`}><LibraryBig size={15} />管理题库题目</Link><Link className="button button-secondary" href={`/quizzes/${quiz.id}`}><ArrowLeft size={15} />返回概览</Link></div>
       </header>
 
+      <QuizQualityReviewPanel busy={qualityReviewBusy} onRequest={() => void handleQualityReview()} quiz={quiz} />
       <div className="quiz-preview-bank-toolbar"><div className="quiz-preview-summary"><FileQuestion size={16} /><strong>{quiz.questions.length} 道题</strong><span>{quiz.max_score} 分 · {quiz.duration_minutes} 分钟</span></div><button className="button button-primary" disabled={bulkPromoting || remainingQuestions.length === 0} onClick={() => void promoteAll()} type="button">{bulkPromoting ? <><LoaderCircle className="spin" size={15} />正在回流 {bulkProgress.completed}/{bulkProgress.total}</> : remainingQuestions.length === 0 ? <><Check size={15} />已全部回流题库</> : <><LibraryBig size={15} />一键回流剩余 {remainingQuestions.length} 题</>}</button></div>
       {bankError && <div className="quiz-preview-bank-error"><AlertTriangle size={16} /><span>{bankError}</span></div>}
       <section className="quiz-preview-list">

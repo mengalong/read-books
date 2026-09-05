@@ -630,6 +630,7 @@ test("书籍页选择试卷先看预览，管理题库后按顺序返回", async
 
   await page.getByRole("link", { name: "选择这套" }).click();
   await expect(page).toHaveURL(/\/quizzes\/quiz-1\/preview$/);
+  await expect(page.getByRole("button", { name: "一键审核全部题目" })).toBeVisible();
   await expect(page.getByText("正确答案", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("解析", { exact: true }).first()).toBeVisible();
   await expect(page.getByText(/选项 A/).first()).toBeVisible();
@@ -728,7 +729,7 @@ test("试卷概览支持发起模型合理性审查并展示逐题建议", async
   });
 
   await page.goto("/quizzes/quiz-quality");
-  await page.getByRole("button", { name: "开始模型审查" }).click();
+  await page.getByRole("button", { name: "一键审核全部题目" }).click();
   await expect(page.getByText("建议修改", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("题干缺少必要限定。" )).toBeVisible();
   await expect(page.getByText("补充事件背景。" )).toBeVisible();
