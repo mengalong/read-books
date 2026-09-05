@@ -94,7 +94,7 @@ export default function QuizPreviewPage() {
       <SourceModeNotice sourceMode={quiz.source_mode} />
       <header className="page-header quiz-preview-header">
         <div><div className="eyebrow"><Eye size={13} />Quiz preview</div><h1 className="page-title">{quiz.title}</h1><p className="page-description">快速查看整套试卷的题目、答案和解析，不会创建复习记录。</p></div>
-        <div className="quiz-overview-actions"><Link className="button button-secondary" href={`/quizzes/${quiz.id}/generation-debug`}><Code2 size={15} />查看出题过程</Link><Link className="button button-secondary" href={`/quizzes/${quiz.id}`}><ArrowLeft size={15} />返回概览</Link></div>
+        <div className="quiz-overview-actions"><Link className="button button-secondary" href={`/quizzes/${quiz.id}/generation-debug`}><Code2 size={15} />查看出题过程</Link><Link className="button button-secondary" href={`/quizzes/${quiz.id}/edit?return_to=preview`}><LibraryBig size={15} />管理题库题目</Link><Link className="button button-secondary" href={`/quizzes/${quiz.id}`}><ArrowLeft size={15} />返回概览</Link></div>
       </header>
 
       <div className="quiz-preview-bank-toolbar"><div className="quiz-preview-summary"><FileQuestion size={16} /><strong>{quiz.questions.length} 道题</strong><span>{quiz.max_score} 分 · {quiz.duration_minutes} 分钟</span></div><button className="button button-primary" disabled={bulkPromoting || remainingQuestions.length === 0} onClick={() => void promoteAll()} type="button">{bulkPromoting ? <><LoaderCircle className="spin" size={15} />正在回流 {bulkProgress.completed}/{bulkProgress.total}</> : remainingQuestions.length === 0 ? <><Check size={15} />已全部回流题库</> : <><LibraryBig size={15} />一键回流剩余 {remainingQuestions.length} 题</>}</button></div>

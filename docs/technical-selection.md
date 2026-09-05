@@ -299,7 +299,7 @@ export type AppConfig = {
 
 出题任务支持实时人工控制：`POST /api/quiz-generation-tasks/{task_id}/cancel` 将 pending/processing/awaiting_intervention 任务标记为 cancelled，后台线程在模型调用返回前后检查该状态，不再写入后续题目或创建试卷；`DELETE /api/quiz-generation-tasks/{task_id}` 删除已终止或失败的任务及其 `model_usage_records`。进行中的任务必须先终止再删除，待人工处理的未完成任务同样显示“终止出题”而不是直接删除。任务页面可复制整套当前任务或单题的 Prompt、模型回复、草稿和 Token；任何已生成题目在任务完成前都可人工调整，结构/来源校验失败时会从最近一次模型原始回复回填可编辑草稿。
 
-已完成试卷提供 `GET /api/quizzes/{quiz_id}/export` 导出接口，返回 `read-books-quiz-validation-v1` 结构，包含完整试卷答案、解析、评分要点和来源依据，并附带给其他模型的校验用途说明。试卷概览页的“预览题目与答案”进入只读预览页，不创建复习记录；“导出题目与答案”将同一结构下载为 JSON 文件。
+已完成试卷提供 `GET /api/quizzes/{quiz_id}/export` 导出接口，返回 `read-books-quiz-validation-v1` 结构，包含完整试卷答案、解析、评分要点和来源依据，并附带给其他模型的校验用途说明。资源详情页的“选择这套”直接进入只读预览页；预览页的“管理题库题目”通过 `return_to=preview` 进入编辑页，编辑页返回时恢复预览上下文，不创建复习记录。“导出题目与答案”将同一结构下载为 JSON 文件。
 
 试卷概览页还提供模型合理性审查。`POST /api/quizzes/{quiz_id}/quality-review` 创建整套后台审查任务，`GET /api/quizzes/{quiz_id}/quality-review` 查询状态和结果；编辑页通过 `POST /api/quizzes/{quiz_id}/questions/{question_id}/quality-review` 只复审指定题目。状态为 `not_started / pending / processing / completed / failed`。审查请求只发送紧凑的题目字段和有限的来源摘录，结果保存于试卷的 `quality_review_*` 字段，格式为 `quiz_quality_review.v2`，包含整套 `score`、逐题 `question_reviews`（分数、结论、优点、问题）和详细修改稿（建议题干、完整选项、答案、解析、知识点及问答评分要点），并记录本次 `reviewed_question_positions`。选择题审查区分正确选项与干扰项：只有 `correct_answers` 标记的选项要求来源支持，未标记选项可以故意错误；干扰项只检查是否造成多解、误导或完全失去迷惑性。模型只给建议，不直接写入题目；用户确认建议后仍通过原有试卷编辑接口修改。真实 Provider 的调用计入 `model_usage_records`，服务重启会恢复未完成的整套或单题审查任务。模拟 Provider 提供结构检查兜底，便于本地联调。
 

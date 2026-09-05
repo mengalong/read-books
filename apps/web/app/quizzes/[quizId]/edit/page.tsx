@@ -2,7 +2,7 @@
 
 import { AlertCircle, ArrowLeft, Clock3, Code2, FileQuestion } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ErrorState, SourceModeNotice } from "@/components/ui";
@@ -18,6 +18,7 @@ const questionTypeLabels: Record<Question["question_type"], string> = {
 
 export default function QuizEditPage() {
   const params = useParams<{ quizId: string }>();
+  const searchParams = useSearchParams();
   const [quiz, setQuiz] = useState<Quiz | null>(null);
   const [dirtyQuestionIds, setDirtyQuestionIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -112,9 +113,13 @@ export default function QuizEditPage() {
   if (loading) return <div className="page-wrap"><div className="loading-state">正在打开试卷编辑器……</div></div>;
   if (!quiz) return <div className="page-wrap"><ErrorState message={error || "未找到这套试卷"} /></div>;
 
+  const returnToPreview = searchParams.get("return_to") === "preview";
+  const backHref = returnToPreview ? `/quizzes/${quiz.id}/preview` : `/books/${quiz.book_id}`;
+  const backLabel = returnToPreview ? "返回试卷预览" : `返回《${quiz.book_title}》`;
+
   return (
     <div className="page-wrap">
-      <Link className="back-link" href={`/books/${quiz.book_id}`} onClick={(event) => { if (dirtyQuestionIds.size > 0 && !window.confirm("还有题目未保存，确定离开吗？未保存内容会丢失。")) event.preventDefault(); }}><ArrowLeft size={14} />返回《{quiz.book_title}》</Link>
+      <Link className="back-link" href={backHref} onClick={(event) => { if (dirtyQuestionIds.size > 0 && !window.confirm("还有题目未保存，确定离开吗？未保存内容会丢失。")) event.preventDefault(); }}><ArrowLeft size={14} />{backLabel}</Link>
       {error && <div className="toast-error">{error}</div>}
       {dirtyQuestionIds.size > 0 && <div className="question-edit-unsaved-banner"><AlertCircle size={17} /><div><strong>有未保存修改</strong><span>{dirtyQuestionIds.size} 道题已发生变化，请逐题点击“保存本题”。离开页面时系统会再次提醒。</span></div></div>}
       <SourceModeNotice sourceMode={quiz.source_mode} />
