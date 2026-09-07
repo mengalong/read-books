@@ -45,6 +45,14 @@ dev
 
 生产或本地长期使用时仍然以自托管服务为主，不以 serverless 部署为第一目标。
 
+### 2.1 日常记录领域边界
+
+日常记录与阅读复习采用同一仓库和同一部署单元，共享用户、个人工作空间、模型配置、后台任务恢复和 Token 统计；业务模型保持独立：阅读领域继续使用书籍、资料、试卷和复习任务，日常领域使用 `JournalCapture`、`JournalDay` 和 `JournalItem`。
+
+日常整理使用独立 `JournalAiProvider`。Mock Provider 以确定性规则支持本地联调，HTTP Provider 复用当前 OpenAI 兼容模型配置，但出于隐私考虑只记录模型名称、Token、耗时和调用结果，不向 `model_usage_records` 写入日记 Prompt 和原始模型回复。整理任务使用进程内后台线程，服务重启时恢复未完成任务；后续与出题任务一起迁移到独立 Worker。
+
+快速记录的用户显式类型是强约束，模型只对 `note` 进行补充推断；推断项目进入待确认状态。日记草稿和长期项目都保存来源记录关系，模型输出不能覆盖原始记录。
+
 ## 3. 本地 Python 环境
 
 后端开发使用 conda 虚拟环境：
@@ -138,6 +146,10 @@ conda activate read-books
 - `GET /quizzes/:quizId`
 - `POST /quizzes/:quizId/reviews`
 - `GET /reviews`
+- `GET /api/journal/days/:localDate`
+- `POST /api/journal/captures`
+- `POST /api/journal/days/:localDate/organize`
+- `GET /api/journal/items`
 - `GET /reviews/:reviewId`
 - `POST /reviews/:reviewId/submit`
 - `GET /reviews/:reviewId/result`

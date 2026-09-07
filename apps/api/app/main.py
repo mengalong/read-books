@@ -17,6 +17,7 @@ from app.routers.materials import router as materials_router
 from app.routers.site import router as site_router
 from app.routers.settings import router as settings_router
 from app.routers.wechat import router as wechat_router
+from app.routers.journal import router as journal_router
 from app.routers.exams import admin_router as admin_exams_router
 from app.routers.exams import public_router as public_exams_router
 from app.routers.exams import router as exams_router
@@ -28,6 +29,7 @@ from app.services.material_parser import parse_material_document, recover_materi
 from app.services.material_understanding import refresh_material_understanding
 from app.services.exam_sharing import recover_exam_grading_tasks, launch_exam_grading
 from app.services.quiz_quality_review import recover_quality_review_tasks, run_quiz_quality_review
+from app.services.journal_service import recover_journal_organization_tasks, organize_day
 
 settings = get_settings()
 
@@ -88,6 +90,8 @@ async def lifespan(_: FastAPI):
             args=(quiz_id, task_id, question_id),
             daemon=True,
         ).start()
+    for day_id in recover_journal_organization_tasks():
+        threading.Thread(target=organize_day, args=(day_id,), daemon=True).start()
     yield
 
 
@@ -118,6 +122,7 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(exams_router, prefix="/api")
 app.include_router(admin_exams_router, prefix="/api")
 app.include_router(public_exams_router, prefix="/api")
+app.include_router(journal_router, prefix="/api")
 
 
 @app.get("/api/health")

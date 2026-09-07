@@ -49,6 +49,11 @@ import type {
   SiteFooterConfiguration,
   WechatIdentityResponse,
   WechatLoginConfiguration,
+  JournalCapture,
+  JournalDay,
+  JournalItem,
+  JournalCaptureType,
+  JournalItemType,
 } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
@@ -119,6 +124,51 @@ export function getBooks(search = "", status?: ReadingStatus, shelfStatus: Shelf
   params.set("shelf_status", shelfStatus);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return apiFetch<BookSummary[]>(`/books${suffix}`);
+}
+
+export function getJournalDay(localDate: string) {
+  return apiFetch<JournalDay>(`/journal/days/${localDate}`);
+}
+
+export function createJournalCapture(payload: {
+  content: string;
+  capture_type: JournalCaptureType;
+  local_date?: string;
+}) {
+  return apiFetch<JournalCapture>("/journal/captures", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteJournalCapture(captureId: string) {
+  return apiFetch<void>(`/journal/captures/${captureId}`, { method: "DELETE" });
+}
+
+export function organizeJournalDay(localDate: string) {
+  return apiFetch<JournalDay>(`/journal/days/${localDate}/organize`, { method: "POST" });
+}
+
+export function updateJournalDay(localDate: string, payload: { journal_text?: string; confirm?: boolean }) {
+  return apiFetch<JournalDay>(`/journal/days/${localDate}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getJournalItems(itemType?: JournalItemType, status?: string) {
+  const params = new URLSearchParams();
+  if (itemType) params.set("item_type", itemType);
+  if (status) params.set("status", status);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<JournalItem[]>(`/journal/items${suffix}`);
+}
+
+export function updateJournalItem(itemId: string, payload: { title?: string; description?: string; status?: string; due_date?: string | null }) {
+  return apiFetch<JournalItem>(`/journal/items/${itemId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getAdminBooks(search = "", ownerId?: string, shelfStatus?: ShelfStatus) {

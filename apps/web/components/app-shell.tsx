@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BarChart3, BookMarked, BookOpenText, ClipboardCheck, Clock3, FileCode2, History, LibraryBig, Link2, LogOut, Plus, ScanLine, Settings2, Users } from "lucide-react";
+import { Activity, BarChart3, BookMarked, BookOpenText, ClipboardCheck, Clock3, FileCode2, History, LibraryBig, Link2, LogOut, NotebookPen, Plus, ScanLine, Settings2, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -13,6 +13,7 @@ import { SiteFooter } from "@/components/site-footer";
 const navigation = [
   { href: "/", label: "我的内容库", icon: LibraryBig },
   { href: "/books/new", label: "添加资源", icon: Plus },
+  { href: "/journal", label: "日常记录", icon: NotebookPen },
   { href: "/reviews", label: "复习记录", icon: History },
   { href: "/exam-management", label: "考试管理", icon: ClipboardCheck },
 ];

@@ -34,6 +34,70 @@ class BookUpdate(BaseModel):
     tags: list[str] | None = None
 
 
+JournalCaptureType = Literal["note", "todo", "idea", "want_read", "want_watch"]
+JournalItemType = Literal["todo", "idea", "want_read", "want_watch"]
+
+
+class JournalCaptureCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=10_000)
+    capture_type: JournalCaptureType = "note"
+    local_date: date | None = None
+    captured_at: datetime | None = None
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class JournalCaptureResponse(ApiModel):
+    id: str
+    content: str
+    capture_type: JournalCaptureType
+    local_date: date
+    captured_at: datetime
+    tags: list[str]
+    created_at: datetime
+
+
+class JournalItemResponse(BaseModel):
+    id: str
+    item_type: JournalItemType
+    title: str
+    description: str
+    status: str
+    source_capture_ids: list[str]
+    confidence: float | None
+    due_date: date | None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class JournalDayUpdate(BaseModel):
+    journal_text: str | None = Field(default=None, max_length=20_000)
+    confirm: bool | None = None
+
+
+class JournalItemUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=240)
+    description: str | None = Field(default=None, max_length=2_000)
+    status: str | None = Field(default=None, max_length=30)
+    due_date: date | None = None
+
+
+class JournalDayResponse(BaseModel):
+    id: str
+    local_date: date
+    organization_status: Literal["not_started", "pending", "processing", "completed", "failed"]
+    journal_text: str
+    summary: dict[str, Any] = Field(default_factory=dict)
+    organization_task_id: str | None
+    organization_error: str | None
+    organized_at: datetime | None
+    confirmed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    captures: list[JournalCaptureResponse] = Field(default_factory=list)
+    items: list[JournalItemResponse] = Field(default_factory=list)
+
+
 class BookStats(ApiModel):
     pdf_count: int = 0
     completed_pdf_count: int = 0

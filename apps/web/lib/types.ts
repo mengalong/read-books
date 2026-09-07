@@ -2,6 +2,49 @@ export type ResourceType = "book" | "movie" | "tv_series";
 export type ReadingStatus = "reading" | "finished" | "reviewing";
 export type ShelfStatus = "active" | "unlisted";
 
+export type JournalCaptureType = "note" | "todo" | "idea" | "want_read" | "want_watch";
+export type JournalItemType = "todo" | "idea" | "want_read" | "want_watch";
+
+export type JournalCapture = {
+  id: string;
+  content: string;
+  capture_type: JournalCaptureType;
+  local_date: string;
+  captured_at: string;
+  tags: string[];
+  created_at: string;
+};
+
+export type JournalItem = {
+  id: string;
+  item_type: JournalItemType;
+  title: string;
+  description: string;
+  status: string;
+  source_capture_ids: string[];
+  confidence: number | null;
+  due_date: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type JournalDay = {
+  id: string;
+  local_date: string;
+  organization_status: "not_started" | "pending" | "processing" | "completed" | "failed";
+  journal_text: string;
+  summary: { highlights?: string[]; item_ids?: string[]; capture_count?: number };
+  organization_task_id: string | null;
+  organization_error: string | null;
+  organized_at: string | null;
+  confirmed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  captures: JournalCapture[];
+  items: JournalItem[];
+};
+
 export type ModelProviderMode = "mock" | "openai_compatible";
 
 export type ModelConfiguration = {

@@ -184,6 +184,72 @@ class AuditLog(Base):
     )
 
 
+class JournalCapture(TimestampMixin, Base):
+    """An append-only quick note captured during the day."""
+
+    __tablename__ = "journal_captures"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    content: Mapped[str] = mapped_column(Text)
+    capture_type: Mapped[str] = mapped_column(String(20), default="note", index=True)
+    local_date: Mapped[date] = mapped_column(Date, index=True)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+
+
+class JournalDay(TimestampMixin, Base):
+    """The editable AI draft and organization status for one local calendar day."""
+
+    __tablename__ = "journal_days"
+    __table_args__ = (UniqueConstraint("workspace_id", "local_date"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    local_date: Mapped[date] = mapped_column(Date, index=True)
+    organization_status: Mapped[str] = mapped_column(
+        String(20), default="not_started", index=True
+    )
+    journal_text: Mapped[str] = mapped_column(Text, default="")
+    summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    organization_task_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    organization_error: Mapped[str | None] = mapped_column(Text)
+    organized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class JournalItem(TimestampMixin, Base):
+    """A long-lived item extracted from one or more quick captures."""
+
+    __tablename__ = "journal_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    item_type: Mapped[str] = mapped_column(String(20), index=True)
+    title: Mapped[str] = mapped_column(String(240))
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="inbox", index=True)
+    source_capture_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    due_date: Mapped[date | None] = mapped_column(Date, index=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
 class Book(TimestampMixin, Base):
     __tablename__ = "books"
 
