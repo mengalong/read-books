@@ -144,7 +144,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           })}
           <div className="nav-group-label">日常记录</div>
           {journalNavigation.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href || pathname.startsWith(`${href}/`);
+            const active = href === "/journal" ? pathname === "/journal" : pathname === href || pathname.startsWith(`${href}/`);
             return <Link className={active ? "active" : ""} href={href} key={href}><Icon size={17} strokeWidth={1.8} />{label}</Link>;
           })}
           {user.role === "admin" && <>
