@@ -57,6 +57,33 @@ def _item_status(item_type: str, *, explicit: bool) -> str:
     return "open" if item_type == "todo" else "inbox"
 
 
+def _structured_metadata(
+    item_type: str,
+    raw_metadata: Any,
+    *,
+    title: str,
+    description: str,
+    source_captures: list[JournalCapture],
+) -> dict[str, Any]:
+    metadata = {
+        key: value
+        for key, value in (raw_metadata.items() if isinstance(raw_metadata, dict) else [])
+        if key in {"media_title", "reason", "mentioned_at", "creator", "media_kind"}
+        and isinstance(value, (str, int, float, bool))
+    }
+    if item_type in {"want_read", "want_watch"}:
+        metadata.setdefault("media_title", title)
+        metadata.setdefault("reason", description or title)
+        if source_captures:
+            mentioned_at = source_captures[0].captured_at
+            metadata.setdefault(
+                "mentioned_at",
+                mentioned_at.isoformat() if hasattr(mentioned_at, "isoformat") else str(mentioned_at),
+            )
+        metadata.setdefault("media_kind", "book" if item_type == "want_read" else "movie_or_tv")
+    return metadata
+
+
 def upsert_journal_item(
     db: Session,
     *,
@@ -69,6 +96,7 @@ def upsert_journal_item(
     confidence: float | None = None,
     due_date: date | None = None,
     explicit: bool = False,
+    metadata: dict[str, Any] | None = None,
 ) -> JournalItem | None:
     if item_type not in ITEM_TYPES:
         return None
@@ -76,12 +104,20 @@ def upsert_journal_item(
     if not clean_title:
         return None
     source_ids = list(dict.fromkeys(source_capture_ids or []))
+    structured_metadata = dict(metadata or {})
+    if item_type in {"want_read", "want_watch"}:
+        media_match = re.search(r"《([^》]{1,160})》", clean_title)
+        structured_metadata.setdefault(
+            "media_title", media_match.group(1).strip() if media_match else clean_title
+        )
+        structured_metadata.setdefault("reason", clean_title)
+        structured_metadata.setdefault("media_kind", "book" if item_type == "want_read" else "movie_or_tv")
+    dedupe_key = str(structured_metadata.get("media_title") or clean_title)
     candidates = db.scalars(
         select(JournalItem)
         .where(
             JournalItem.workspace_id == workspace_id,
             JournalItem.item_type == item_type,
-            JournalItem.status.not_in({"dismissed", "cancelled", "archived"}),
         )
         .order_by(JournalItem.updated_at.desc())
         .limit(100)
@@ -90,7 +126,12 @@ def upsert_journal_item(
         (
             candidate
             for candidate in candidates
-            if _title_key(candidate.title) == _title_key(clean_title)
+            if (
+                set(candidate.source_capture_ids or []).intersection(source_ids)
+                or _title_key(candidate.title) == _title_key(clean_title)
+                or _title_key(str((candidate.metadata_json or {}).get("media_title") or ""))
+                == _title_key(dedupe_key)
+            )
         ),
         None,
     )
@@ -99,13 +140,18 @@ def upsert_journal_item(
             workspace_id=workspace_id,
             created_by_user_id=user_id,
             item_type=item_type,
-            title=clean_title,
+            title=str(structured_metadata.get("media_title") or clean_title)[:240],
             description=str(description or "").strip()[:2_000],
             status=_item_status(item_type, explicit=explicit),
             source_capture_ids=source_ids,
             confidence=confidence,
             due_date=due_date,
-            metadata_json={"source": "explicit" if explicit else "ai", "needs_confirmation": not explicit},
+            metadata_json={
+                **structured_metadata,
+                "dedupe_key": _title_key(dedupe_key),
+                "source": "explicit" if explicit else "ai",
+                "needs_confirmation": not explicit,
+            },
         )
         db.add(item)
         return item
@@ -118,6 +164,8 @@ def upsert_journal_item(
         item.confidence = max(item.confidence or 0, min(1.0, float(confidence)))
     if due_date is not None:
         item.due_date = due_date
+    if structured_metadata:
+        item.metadata_json = {**(item.metadata_json or {}), **structured_metadata}
     if explicit and item.status == "needs_review":
         item.status = _item_status(item_type, explicit=True)
         item.metadata_json = {**(item.metadata_json or {}), "needs_confirmation": False}
@@ -226,6 +274,9 @@ def organize_day(day_id: str, *, settings: Settings | None = None) -> None:
             )
             capture_ids = {capture.id for capture in captures}
             item_ids: list[str] = []
+            existing_items = db.scalars(
+                select(JournalItem).where(JournalItem.workspace_id == day.workspace_id)
+            ).all()
             for raw_item in organization.items:
                 item_type = str(raw_item.get("item_type") or "")
                 source_ids = _safe_source_ids(raw_item.get("source_capture_ids"), capture_ids)
@@ -245,6 +296,34 @@ def organize_day(day_id: str, *, settings: Settings | None = None) -> None:
                     if explicit_captures
                     else str(raw_item.get("title") or "")
                 )
+                structured_metadata = _structured_metadata(
+                    item_type,
+                    raw_item.get("metadata"),
+                    title=title,
+                    description=str(raw_item.get("description") or ""),
+                    source_captures=source_captures,
+                )
+                manual_override = next(
+                    (
+                        existing
+                        for existing in existing_items
+                        if set(existing.source_capture_ids or []).intersection(source_ids)
+                        and (existing.metadata_json or {}).get("manual_type_override") is True
+                    ),
+                    None,
+                )
+                if manual_override is not None:
+                    manual_override.source_capture_ids = list(
+                        dict.fromkeys((manual_override.source_capture_ids or []) + source_ids)
+                    )
+                    if structured_metadata:
+                        manual_override.metadata_json = {
+                            **(manual_override.metadata_json or {}),
+                            **structured_metadata,
+                        }
+                    db.flush()
+                    item_ids.append(manual_override.id)
+                    continue
                 confidence = raw_item.get("confidence")
                 if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
                     confidence = 1.0 if explicit else 0.65
@@ -266,6 +345,7 @@ def organize_day(day_id: str, *, settings: Settings | None = None) -> None:
                     confidence=float(confidence),
                     due_date=due_date,
                     explicit=explicit,
+                    metadata=structured_metadata,
                 )
                 if item is not None:
                     db.flush()

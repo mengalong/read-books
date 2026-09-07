@@ -67,6 +67,15 @@ def test_quick_captures_are_classified_and_organized(client):
     assert confirmed.status_code == 200
     assert confirmed.json()["status"] == "inbox"
 
+    before_rerun = {
+        item["id"]: item["status"]
+        for item in client.get(f"/api/journal/days/{local_date}").json()["items"]
+    }
+    rerun = client.post(f"/api/journal/days/{local_date}/organize", json={"writing_style": "lu_xun"})
+    assert rerun.status_code == 202
+    rerun_body = wait_for_day(client, local_date)
+    assert {item["id"]: item["status"] for item in rerun_body["items"]} == before_rerun
+
     rejected = client.patch(
         f"/api/journal/items/{items['todo']['id']}",
         json={"status": "dismissed"},
@@ -103,10 +112,14 @@ def test_journal_item_filters_and_day_edit(client):
     assert client.post(f"/api/journal/days/{local_date}/organize").status_code == 202
     body = wait_for_day(client, local_date)
     assert body["items"][0]["item_type"] == "want_read"
+    assert body["items"][0]["title"] == "夜晚的潜水艇"
+    assert body["items"][0]["metadata"]["media_title"] == "夜晚的潜水艇"
+    assert body["items"][0]["metadata"]["reason"]
+    assert body["items"][0]["metadata"]["mentioned_at"]
 
     filtered = client.get("/api/journal/items?item_type=want_read")
     assert filtered.status_code == 200
-    assert any(item["title"] == "想读《夜晚的潜水艇》" for item in filtered.json())
+    assert any(item["title"] == "夜晚的潜水艇" for item in filtered.json())
 
     edited = client.patch(
         f"/api/journal/days/{local_date}",

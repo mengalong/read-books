@@ -62,6 +62,24 @@ def _inferred_type(content: str) -> str | None:
     return None
 
 
+def _media_title(content: str) -> str:
+    match = re.search(r"《([^》]{1,160})》", content)
+    if match:
+        return match.group(1).strip()
+    return _compact(content, 120)
+
+
+def _media_metadata(item_type: str, content: str, captured_at: Any) -> dict[str, Any]:
+    if item_type not in {"want_read", "want_watch"}:
+        return {}
+    return {
+        "media_title": _media_title(content),
+        "reason": content,
+        "mentioned_at": str(captured_at or ""),
+        "media_kind": "book" if item_type == "want_read" else "movie_or_tv",
+    }
+
+
 def _mock_organization(
     captures: list[dict[str, Any]], local_date: date, writing_style: str = "natural"
 ) -> JournalOrganization:
@@ -91,14 +109,16 @@ def _mock_organization(
         item_type = capture_type if capture_type in ITEM_TYPES else _inferred_type(content)
         if item_type:
             grouped[item_type].append(content)
+            media_title = _media_title(content) if item_type in {"want_read", "want_watch"} else content
             items.append(
                 {
                     "item_type": item_type,
-                    "title": content,
+                    "title": media_title,
                     "description": "",
                     "source_capture_ids": [capture["id"]],
                     "confidence": 1.0 if capture_type in ITEM_TYPES else 0.65,
                     "due_date": None,
+                    "metadata": _media_metadata(item_type, content, capture.get("captured_at")),
                 }
             )
     style_openers = {

@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
-  Check,
   Copy,
   Film,
   Lightbulb,
@@ -18,7 +17,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ErrorState } from "@/components/ui";
 import {
@@ -85,21 +84,76 @@ function dayLabel(value: string) {
 
 function statusLabel(item: JournalItem) {
   if (item.status === "needs_review") return "待确认";
-  if (item.status === "dismissed") return "已打回";
-  if (item.item_type === "todo") return item.status === "done" ? "已完成" : item.status === "cancelled" ? "已取消" : "进行中";
+  if (item.status === "dismissed") return "已取消";
+  if (item.item_type === "todo") return item.status === "done" ? "已完成" : item.status === "cancelled" ? "已取消" : "已确认";
   if (item.status === "archived") return "已归档";
   if (item.status === "added") return "已采纳";
   if (item.status === "completed") return "已完成";
-  return "收件箱";
+  return "已确认";
 }
 
 function nextStatus(item: JournalItem) {
+  if (item.status === "needs_review") return item.item_type === "todo" ? "open" : "inbox";
+  if (item.status === "dismissed" || item.status === "archived" || item.status === "completed") {
+    return item.item_type === "todo" ? "open" : "inbox";
+  }
   if (item.item_type === "todo") return item.status === "done" ? "open" : "done";
-  if (item.status === "needs_review") return "inbox";
-  if (item.item_type === "idea") return item.status === "inbox" ? "archived" : "inbox";
-  if (item.status === "inbox") return "added";
-  if (item.status === "added") return "completed";
-  return "inbox";
+  return item.status;
+}
+
+function primaryItemAction(item: JournalItem) {
+  if (item.status === "needs_review") return "确认";
+  if (item.status === "dismissed" || item.status === "archived" || item.status === "completed") return "恢复";
+  if (item.item_type === "todo" && item.status === "done") return "重新打开";
+  if (item.item_type === "todo" && item.status === "open") return "完成";
+  return null;
+}
+
+function markdownInline(text: string, keyPrefix: string) {
+  return text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g).map((part, index) => {
+    const key = `${keyPrefix}-${index}`;
+    if (part.startsWith("`") && part.endsWith("`")) return <code key={key}>{part.slice(1, -1)}</code>;
+    if (part.startsWith("**") && part.endsWith("**")) return <strong key={key}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith("*") && part.endsWith("*")) return <em key={key}>{part.slice(1, -1)}</em>;
+    return <span key={key}>{part}</span>;
+  });
+}
+
+function MarkdownPreview({ value }: { value: string }) {
+  return <div className="journal-markdown-preview">{value.split(/\r?\n/).map((line, index) => {
+    const key = `markdown-${index}`;
+    if (!line.trim()) return <div className="markdown-spacer" key={key} />;
+    if (/^---+$/.test(line.trim())) return <hr key={key} />;
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) return createElement(`h${heading[1].length}`, { key }, markdownInline(heading[2], key));
+    const unordered = line.match(/^\s*[-*]\s+(.+)$/);
+    if (unordered) return <div className="markdown-list-item" key={key}><span>•</span><span>{markdownInline(unordered[1], key)}</span></div>;
+    const ordered = line.match(/^\s*(\d+)\.\s+(.+)$/);
+    if (ordered) return <div className="markdown-list-item" key={key}><span>{ordered[1]}.</span><span>{markdownInline(ordered[2], key)}</span></div>;
+    if (/^>\s?/.test(line)) return <blockquote key={key}>{markdownInline(line.replace(/^>\s?/, ""), key)}</blockquote>;
+    return <p key={key}>{markdownInline(line, key)}</p>;
+  })}</div>;
+}
+
+function DayItemCard({
+  item,
+  onStatus,
+  onTypeChange,
+  onReject,
+}: {
+  item: JournalItem;
+  onStatus: (item: JournalItem) => void;
+  onTypeChange: (item: JournalItem, itemType: JournalItemType) => void;
+  onReject: (item: JournalItem) => void;
+}) {
+  const Icon = itemIcons[item.item_type];
+  const rejected = item.status === "dismissed";
+  const primaryAction = primaryItemAction(item);
+  return <article className={`journal-item-card ${item.status === "done" ? "is-done" : ""}`}>
+    <div className="journal-item-card-head"><span className={`journal-item-icon item-${item.item_type}`}><Icon size={15} /></span><select aria-label={`修改${itemLabels[item.item_type]}归集类型`} className="journal-item-type-select" onChange={(event) => onTypeChange(item, event.target.value as JournalItemType)} value={item.item_type}>{Object.entries(itemLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><span className={`journal-item-status ${item.status}`}>{statusLabel(item)}</span></div>
+    <strong>{item.title}</strong>{item.description && <p>{item.description}</p>}
+    <div className="journal-item-card-actions">{primaryAction && <button className="button button-quiet journal-item-action" onClick={() => onStatus(item)} type="button">{primaryAction}</button>}{!rejected && item.status !== "done" && item.status !== "completed" && <button className="button button-quiet journal-item-action journal-item-reject" onClick={() => onReject(item)} type="button">取消归集</button>}</div>
+  </article>;
 }
 
 export default function JournalPage() {
@@ -109,10 +163,13 @@ export default function JournalPage() {
   const [captureType, setCaptureType] = useState<JournalCaptureType>("note");
   const [journalText, setJournalText] = useState("");
   const [writingStyle, setWritingStyle] = useState<JournalWritingStyle>("natural");
+  const [previewMode, setPreviewMode] = useState<"edit" | "preview">("edit");
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [lastAutosavedAt, setLastAutosavedAt] = useState<string | null>(null);
+  const editorRevision = useRef(0);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [organizing, setOrganizing] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [editingCaptureId, setEditingCaptureId] = useState<string | null>(null);
@@ -128,6 +185,7 @@ export default function JournalPage() {
       setDay(result);
       setJournalText(result.journal_text);
       setWritingStyle(result.writing_style);
+      setLastAutosavedAt(result.updated_at);
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "日常记录加载失败");
     } finally {
@@ -138,12 +196,33 @@ export default function JournalPage() {
   useEffect(() => { void loadDay(); }, [loadDay]);
 
   useEffect(() => {
+    if (!day || loading || (journalText === day.journal_text && writingStyle === day.writing_style)) return;
+    const timer = window.setTimeout(() => {
+      const revisionAtSave = editorRevision.current;
+      setAutoSaving(true);
+      updateJournalDay(localDate, { journal_text: journalText, writing_style: writingStyle })
+        .then((result) => {
+          if (revisionAtSave !== editorRevision.current) return;
+          setDay(result);
+          setJournalText(result.journal_text);
+          setWritingStyle(result.writing_style);
+          setLastAutosavedAt(result.updated_at);
+          setError("");
+        })
+        .catch((reason: unknown) => setError(reason instanceof ApiError ? reason.message : "草稿自动保存失败"))
+        .finally(() => setAutoSaving(false));
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [day, journalText, localDate, loading, writingStyle]);
+
+  useEffect(() => {
     if (!day || !["pending", "processing"].includes(day.organization_status)) return;
     const timer = window.setInterval(() => {
       getJournalDay(localDate).then((result) => {
         setDay(result);
         setJournalText(result.journal_text);
         setWritingStyle(result.writing_style);
+        setLastAutosavedAt(result.updated_at);
         if (result.organization_status === "completed" || result.organization_status === "failed") setOrganizing(false);
       }).catch(() => undefined);
     }, 1_200);
@@ -179,26 +258,11 @@ export default function JournalPage() {
       setDay(result);
       setJournalText(result.journal_text);
       setWritingStyle(result.writing_style);
+      setLastAutosavedAt(result.updated_at);
       setNotice("整理任务已开始");
     } catch (reason: unknown) {
       setOrganizing(false);
       setError(reason instanceof ApiError ? reason.message : "日常整理启动失败");
-    }
-  }
-
-  async function handleSaveJournal(confirm = false) {
-    setSaving(true);
-    setError("");
-    try {
-      const result = await updateJournalDay(localDate, { journal_text: journalText, writing_style: writingStyle, ...(confirm ? { confirm: !day?.confirmed_at } : {}) });
-      setDay(result);
-      setJournalText(result.journal_text);
-      setWritingStyle(result.writing_style);
-      setNotice(confirm ? (result.confirmed_at ? "日记已确认" : "已取消确认") : "日记草稿已保存");
-    } catch (reason: unknown) {
-      setError(reason instanceof ApiError ? reason.message : "日记保存失败");
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -342,8 +406,10 @@ export default function JournalPage() {
 
         <section className="journal-section form-panel">
           <div className="section-title"><h2>今日整理</h2><span>{day?.organization_status === "completed" ? "已完成" : day?.organization_status === "processing" || day?.organization_status === "pending" ? "整理中" : "尚未整理"}</span></div>
-          <div className="journal-draft-hint">Markdown 草稿，可直接复制到支持 Markdown 的编辑器发布</div><textarea aria-label="今日生成的日记" className="journal-draft" onChange={(event) => setJournalText(event.target.value)} placeholder="整理后会在这里生成结构化 Markdown 日记草稿。" rows={16} value={journalText} />
-          <div className="journal-draft-footer"><div className="journal-draft-meta"><span>{day?.confirmed_at ? <><Check size={14} />已确认</> : "草稿可继续编辑"}</span><label className="journal-style-picker"><span>写作风格</span><select aria-label="日记写作风格" onChange={(event) => setWritingStyle(event.target.value as JournalWritingStyle)} value={writingStyle}>{writingStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}</select></label></div><div className="journal-draft-actions table-actions"><button className="button button-secondary" disabled={saving || !journalText.trim()} onClick={() => void handleSaveJournal()} type="button"><Save size={15} />保存草稿</button><button className="button button-secondary" disabled={!journalText.trim()} onClick={() => void handleCopyJournal()} type="button"><Copy size={15} />复制 Markdown</button><button className="button button-primary" disabled={saving || !captureCount} onClick={() => void handleOrganize()} type="button"><Sparkles size={15} />{organizing ? "整理中" : "重新整理"}</button>{day?.journal_text && <button aria-label={day.confirmed_at ? "取消确认" : "确认日记"} className="button button-quiet" disabled={saving} onClick={() => void handleSaveJournal(true)} title={day.confirmed_at ? "取消确认" : "确认日记"} type="button"><Check size={15} /></button>}</div></div>
+          <div className="journal-draft-hint">Markdown 草稿，可直接复制到支持 Markdown 的编辑器发布</div>
+          <div className="journal-editor-toolbar"><div className="journal-editor-tabs" role="tablist" aria-label="日记查看模式"><button aria-selected={previewMode === "edit"} className={previewMode === "edit" ? "active" : ""} onClick={() => setPreviewMode("edit")} role="tab" type="button">编辑</button><button aria-selected={previewMode === "preview"} className={previewMode === "preview" ? "active" : ""} onClick={() => setPreviewMode("preview")} role="tab" type="button">预览</button></div><button aria-label="复制 Markdown 日记" className="journal-copy-button" disabled={!journalText.trim()} onClick={() => void handleCopyJournal()} title="复制 Markdown 日记" type="button"><Copy size={16} /></button></div>
+          {previewMode === "edit" ? <textarea aria-label="今日生成的日记" className="journal-draft" onChange={(event) => { editorRevision.current += 1; setJournalText(event.target.value); }} placeholder="整理后会在这里生成结构化 Markdown 日记草稿。" rows={16} value={journalText} /> : <MarkdownPreview value={journalText || "还没有日记草稿，先整理今天的记录。"} />}
+          <div className="journal-autosave-meta"><span>{autoSaving ? "正在自动保存……" : lastAutosavedAt ? `已自动保存 ${formatDateTime(lastAutosavedAt)}` : "编辑后会自动保存"}</span><label className="journal-style-picker"><span>写作风格</span><select aria-label="日记写作风格" onChange={(event) => { editorRevision.current += 1; setWritingStyle(event.target.value as JournalWritingStyle); }} value={writingStyle}>{writingStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}</select></label></div>
           {day?.organization_error && <div className="journal-error">{day.organization_error}</div>}
         </section>
       </div>

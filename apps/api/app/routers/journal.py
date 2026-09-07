@@ -165,6 +165,11 @@ def create_capture(
     db.add(capture)
     db.flush()
     if capture_type in ITEM_STATUSES:
+        item_metadata = (
+            {"mentioned_at": captured_at.isoformat()}
+            if capture_type in {"want_read", "want_watch"}
+            else None
+        )
         upsert_journal_item(
             db,
             workspace_id=identity.workspace.id,
@@ -174,6 +179,7 @@ def create_capture(
             source_capture_ids=[capture.id],
             confidence=1.0,
             explicit=True,
+            metadata=item_metadata,
         )
     get_or_create_day(
         db,
@@ -401,7 +407,11 @@ def update_journal_item(
         item.item_type = payload.item_type
         if payload.status is None:
             item.status = "open" if payload.item_type == "todo" else "inbox"
-        item.metadata_json = {**(item.metadata_json or {}), "needs_confirmation": False}
+        item.metadata_json = {
+            **(item.metadata_json or {}),
+            "needs_confirmation": False,
+            "manual_type_override": True,
+        }
     if payload.status in {"open", "inbox", "added"}:
         item.metadata_json = {**(item.metadata_json or {}), "needs_confirmation": False}
     mark_item_days_stale(db, identity.workspace.id, item)
