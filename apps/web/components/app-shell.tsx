@@ -10,12 +10,16 @@ import { formatDateTime } from "@/lib/format";
 import type { CurrentUser } from "@/lib/types";
 import { SiteFooter } from "@/components/site-footer";
 
-const navigation = [
+const readingNavigation = [
   { href: "/", label: "我的内容库", icon: LibraryBig },
   { href: "/books/new", label: "添加资源", icon: Plus },
-  { href: "/journal", label: "日常记录", icon: NotebookPen },
   { href: "/reviews", label: "复习记录", icon: History },
   { href: "/exam-management", label: "考试管理", icon: ClipboardCheck },
+];
+
+const journalNavigation = [
+  { href: "/journal", label: "今天的记录", icon: NotebookPen },
+  { href: "/journal/items", label: "日常清单", icon: ClipboardCheck },
 ];
 
 const systemNavigation = [
@@ -133,14 +137,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </span>
         </Link>
         <nav className="side-nav" aria-label="主导航">
-          {navigation.map(({ href, label, icon: Icon }) => {
+          <div className="nav-group-label nav-group-label-first">阅读复习</div>
+          {readingNavigation.map(({ href, label, icon: Icon }) => {
             const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
-            return (
-              <Link className={active ? "active" : ""} href={href} key={href}>
-                <Icon size={17} strokeWidth={1.8} />
-                {label}
-              </Link>
-            );
+            return <Link className={active ? "active" : ""} href={href} key={href}><Icon size={17} strokeWidth={1.8} />{label}</Link>;
+          })}
+          <div className="nav-group-label">日常记录</div>
+          {journalNavigation.map(({ href, label, icon: Icon }) => {
+            const active = pathname === href || pathname.startsWith(`${href}/`);
+            return <Link className={active ? "active" : ""} href={href} key={href}><Icon size={17} strokeWidth={1.8} />{label}</Link>;
           })}
           {user.role === "admin" && <>
             <div className="nav-group-label">系统管理</div>

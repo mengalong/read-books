@@ -217,6 +217,7 @@ class JournalDay(TimestampMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
     local_date: Mapped[date] = mapped_column(Date, index=True)
+    writing_style: Mapped[str] = mapped_column(String(30), default="natural")
     organization_status: Mapped[str] = mapped_column(
         String(20), default="not_started", index=True
     )

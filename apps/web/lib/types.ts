@@ -29,9 +29,12 @@ export type JournalItem = {
   updated_at: string;
 };
 
+export type JournalWritingStyle = "natural" | "lu_xun" | "hu_shi" | "minimal";
+
 export type JournalDay = {
   id: string;
   local_date: string;
+  writing_style: JournalWritingStyle;
   organization_status: "not_started" | "pending" | "processing" | "completed" | "failed";
   journal_text: string;
   summary: { highlights?: string[]; item_ids?: string[]; capture_count?: number };
@@ -110,7 +113,7 @@ export type SiteFooterConfiguration = {
   updated_at: string | null;
 };
 
-export type PromptType = "generation" | "grading";
+export type PromptType = "generation" | "grading" | "journal_organization";
 
 export type PromptTemplate = {
   id: string;

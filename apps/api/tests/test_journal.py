@@ -1,8 +1,12 @@
 import time
+import json
+from datetime import date, datetime
 
 from app.database import SessionLocal
 from app.models import User
 from app.services.auth import create_user_with_workspace
+from app.services.journal_service import capture_to_model_dict
+from app.models import JournalCapture
 
 
 def wait_for_day(client, local_date: str) -> dict:
@@ -39,10 +43,16 @@ def test_quick_captures_are_classified_and_organized(client):
     )
     assert idea.status_code == 201
 
-    organize = client.post(f"/api/journal/days/{local_date}/organize")
+    organize = client.post(
+        f"/api/journal/days/{local_date}/organize",
+        json={"writing_style": "lu_xun"},
+    )
     assert organize.status_code == 202
     body = wait_for_day(client, local_date)
     assert body["organization_status"] == "completed"
+    assert body["writing_style"] == "lu_xun"
+    assert "## 今日概览" in body["journal_text"]
+    assert "## 待办" in body["journal_text"]
     assert "明天给设计师确认首页文案" in body["journal_text"]
     assert body["summary"]["capture_count"] == 2
     items = {item["item_type"]: item for item in body["items"]}
@@ -123,3 +133,60 @@ def test_journal_data_is_isolated_by_workspace(client):
     assert admin_day.status_code == 200
     assert admin_day.json()["captures"] == []
     assert client.delete(f"/api/journal/captures/{capture_id}").status_code == 404
+
+
+def test_captures_and_items_can_be_edited_and_deleted(client):
+    local_date = "2035-01-02"
+    created = client.post(
+        "/api/journal/captures",
+        json={
+            "content": "先记一条待办",
+            "capture_type": "todo",
+            "local_date": local_date,
+        },
+    )
+    assert created.status_code == 201
+    capture_id = created.json()["id"]
+
+    edited_capture = client.patch(
+        f"/api/journal/captures/{capture_id}",
+        json={
+            "content": "更新后的灵感",
+            "capture_type": "idea",
+            "local_date": local_date,
+        },
+    )
+    assert edited_capture.status_code == 200
+    assert edited_capture.json()["content"] == "更新后的灵感"
+    assert edited_capture.json()["capture_type"] == "idea"
+
+    day = client.get(f"/api/journal/days/{local_date}")
+    assert day.status_code == 200
+    assert day.json()["captures"][0]["content"] == "更新后的灵感"
+    item = day.json()["items"][0]
+    edited_item = client.patch(
+        f"/api/journal/items/{item['id']}",
+        json={"item_type": "want_read", "title": "想读的一本书", "status": "inbox"},
+    )
+    assert edited_item.status_code == 200
+    assert edited_item.json()["item_type"] == "want_read"
+    assert edited_item.json()["title"] == "想读的一本书"
+    deleted_item = client.delete(f"/api/journal/items/{item['id']}")
+    assert deleted_item.status_code == 204
+    deleted_capture = client.delete(f"/api/journal/captures/{capture_id}")
+    assert deleted_capture.status_code == 204
+
+
+def test_model_capture_payload_serializes_calendar_values():
+    capture = JournalCapture(
+        id="capture-json",
+        workspace_id="workspace-json",
+        content="一条记录",
+        capture_type="note",
+        local_date=date(2035, 1, 3),
+        captured_at=datetime(2035, 1, 3, 9, 0),
+        tags=[],
+    )
+    payload = capture_to_model_dict(capture)
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert "2035-01-03" in serialized

@@ -10,6 +10,7 @@ import type { PromptPreview, PromptTemplate, PromptType } from "@/lib/types";
 const PROMPT_LABELS: Record<PromptType, { label: string; description: string }> = {
   generation: { label: "出题提示词", description: "控制题目生成、题型结构和原文引用要求" },
   grading: { label: "问答评分提示词", description: "控制参考答案、评分要点和作答反馈" },
+  journal_organization: { label: "日常整理提示词", description: "控制日记草稿生成和待办/灵感/媒体项目提取" },
 };
 
 function formatTime(value: string | null) {
@@ -126,7 +127,7 @@ export default function PromptSettingsPage() {
         <div>
           <div className="eyebrow">System management</div>
           <h1 className="page-title">提示词管理</h1>
-          <p className="page-description">调整真实模型的出题与问答评分模板</p>
+          <p className="page-description">调整真实模型的出题、问答评分和日常整理模板</p>
         </div>
         <span className="status-badge status-completed"><FileCode2 size={14} /> 当前版本 v{currentTemplate?.version ?? 0}</span>
       </header>

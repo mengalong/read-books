@@ -54,6 +54,7 @@ import type {
   JournalItem,
   JournalCaptureType,
   JournalItemType,
+  JournalWritingStyle,
 } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
@@ -141,15 +142,33 @@ export function createJournalCapture(payload: {
   });
 }
 
+export function updateJournalCapture(
+  captureId: string,
+  payload: {
+    content: string;
+    capture_type: JournalCaptureType;
+    local_date?: string;
+    captured_at?: string;
+  },
+) {
+  return apiFetch<JournalCapture>(`/journal/captures/${captureId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function deleteJournalCapture(captureId: string) {
   return apiFetch<void>(`/journal/captures/${captureId}`, { method: "DELETE" });
 }
 
-export function organizeJournalDay(localDate: string) {
-  return apiFetch<JournalDay>(`/journal/days/${localDate}/organize`, { method: "POST" });
+export function organizeJournalDay(localDate: string, writingStyle?: JournalWritingStyle) {
+  return apiFetch<JournalDay>(`/journal/days/${localDate}/organize`, {
+    method: "POST",
+    body: JSON.stringify(writingStyle ? { writing_style: writingStyle } : {}),
+  });
 }
 
-export function updateJournalDay(localDate: string, payload: { journal_text?: string; confirm?: boolean }) {
+export function updateJournalDay(localDate: string, payload: { journal_text?: string; confirm?: boolean; writing_style?: JournalWritingStyle }) {
   return apiFetch<JournalDay>(`/journal/days/${localDate}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
@@ -164,11 +183,15 @@ export function getJournalItems(itemType?: JournalItemType, status?: string) {
   return apiFetch<JournalItem[]>(`/journal/items${suffix}`);
 }
 
-export function updateJournalItem(itemId: string, payload: { title?: string; description?: string; status?: string; due_date?: string | null }) {
+export function updateJournalItem(itemId: string, payload: { item_type?: JournalItemType; title?: string; description?: string; status?: string; due_date?: string | null }) {
   return apiFetch<JournalItem>(`/journal/items/${itemId}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+}
+
+export function deleteJournalItem(itemId: string) {
+  return apiFetch<void>(`/journal/items/${itemId}`, { method: "DELETE" });
 }
 
 export function getAdminBooks(search = "", ownerId?: string, shelfStatus?: ShelfStatus) {

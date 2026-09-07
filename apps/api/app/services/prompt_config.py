@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.models import PromptTemplate
 
 
-PROMPT_TYPES = ("generation", "grading")
+PROMPT_TYPES = ("generation", "grading", "journal_organization")
 PROMPT_VARIABLES = {
     "generation": (
         "book_title",
@@ -41,6 +41,11 @@ PROMPT_VARIABLES = {
         "user_answer",
         "max_score",
     ),
+    "journal_organization": (
+        "local_date",
+        "captures",
+        "writing_style",
+    ),
 }
 PROMPT_REQUIRED_VARIABLES = {
     "generation": (
@@ -58,6 +63,11 @@ PROMPT_REQUIRED_VARIABLES = {
         "source_evidence",
         "user_answer",
         "max_score",
+    ),
+    "journal_organization": (
+        "local_date",
+        "captures",
+        "writing_style",
     ),
 }
 TEMPLATE_PATTERN = re.compile(r"{{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*}}")
@@ -153,6 +163,31 @@ SOURCE_MATERIAL：
         template_id="default-grading",
         is_active=True,
     ),
+    "journal_organization": PromptTemplateDefinition(
+        prompt_type="journal_organization",
+        system_prompt=(
+            "你是个人日常整理助手。只能根据用户提供的原始记录整理，不得补写未提及的事实。"
+            "请返回合法 JSON，不要返回 Markdown。日记应自然、克制，保留用户语气。"
+            "明确标记的类型优先于你的推断。待办、灵感、想读、想看都要保留来源记录 ID。"
+            "不要输出心理诊断、人生价值结论或未被记录支持的长期画像。"
+        ),
+        user_prompt=(
+            "请以 {{writing_style}} 的写作风格整理 {{local_date}} 的原始记录：\n{{captures}}\n\n"
+            "请返回："
+            '{"journal_text":"日记草稿","highlights":["重点"],"items":['
+            '{"item_type":"todo|idea|want_read|want_watch","title":"归集标题",'
+            '"description":"补充说明","source_capture_ids":["原始记录 ID"],'
+            '"confidence":0.0,"due_date":null}]}。'
+            "confidence 在 0 到 1 之间；无法确认的项目可以省略。"
+            "每个项目必须引用至少一个原始记录 ID，不要生成原始记录中不存在的项目。"
+            "journal_text 必须是可以直接复制发布的 Markdown，使用 # 标题、## 分节、段落和列表。"
+            "不要把原始记录逐条机械复述；请提炼事件、感受、转折和思考，形成有条理的完整日记。"
+            "风格只借鉴高层次的语气、节奏和观察方式，不复制任何具体作品句子。"
+        ),
+        version=0,
+        template_id="default-journal-organization",
+        is_active=True,
+    ),
 }
 
 
@@ -216,6 +251,29 @@ def prompt_values_for_preview(prompt_type: str) -> dict[str, str]:
                 indent=2,
             ),
             "question_exclusions": json.dumps([], ensure_ascii=False, indent=2),
+        }
+    if prompt_type == "journal_organization":
+        return {
+            "local_date": "2026-09-07",
+            "writing_style": "胡适式平实自省",
+            "captures": json.dumps(
+                [
+                    {
+                        "id": "sample-capture-1",
+                        "content": "明天给设计师确认首页文案",
+                        "capture_type": "todo",
+                        "captured_at": "2026-09-07T09:30:00+08:00",
+                    },
+                    {
+                        "id": "sample-capture-2",
+                        "content": "想到可以把读书笔记做成关系图",
+                        "capture_type": "note",
+                        "captured_at": "2026-09-07T20:10:00+08:00",
+                    },
+                ],
+                ensure_ascii=False,
+                indent=2,
+            ),
         }
     return {
         "source_mode": "pdf（基于已解析 PDF 原文）",

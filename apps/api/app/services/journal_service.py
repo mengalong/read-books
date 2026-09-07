@@ -14,6 +14,7 @@ from app.models import JournalCapture, JournalDay, JournalItem
 from app.services.journal_provider import ITEM_TYPES, JournalOrganization, get_journal_provider
 from app.services.model_config import get_effective_model_configuration
 from app.services.model_usage import new_usage_context
+from app.services.prompt_config import get_prompt_template
 
 JOURNAL_TIMEZONE = ZoneInfo("Asia/Shanghai")
 CAPTURE_TYPES = {"note", *ITEM_TYPES}
@@ -135,6 +136,16 @@ def capture_to_dict(capture: JournalCapture) -> dict[str, Any]:
     }
 
 
+def capture_to_model_dict(capture: JournalCapture) -> dict[str, Any]:
+    """Use JSON-safe scalar values when sending captures to a model provider."""
+    payload = capture_to_dict(capture)
+    for key in ("local_date", "captured_at", "created_at"):
+        value = payload.get(key)
+        if hasattr(value, "isoformat"):
+            payload[key] = value.isoformat()
+    return payload
+
+
 def item_to_dict(item: JournalItem) -> dict[str, Any]:
     return {
         "id": item.id,
@@ -197,8 +208,9 @@ def organize_day(day_id: str, *, settings: Settings | None = None) -> None:
                     .order_by(JournalCapture.captured_at.asc())
                 ).all()
             )
-            capture_payload = [capture_to_dict(capture) for capture in captures]
+            capture_payload = [capture_to_model_dict(capture) for capture in captures]
             configuration = get_effective_model_configuration(db, settings)
+            prompt_template = get_prompt_template(db, "journal_organization")
             context = new_usage_context(
                 "journal_daily_organization",
                 f"{day.local_date.isoformat()} 日常整理",
@@ -206,8 +218,12 @@ def organize_day(day_id: str, *, settings: Settings | None = None) -> None:
                 workspace_id=day.workspace_id,
                 task_id=day.organization_task_id,
             )
-            provider = get_journal_provider(settings, configuration, context)
-            organization = provider.organize_day(capture_payload, day.local_date)
+            provider = get_journal_provider(
+                settings, configuration, context, prompt_template=prompt_template
+            )
+            organization = provider.organize_day(
+                capture_payload, day.local_date, day.writing_style or "natural"
+            )
             capture_ids = {capture.id for capture in captures}
             item_ids: list[str] = []
             for raw_item in organization.items:

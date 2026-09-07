@@ -46,6 +46,17 @@ class JournalCaptureCreate(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=20)
 
 
+class JournalCaptureUpdate(BaseModel):
+    content: str = Field(min_length=1, max_length=10_000)
+    capture_type: JournalCaptureType = "note"
+    local_date: date | None = None
+    captured_at: datetime | None = None
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+JournalWritingStyle = Literal["natural", "lu_xun", "hu_shi", "minimal"]
+
+
 class JournalCaptureResponse(ApiModel):
     id: str
     content: str
@@ -73,9 +84,15 @@ class JournalItemResponse(BaseModel):
 class JournalDayUpdate(BaseModel):
     journal_text: str | None = Field(default=None, max_length=20_000)
     confirm: bool | None = None
+    writing_style: JournalWritingStyle | None = None
+
+
+class JournalOrganizeRequest(BaseModel):
+    writing_style: JournalWritingStyle | None = None
 
 
 class JournalItemUpdate(BaseModel):
+    item_type: JournalItemType | None = None
     title: str | None = Field(default=None, min_length=1, max_length=240)
     description: str | None = Field(default=None, max_length=2_000)
     status: str | None = Field(default=None, max_length=30)
@@ -85,6 +102,7 @@ class JournalItemUpdate(BaseModel):
 class JournalDayResponse(BaseModel):
     id: str
     local_date: date
+    writing_style: JournalWritingStyle
     organization_status: Literal["not_started", "pending", "processing", "completed", "failed"]
     journal_text: str
     summary: dict[str, Any] = Field(default_factory=dict)
@@ -1122,7 +1140,7 @@ class PromptTemplateUpdate(BaseModel):
 
 class PromptTemplateResponse(ApiModel):
     id: str
-    prompt_type: Literal["generation", "grading"]
+    prompt_type: Literal["generation", "grading", "journal_organization"]
     system_prompt: str
     user_prompt: str
     version: int
@@ -1133,7 +1151,7 @@ class PromptTemplateResponse(ApiModel):
 
 
 class PromptPreviewResponse(BaseModel):
-    prompt_type: Literal["generation", "grading"]
+    prompt_type: Literal["generation", "grading", "journal_organization"]
     rendered_system_prompt: str
     rendered_user_prompt: str
     available_variables: list[str]

@@ -5,14 +5,17 @@ import {
   ArrowRight,
   BookOpen,
   Check,
+  Copy,
   Film,
   Lightbulb,
   ListTodo,
   NotebookPen,
+  Pencil,
   RefreshCw,
   Save,
   Sparkles,
   Trash2,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -24,11 +27,12 @@ import {
   deleteJournalCapture,
   getJournalDay,
   organizeJournalDay,
+  updateJournalCapture,
   updateJournalDay,
   updateJournalItem,
 } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
-import type { JournalCaptureType, JournalDay, JournalItem, JournalItemType } from "@/lib/types";
+import type { JournalCaptureType, JournalDay, JournalItem, JournalItemType, JournalWritingStyle } from "@/lib/types";
 
 const captureTypes: { value: JournalCaptureType; label: string; icon: typeof NotebookPen }[] = [
   { value: "note", label: "记录", icon: NotebookPen },
@@ -51,6 +55,13 @@ const itemIcons: Record<JournalItemType, typeof ListTodo> = {
   want_read: BookOpen,
   want_watch: Film,
 };
+
+const writingStyles: { value: JournalWritingStyle; label: string; description: string }[] = [
+  { value: "natural", label: "自然纪实", description: "清楚、克制地记录当天" },
+  { value: "lu_xun", label: "鲁迅式冷峻讽刺", description: "冷静观察，带一点锋利的讽刺" },
+  { value: "hu_shi", label: "胡适式平实自省", description: "平实清晰，保留思考和自省" },
+  { value: "minimal", label: "清简随笔", description: "短句和留白为主" },
+];
 
 function todayString() {
   return new Intl.DateTimeFormat("en-CA", {
@@ -96,12 +107,17 @@ export default function JournalPage() {
   const [content, setContent] = useState("");
   const [captureType, setCaptureType] = useState<JournalCaptureType>("note");
   const [journalText, setJournalText] = useState("");
+  const [writingStyle, setWritingStyle] = useState<JournalWritingStyle>("natural");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [organizing, setOrganizing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [editingCaptureId, setEditingCaptureId] = useState<string | null>(null);
+  const [editingContent, setEditingContent] = useState("");
+  const [editingType, setEditingType] = useState<JournalCaptureType>("note");
+  const [editingDate, setEditingDate] = useState(localDate);
 
   const loadDay = useCallback(async () => {
     setLoading(true);
@@ -110,6 +126,7 @@ export default function JournalPage() {
       const result = await getJournalDay(localDate);
       setDay(result);
       setJournalText(result.journal_text);
+      setWritingStyle(result.writing_style);
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "日常记录加载失败");
     } finally {
@@ -125,6 +142,7 @@ export default function JournalPage() {
       getJournalDay(localDate).then((result) => {
         setDay(result);
         setJournalText(result.journal_text);
+        setWritingStyle(result.writing_style);
         if (result.organization_status === "completed" || result.organization_status === "failed") setOrganizing(false);
       }).catch(() => undefined);
     }, 1_200);
@@ -156,9 +174,10 @@ export default function JournalPage() {
     setNotice("");
     setError("");
     try {
-      const result = await organizeJournalDay(localDate);
+      const result = await organizeJournalDay(localDate, writingStyle);
       setDay(result);
       setJournalText(result.journal_text);
+      setWritingStyle(result.writing_style);
       setNotice("整理任务已开始");
     } catch (reason: unknown) {
       setOrganizing(false);
@@ -170,14 +189,25 @@ export default function JournalPage() {
     setSaving(true);
     setError("");
     try {
-      const result = await updateJournalDay(localDate, { journal_text: journalText, ...(confirm ? { confirm: !day?.confirmed_at } : {}) });
+      const result = await updateJournalDay(localDate, { journal_text: journalText, writing_style: writingStyle, ...(confirm ? { confirm: !day?.confirmed_at } : {}) });
       setDay(result);
       setJournalText(result.journal_text);
+      setWritingStyle(result.writing_style);
       setNotice(confirm ? (result.confirmed_at ? "日记已确认" : "已取消确认") : "日记草稿已保存");
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "日记保存失败");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleCopyJournal() {
+    if (!journalText.trim()) return;
+    try {
+      await navigator.clipboard.writeText(journalText);
+      setNotice("Markdown 日记已复制");
+    } catch {
+      setError("浏览器拒绝了复制，请手动选中文本复制");
     }
   }
 
@@ -188,6 +218,41 @@ export default function JournalPage() {
       await loadDay();
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "原始记录删除失败");
+    }
+  }
+
+  function startEditingCapture(capture: JournalDay["captures"][number]) {
+    setEditingCaptureId(capture.id);
+    setEditingContent(capture.content);
+    setEditingType(capture.capture_type);
+    setEditingDate(capture.local_date);
+    setError("");
+  }
+
+  function cancelEditingCapture() {
+    setEditingCaptureId(null);
+    setEditingContent("");
+    setEditingType("note");
+    setEditingDate(localDate);
+  }
+
+  async function handleUpdateCapture() {
+    if (!editingCaptureId || !editingContent.trim()) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      await updateJournalCapture(editingCaptureId, {
+        content: editingContent.trim(),
+        capture_type: editingType,
+        local_date: editingDate,
+      });
+      cancelEditingCapture();
+      setNotice("原始记录已更新");
+      await loadDay();
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "原始记录更新失败");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -213,6 +278,7 @@ export default function JournalPage() {
         <div className="journal-date-nav">
           <button aria-label="前一天" className="button button-quiet" onClick={() => setLocalDate((value) => shiftDate(value, -1))} title="前一天" type="button"><ArrowLeft size={16} /></button>
           <span><strong>{dayLabel(localDate)}</strong><small>{localDate}</small></span>
+          <label className="journal-date-picker"><span>选择日期</span><input aria-label="选择日期" onChange={(event) => event.target.value && setLocalDate(event.target.value)} type="date" value={localDate} /></label>
           <button aria-label="后一天" className="button button-quiet" onClick={() => setLocalDate((value) => shiftDate(value, 1))} title="后一天"><ArrowRight size={16} /></button>
         </div>
       </header>
@@ -223,7 +289,7 @@ export default function JournalPage() {
       <section className="journal-capture-panel form-panel">
         <div className="section-title"><h2>快速记录</h2><span>{captureCount} 条</span></div>
         <form onSubmit={(event) => void handleCapture(event)}>
-          <textarea aria-label="快速记录内容" className="journal-capture-input" onChange={(event) => setContent(event.target.value)} placeholder="现在想到什么？先记下来……" rows={3} value={content} />
+          <textarea aria-label="快速记录内容" className="journal-capture-input" onChange={(event) => setContent(event.target.value)} placeholder="现在想到什么？先记下来……" rows={6} value={content} />
           <div className="journal-capture-actions">
             <div className="journal-type-picker" aria-label="记录类型">
               {captureTypes.map(({ value, label, icon: Icon }) => <button className={`journal-type-button ${captureType === value ? "active" : ""}`} key={value} onClick={() => setCaptureType(value)} type="button"><Icon size={15} />{label}</button>)}
@@ -239,14 +305,23 @@ export default function JournalPage() {
           {day?.captures.length ? <div className="journal-capture-list">{day.captures.map((capture) => {
             const type = captureTypes.find((item) => item.value === capture.capture_type) || captureTypes[0];
             const Icon = type.icon;
-            return <article className="journal-capture-row" key={capture.id}><div className={`journal-capture-icon type-${capture.capture_type}`}><Icon size={15} /></div><div className="journal-capture-copy"><div className="journal-capture-meta"><span>{type.label}</span><time>{formatDateTime(capture.captured_at)}</time></div><p>{capture.content}</p></div><button aria-label="删除原始记录" className="button button-quiet danger-action" onClick={() => void handleDeleteCapture(capture.id)} title="删除原始记录" type="button"><Trash2 size={14} /></button></article>;
+            if (editingCaptureId === capture.id) {
+              return <article className="journal-capture-row journal-capture-row-editing" key={capture.id}>
+                <div className={`journal-capture-icon type-${editingType}`}><Icon size={15} /></div>
+                <div className="journal-capture-copy journal-capture-edit-copy">
+                  <textarea aria-label="编辑原始记录" className="journal-edit-input" onChange={(event) => setEditingContent(event.target.value)} rows={4} value={editingContent} />
+                  <div className="journal-edit-actions"><select aria-label="修改记录类型" onChange={(event) => setEditingType(event.target.value as JournalCaptureType)} value={editingType}>{captureTypes.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><input aria-label="修改记录日期" onChange={(event) => setEditingDate(event.target.value)} type="date" value={editingDate} /><button className="button button-primary" disabled={submitting || !editingContent.trim() || !editingDate} onClick={() => void handleUpdateCapture()} type="button"><Save size={14} />保存</button><button aria-label="取消编辑" className="button button-quiet" onClick={cancelEditingCapture} title="取消编辑" type="button"><X size={15} /></button></div>
+                </div>
+              </article>;
+            }
+            return <article className="journal-capture-row" key={capture.id}><div className={`journal-capture-icon type-${capture.capture_type}`}><Icon size={15} /></div><div className="journal-capture-copy"><div className="journal-capture-meta"><span>{type.label}</span><time>{formatDateTime(capture.captured_at)}</time></div><p>{capture.content}</p></div><div className="journal-capture-row-actions"><button aria-label="编辑原始记录" className="button button-quiet" onClick={() => startEditingCapture(capture)} title="编辑原始记录" type="button"><Pencil size={14} /></button><button aria-label="删除原始记录" className="button button-quiet danger-action" onClick={() => void handleDeleteCapture(capture.id)} title="删除原始记录" type="button"><Trash2 size={14} /></button></div></article>;
           })}</div> : <div className="journal-empty">还没有记录。先写下一句话，今天的时间线就从这里开始。</div>}
         </section>
 
         <section className="journal-section form-panel">
           <div className="section-title"><h2>今日整理</h2><span>{day?.organization_status === "completed" ? "已完成" : day?.organization_status === "processing" || day?.organization_status === "pending" ? "整理中" : "尚未整理"}</span></div>
-          <textarea aria-label="今日生成的日记" className="journal-draft" onChange={(event) => setJournalText(event.target.value)} placeholder="整理后会在这里生成日记草稿。" rows={12} value={journalText} />
-          <div className="journal-draft-footer"><span>{day?.confirmed_at ? <><Check size={14} />已确认</> : "草稿可继续编辑"}</span><div className="table-actions"><button className="button button-secondary" disabled={saving || !journalText.trim()} onClick={() => void handleSaveJournal()} type="button"><Save size={15} />保存</button><button className="button button-primary" disabled={saving || !captureCount} onClick={() => void handleOrganize()} type="button"><Sparkles size={15} />{organizing ? "整理中……" : "重新整理"}</button>{day?.journal_text && <button aria-label={day.confirmed_at ? "取消确认" : "确认日记"} className="button button-quiet" disabled={saving} onClick={() => void handleSaveJournal(true)} title={day.confirmed_at ? "取消确认" : "确认日记"} type="button"><Check size={15} /></button>}</div></div>
+          <div className="journal-draft-hint">Markdown 草稿，可直接复制到支持 Markdown 的编辑器发布</div><textarea aria-label="今日生成的日记" className="journal-draft" onChange={(event) => setJournalText(event.target.value)} placeholder="整理后会在这里生成结构化 Markdown 日记草稿。" rows={16} value={journalText} />
+          <div className="journal-draft-footer"><div className="journal-draft-meta"><span>{day?.confirmed_at ? <><Check size={14} />已确认</> : "草稿可继续编辑"}</span><label className="journal-style-picker"><span>写作风格</span><select aria-label="日记写作风格" onChange={(event) => setWritingStyle(event.target.value as JournalWritingStyle)} value={writingStyle}>{writingStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}</select></label></div><div className="table-actions"><button className="button button-secondary" disabled={saving || !journalText.trim()} onClick={() => void handleSaveJournal()} type="button"><Save size={15} />保存</button><button className="button button-secondary" disabled={!journalText.trim()} onClick={() => void handleCopyJournal()} type="button"><Copy size={15} />复制 Markdown</button><button className="button button-primary" disabled={saving || !captureCount} onClick={() => void handleOrganize()} type="button"><Sparkles size={15} />{organizing ? "整理中……" : "重新整理"}</button>{day?.journal_text && <button aria-label={day.confirmed_at ? "取消确认" : "确认日记"} className="button button-quiet" disabled={saving} onClick={() => void handleSaveJournal(true)} title={day.confirmed_at ? "取消确认" : "确认日记"} type="button"><Check size={15} /></button>}</div></div>
           {day?.organization_error && <div className="journal-error">{day.organization_error}</div>}
         </section>
       </div>

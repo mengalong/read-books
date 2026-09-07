@@ -2,7 +2,11 @@ def test_prompt_templates_support_preview_versioning_and_validation(client):
     response = client.get("/api/settings/prompts")
     assert response.status_code == 200
     templates = response.json()
-    assert {template["prompt_type"] for template in templates} == {"generation", "grading"}
+    assert {template["prompt_type"] for template in templates} == {
+        "generation",
+        "grading",
+        "journal_organization",
+    }
     generation = next(template for template in templates if template["prompt_type"] == "generation")
     assert generation["version"] == 0
     assert "{{source_material}}" in generation["user_prompt"]
@@ -51,3 +55,34 @@ def test_prompt_templates_support_preview_versioning_and_validation(client):
     current = client.get("/api/settings/prompts")
     current_generation = next(item for item in current.json() if item["prompt_type"] == "generation")
     assert current_generation["version"] == 2
+
+
+def test_journal_organization_prompt_is_editable_and_previewable(client):
+    response = client.get("/api/settings/prompts")
+    assert response.status_code == 200
+    journal = next(
+        item for item in response.json() if item["prompt_type"] == "journal_organization"
+    )
+    assert "{{captures}}" in journal["user_prompt"]
+    assert "{{writing_style}}" in journal["user_prompt"]
+
+    preview = client.post(
+        "/api/settings/prompts/journal_organization/preview",
+        json={
+            "system_prompt": journal["system_prompt"],
+            "user_prompt": journal["user_prompt"],
+        },
+    )
+    assert preview.status_code == 200
+    assert "sample-capture-1" in preview.json()["rendered_user_prompt"]
+    assert "{{captures}}" not in preview.json()["rendered_user_prompt"]
+
+    saved = client.put(
+        "/api/settings/prompts/journal_organization",
+        json={
+            "system_prompt": journal["system_prompt"],
+            "user_prompt": journal["user_prompt"] + "\n请保持 Markdown 排版。",
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["version"] == 1

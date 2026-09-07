@@ -51,7 +51,7 @@ dev
 
 日常整理使用独立 `JournalAiProvider`。Mock Provider 以确定性规则支持本地联调，HTTP Provider 复用当前 OpenAI 兼容模型配置，但出于隐私考虑只记录模型名称、Token、耗时和调用结果，不向 `model_usage_records` 写入日记 Prompt 和原始模型回复。整理任务使用进程内后台线程，服务重启时恢复未完成任务；后续与出题任务一起迁移到独立 Worker。
 
-快速记录的用户显式类型是强约束，模型只对 `note` 进行补充推断；推断项目进入待确认状态。日记草稿和长期项目都保存来源记录关系，模型输出不能覆盖原始记录。
+快速记录的用户显式类型是强约束，模型只对 `note` 进行补充推断；推断项目进入待确认状态。日记草稿和长期项目都保存来源记录关系，模型输出不能覆盖原始记录。日记整理 Prompt 单独使用 `journal_organization` 类型，支持 `local_date`、`captures` 和 `writing_style` 变量；输出必须是结构化 Markdown，允许选择自然纪实、鲁迅式冷峻讽刺、胡适式平实自省或清简随笔等高层次风格，但不复制具体句子。
 
 ## 3. 本地 Python 环境
 

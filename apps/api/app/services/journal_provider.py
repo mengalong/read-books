@@ -17,10 +17,25 @@ from app.services.model_usage import (
     record_model_usage,
     token_counts,
 )
+from app.services.prompt_config import DEFAULT_PROMPTS, PromptTemplateDefinition, render_prompt
 from app.services.quiz_provider import extract_response_text, parse_json_object
 
 
 ITEM_TYPES = {"todo", "idea", "want_read", "want_watch"}
+STYLE_LABELS = {
+    "natural": "自然纪实",
+    "lu_xun": "鲁迅式冷峻讽刺（只借鉴高层次语气和观察方式）",
+    "hu_shi": "胡适式平实自省（只借鉴高层次语气和观察方式）",
+    "minimal": "清简随笔",
+}
+
+
+def _ensure_markdown(text: str, local_date: date) -> str:
+    """Keep model drafts publishable even when a provider omits the requested headings."""
+    clean = text.strip()
+    if re.search(r"^#{1,6}\s", clean, flags=re.MULTILINE):
+        return clean
+    return f"# {local_date.isoformat()}\n\n## 日记\n\n{clean}"
 
 
 @dataclass(frozen=True)
@@ -47,28 +62,32 @@ def _inferred_type(content: str) -> str | None:
     return None
 
 
-def _mock_organization(captures: list[dict[str, Any]], local_date: date) -> JournalOrganization:
+def _mock_organization(
+    captures: list[dict[str, Any]], local_date: date, writing_style: str = "natural"
+) -> JournalOrganization:
     if not captures:
         return JournalOrganization(
-            journal_text=f"{local_date.isoformat()} 还没有快速记录。",
+            journal_text=f"# {local_date.isoformat()}\n\n今天还没有留下快速记录。",
             highlights=[],
             items=[],
         )
 
     ordered = sorted(captures, key=lambda item: str(item.get("captured_at") or ""))
-    journal_lines = [f"今天记录了 {len(ordered)} 件事情："]
     highlights: list[str] = []
     items: list[dict[str, Any]] = []
+    body_lines: list[str] = []
+    grouped: dict[str, list[str]] = {"todo": [], "idea": [], "want_read": [], "want_watch": []}
     for capture in ordered:
         content = _compact(str(capture.get("content") or ""))
         if not content:
             continue
-        journal_lines.append(f"- {content}")
+        body_lines.append(f"- {content}")
         if len(highlights) < 3:
             highlights.append(content)
         capture_type = str(capture.get("capture_type") or "note")
         item_type = capture_type if capture_type in ITEM_TYPES else _inferred_type(content)
         if item_type:
+            grouped[item_type].append(content)
             items.append(
                 {
                     "item_type": item_type,
@@ -79,6 +98,37 @@ def _mock_organization(captures: list[dict[str, Any]], local_date: date) -> Jour
                     "due_date": None,
                 }
             )
+    style_openers = {
+        "lu_xun": "今日的事情并不宏大，却各自带着一点不肯散去的声响。",
+        "hu_shi": "今天仍是由一些具体的小事组成。把它们记下来，也算对自己有个交代。",
+        "minimal": "今天的几件事，逐一记下。",
+        "natural": "今天由一些具体的片段组成，值得留下一点清楚的记录。",
+    }
+    journal_lines = [
+        f"# {local_date.isoformat()}",
+        "",
+        "## 今日概览",
+        "",
+        style_openers.get(writing_style, style_openers["natural"]),
+        "",
+        "## 日记",
+        "",
+        "\n".join(body_lines) or "今天没有可整理的正文。",
+        "",
+        "## 今日重点",
+        "",
+        *(f"- {item}" for item in highlights),
+    ]
+    section_labels = {
+        "todo": "## 待办",
+        "idea": "## 灵感",
+        "want_read": "## 想读",
+        "want_watch": "## 想看",
+    }
+    for item_type, label in section_labels.items():
+        if grouped[item_type]:
+            journal_lines.extend(["", label, "", *[f"- {item}" for item in grouped[item_type]]])
+    journal_lines.extend(["", "---", "", "*以上内容由原始记录整理生成，可继续编辑。*"])
     return JournalOrganization("\n".join(journal_lines), highlights, items)
 
 
@@ -88,23 +138,25 @@ class JournalAiProvider:
         configuration: EffectiveModelConfiguration,
         usage_context: ModelUsageContext | None = None,
         settings: Settings | None = None,
+        prompt_template: PromptTemplateDefinition | None = None,
     ):
         self.configuration = configuration
         self.usage_context = usage_context
         self.settings = settings
+        self.prompt_template = prompt_template or DEFAULT_PROMPTS["journal_organization"]
         self._call_number = 0
 
     def organize_day(
-        self, captures: list[dict[str, Any]], local_date: date
+        self, captures: list[dict[str, Any]], local_date: date, writing_style: str = "natural"
     ) -> JournalOrganization:
         raise NotImplementedError
 
 
 class MockJournalAiProvider(JournalAiProvider):
     def organize_day(
-        self, captures: list[dict[str, Any]], local_date: date
+        self, captures: list[dict[str, Any]], local_date: date, writing_style: str = "natural"
     ) -> JournalOrganization:
-        return _mock_organization(captures, local_date)
+        return _mock_organization(captures, local_date, writing_style)
 
 
 class HttpJournalAiProvider(JournalAiProvider):
@@ -205,30 +257,22 @@ class HttpJournalAiProvider(JournalAiProvider):
         return content
 
     def organize_day(
-        self, captures: list[dict[str, Any]], local_date: date
+        self, captures: list[dict[str, Any]], local_date: date, writing_style: str = "natural"
     ) -> JournalOrganization:
         capture_text = json.dumps(captures, ensure_ascii=False, separators=(",", ":"))
+        values = {
+            "local_date": local_date.isoformat(),
+            "captures": capture_text,
+            "writing_style": STYLE_LABELS.get(writing_style, STYLE_LABELS["natural"]),
+        }
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "你是个人日常整理助手。只能根据用户提供的原始记录整理，不得补写未提及的事实。"
-                    "请返回合法 JSON，不要返回 Markdown。日记应自然、克制，保留用户语气。"
-                    "明确标记的类型优先于你的推断。待办、灵感、想读、想看都要保留来源记录 ID。"
-                ),
+                "content": render_prompt(self.prompt_template.system_prompt, values),
             },
             {
                 "role": "user",
-                "content": (
-                    f"日期：{local_date.isoformat()}\n原始记录：{capture_text}\n\n"
-                    "请返回："
-                    '{"journal_text":"日记草稿","highlights":["重点"],"items":['
-                    '{"item_type":"todo|idea|want_read|want_watch","title":"归集标题",'
-                    '"description":"补充说明","source_capture_ids":["原始记录 ID"],'
-                    '"confidence":0.0,"due_date":null}]}。'
-                    "confidence 在 0 到 1 之间；无法确认的项目可以省略。"
-                    "不要输出心情诊断或人生价值结论。"
-                ),
+                "content": render_prompt(self.prompt_template.user_prompt, values),
             },
         ]
         payload = parse_json_object(self._chat_completion(messages))
@@ -242,7 +286,7 @@ class HttpJournalAiProvider(JournalAiProvider):
         if not isinstance(items, list):
             items = []
         return JournalOrganization(
-            journal_text=journal_text.strip()[:20_000],
+            journal_text=_ensure_markdown(journal_text, local_date)[:20_000],
             highlights=[str(item).strip() for item in highlights if str(item).strip()][:10],
             items=[item for item in items if isinstance(item, dict)],
         )
@@ -252,7 +296,12 @@ def get_journal_provider(
     settings: Settings,
     configuration: EffectiveModelConfiguration,
     usage_context: ModelUsageContext | None = None,
+    prompt_template: PromptTemplateDefinition | None = None,
 ) -> JournalAiProvider:
     if configuration.provider_mode == "mock":
-        return MockJournalAiProvider(configuration, usage_context=usage_context, settings=settings)
-    return HttpJournalAiProvider(configuration, usage_context=usage_context, settings=settings)
+        return MockJournalAiProvider(
+            configuration, usage_context=usage_context, settings=settings, prompt_template=prompt_template
+        )
+    return HttpJournalAiProvider(
+        configuration, usage_context=usage_context, settings=settings, prompt_template=prompt_template
+    )
