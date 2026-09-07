@@ -152,7 +152,7 @@ function BankEntryCard({ entry, onSaved }: { entry: QuestionBankEntry; onSaved: 
       <div className="question-bank-answer"><strong>正确答案</strong><span>{entry.question_type === "short" ? entry.reference_answer || "未设置" : entry.correct_answers.join("、")}</span></div>
       <div className="question-bank-meta"><span>知识点：{entry.knowledge_point}</span><span>来源依据：{entry.source_evidence.length} 条</span><span>创建于：{formatDateTime(entry.created_at)}</span></div>
       {entry.explanation && <p className="question-bank-explanation">解析：{entry.explanation}</p>}
-      <details className="question-bank-usages"><summary>查看试卷引用（{entry.usages.length}）</summary>{entry.usages.length > 0 ? entry.usages.map((usage) => <div key={usage.id}><span>{usage.quiz_title}{usage.question_position ? ` · 第 ${usage.question_position} 题` : ""}</span><small>{formatDateTime(usage.used_at)}{usage.quiz_id ? "" : " · 试卷已删除"}</small></div>) : <p>这道题还没有被其他试卷使用。</p>}</details>
+      <details className="question-bank-usages"><summary>查看试卷引用（{entry.usages.length}）</summary>{entry.usages.length > 0 ? entry.usages.map((usage) => <div key={usage.id}><span>{usage.quiz_title}{usage.question_position ? ` · 第 ${usage.question_position} 题` : ""}</span><small>{formatDateTime(usage.used_at)}</small></div>) : <p>这道题还没有被其他现存试卷使用。</p>}</details>
     </>}
   </article>;
 }

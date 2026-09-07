@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models import Question, QuestionBankEntry, QuestionBankUsage, Quiz
@@ -91,6 +91,36 @@ def record_question_bank_usage(
     entry.use_count = int(entry.use_count or 0) + 1
     entry.last_used_at = usage.used_at
     return usage
+
+
+def release_question_bank_usages(db: Session, quiz_id: str) -> None:
+    """Remove a deleted quiz's bank usages and recalculate affected entries."""
+    usages = list(
+        db.scalars(
+            select(QuestionBankUsage).where(QuestionBankUsage.quiz_id == quiz_id)
+        ).all()
+    )
+    if not usages:
+        return
+
+    entry_ids = {usage.entry_id for usage in usages}
+    db.execute(delete(QuestionBankUsage).where(QuestionBankUsage.quiz_id == quiz_id))
+    for entry_id in entry_ids:
+        entry = db.get(QuestionBankEntry, entry_id)
+        if entry is None:
+            continue
+        entry.use_count = db.scalar(
+            select(func.count(QuestionBankUsage.id)).where(
+                QuestionBankUsage.entry_id == entry_id,
+                QuestionBankUsage.quiz_id.is_not(None),
+            )
+        ) or 0
+        entry.last_used_at = db.scalar(
+            select(func.max(QuestionBankUsage.used_at)).where(
+                QuestionBankUsage.entry_id == entry_id,
+                QuestionBankUsage.quiz_id.is_not(None),
+            )
+        )
 
 
 def promote_question_to_bank(

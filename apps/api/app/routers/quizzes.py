@@ -15,7 +15,6 @@ from app.models import (
     ExamShare,
     ModelUsageRecord,
     Question,
-    QuestionBankUsage,
     Quiz,
     QuizGenerationTask,
     ReviewAnswer,
@@ -45,6 +44,7 @@ from app.services.model_usage import new_usage_context
 from app.services.book_stats import to_quiz_summary
 from app.services.prompt_config import get_effective_prompt_templates
 from app.services.question_dedup import refresh_question_signature
+from app.services.question_bank import release_question_bank_usages
 from app.services.quiz_generation import (
     apply_generation_intervention,
     cancel_generation_task,
@@ -838,11 +838,7 @@ def delete_quiz(
         .where(ExamShare.quiz_id == quiz.id)
         .values(status="source_deleted", quiz_id=None, stopped_at=datetime.now(timezone.utc))
     )
-    db.execute(
-        update(QuestionBankUsage)
-        .where(QuestionBankUsage.quiz_id == quiz.id)
-        .values(quiz_id=None, question_id=None)
-    )
+    release_question_bank_usages(db, quiz.id)
     db.delete(quiz)
     db.commit()
 

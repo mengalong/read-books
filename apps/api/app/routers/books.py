@@ -36,6 +36,7 @@ from app.schemas import (
 from app.services.book_stats import to_book_detail, to_book_summary
 from app.services.pdf_parser import parse_pdf_document
 from app.services.pre_generation import start_pre_generation
+from app.services.question_bank import release_question_bank_usages
 
 router = APIRouter(prefix="/books", tags=["books"])
 admin_router = APIRouter(prefix="/admin/books", tags=["admin-books"])
@@ -327,6 +328,8 @@ def delete_pdf(
         select(Quiz.id).where(Quiz.book_id == book_id, Quiz.status != "submitted")
     ).all()
     if draft_quiz_ids:
+        for draft_quiz_id in draft_quiz_ids:
+            release_question_bank_usages(db, draft_quiz_id)
         db.execute(
             update(ExamShare)
             .where(ExamShare.quiz_id.in_(draft_quiz_ids))

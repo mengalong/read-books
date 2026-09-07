@@ -117,8 +117,44 @@ def test_promote_edit_list_and_track_usage(client):
     deleted = client.delete(f"/api/quizzes/{quiz_id}")
     assert deleted.status_code == 204
     remaining = client.get(f"/api/books/{book['id']}/question-bank").json()["items"][0]
-    assert remaining["usages"][0]["quiz_id"] is None
-    assert remaining["usages"][0]["quiz_title"] == "原始试卷"
+    assert remaining["use_count"] == 0
+    assert remaining["usages"] == []
+    assert client.get(f"/api/books/{book['id']}/question-bank?unused_only=true").json()["total"] == 1
+
+
+def test_deleting_quiz_updates_only_current_question_bank_usages(client):
+    book = create_book(client)
+    first_quiz_id, first_question_id = create_source_and_quiz(book["id"])
+    entry = client.post(
+        f"/api/quizzes/{first_quiz_id}/questions/{first_question_id}/question-bank"
+    ).json()
+    second_quiz_id, second_question_id = create_source_and_quiz(book["id"])
+    reused = client.post(
+        f"/api/quizzes/{second_quiz_id}/questions/{second_question_id}/question-bank"
+    ).json()
+
+    assert reused["id"] == entry["id"]
+    assert reused["use_count"] == 2
+    assert {usage["quiz_id"] for usage in reused["usages"]} == {
+        first_quiz_id,
+        second_quiz_id,
+    }
+
+    deleted = client.delete(f"/api/quizzes/{first_quiz_id}")
+    assert deleted.status_code == 204
+    remaining = client.get(f"/api/books/{book['id']}/question-bank").json()["items"][0]
+    assert remaining["use_count"] == 1
+    assert len(remaining["usages"]) == 1
+    assert remaining["usages"][0]["quiz_id"] == second_quiz_id
+
+    deleted = client.delete(f"/api/quizzes/{second_quiz_id}")
+    assert deleted.status_code == 204
+    unused = client.get(
+        f"/api/books/{book['id']}/question-bank?unused_only=true"
+    ).json()
+    assert unused["total"] == 1
+    assert unused["items"][0]["use_count"] == 0
+    assert unused["items"][0]["usages"] == []
 
 
 def test_generation_prefers_a_bank_question_and_records_new_usage(client):
