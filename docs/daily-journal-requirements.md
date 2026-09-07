@@ -65,7 +65,7 @@
 | 想读 | `inbox` | `needs_review`、`inbox`、`added`、`completed`、`dismissed` |
 | 想看 | `inbox` | `needs_review`、`inbox`、`added`、`completed`、`dismissed` |
 
-想读和想看项目当前不会自动创建正式内容库资源；`added` 只表示用户已经推进该候选。后续应增加明确的“加入内容库”操作，并执行标题确认和重复资源检查。
+想读和想看项目当前不会自动创建正式内容库资源；`added` 在界面显示为“已采纳”，只表示用户已经推进该候选。后续应增加明确的“加入内容库”操作，并执行标题确认和重复资源检查。
 
 ## 3. 页面与接口
 

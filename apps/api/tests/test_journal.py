@@ -1,5 +1,9 @@
 import time
 
+from app.database import SessionLocal
+from app.models import User
+from app.services.auth import create_user_with_workspace
+
 
 def wait_for_day(client, local_date: str) -> dict:
     for _ in range(100):
@@ -80,3 +84,42 @@ def test_journal_item_filters_and_day_edit(client):
     assert edited.status_code == 200
     assert edited.json()["journal_text"] == "今天想读一本新的书。"
     assert edited.json()["confirmed_at"] is not None
+
+
+def test_journal_data_is_isolated_by_workspace(client):
+    with SessionLocal() as db:
+        if db.query(User).filter(User.username == "journal-reader").one_or_none() is None:
+            create_user_with_workspace(
+                db,
+                username="journal-reader",
+                display_name="日常记录隔离用户",
+                password="JournalReader1!",
+                must_change_password=False,
+            )
+            db.commit()
+
+    client.post("/api/auth/logout")
+    assert client.post(
+        "/api/auth/login",
+        json={"username": "journal-reader", "password": "JournalReader1!"},
+    ).status_code == 200
+    created = client.post(
+        "/api/journal/captures",
+        json={
+            "content": "这个记录只属于普通用户",
+            "capture_type": "note",
+            "local_date": "2035-01-01",
+        },
+    )
+    assert created.status_code == 201
+    capture_id = created.json()["id"]
+
+    client.post("/api/auth/logout")
+    assert client.post(
+        "/api/auth/login",
+        json={"username": "test-admin", "password": "TestAdmin1!"},
+    ).status_code == 200
+    admin_day = client.get("/api/journal/days/2035-01-01")
+    assert admin_day.status_code == 200
+    assert admin_day.json()["captures"] == []
+    assert client.delete(f"/api/journal/captures/{capture_id}").status_code == 404

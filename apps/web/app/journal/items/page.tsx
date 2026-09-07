@@ -23,7 +23,7 @@ function statusText(item: JournalItem) {
   if (item.status === "needs_review") return "待确认";
   if (item.item_type === "todo") return item.status === "done" ? "已完成" : "进行中";
   if (item.status === "archived" || item.status === "dismissed") return "已归档";
-  if (item.status === "added") return "已加入内容库";
+  if (item.status === "added") return "已采纳";
   if (item.status === "completed") return "已完成";
   return "收件箱";
 }

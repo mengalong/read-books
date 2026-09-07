@@ -13,6 +13,7 @@ const FILTERS = [
   { value: "manual_quiz_generation", label: "手动出题" },
   { value: "pre_generation", label: "后台预出题" },
   { value: "quiz_submission", label: "问答评分" },
+  { value: "journal_daily_organization", label: "日常整理" },
   { value: "model_connection_test", label: "连接测试" },
 ];
 
@@ -24,6 +25,7 @@ const PHASE_LABELS: Record<string, string> = {
   quiz_generation: "出题",
   quiz_generation_repair: "出题格式修正",
   short_answer_grading: "问答题评分",
+  journal_organization: "日记与项目整理",
   connection_test: "连接测试",
 };
 

@@ -53,14 +53,17 @@ const itemIcons: Record<JournalItemType, typeof ListTodo> = {
 };
 
 function todayString() {
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60_000;
-  return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
 function shiftDate(value: string, amount: number) {
-  const current = new Date(`${value}T12:00:00`);
-  current.setDate(current.getDate() + amount);
+  const current = new Date(`${value}T12:00:00Z`);
+  current.setUTCDate(current.getUTCDate() + amount);
   return current.toISOString().slice(0, 10);
 }
 
@@ -73,7 +76,7 @@ function statusLabel(item: JournalItem) {
   if (item.status === "needs_review") return "待确认";
   if (item.item_type === "todo") return item.status === "done" ? "已完成" : item.status === "cancelled" ? "已取消" : "进行中";
   if (item.status === "archived" || item.status === "dismissed") return "已归档";
-  if (item.status === "added") return "已加入内容库";
+  if (item.status === "added") return "已采纳";
   if (item.status === "completed") return "已完成";
   return "收件箱";
 }
