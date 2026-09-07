@@ -6,6 +6,7 @@ test("试卷编辑页可直接修正题干、选项和标准答案", async ({ pa
   await mockAdminIdentity(page);
 
   let savedPayload: Record<string, unknown> | null = null;
+  let bankUpdatePayload: Record<string, unknown> | null = null;
   await page.route("**/api/quizzes/quiz-edit/editable", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -45,6 +46,7 @@ test("试卷编辑页可直接修正题干、选项和标准答案", async ({ pa
             source_evidence: [],
             max_score: 6,
             correct_answers: ["A"],
+            question_bank_entry_id: "bank-1",
           },
         ],
       }),
@@ -77,6 +79,25 @@ test("试卷编辑页可直接修正题干、选项和标准答案", async ({ pa
         source_evidence: [],
         max_score: 6,
         correct_answers: ["B"],
+        question_bank_entry_id: "bank-1",
+      }),
+    });
+  });
+
+  await page.route("**/api/quizzes/quiz-edit/questions/q1/question-bank", async (route) => {
+    bankUpdatePayload = route.request().postDataJSON() || {};
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "bank-1", book_id: "book-1", origin_quiz_id: "quiz-edit", origin_question_id: "q1",
+        question_type: "single", question_subtype: "general", prompt: "修正后的题干",
+        options: [{ id: "A", text: "错误选项" }, { id: "B", text: "正确选项" }, { id: "C", text: "干扰项一" }, { id: "D", text: "干扰项二" }],
+        correct_answers: ["B"], explanation: "修正后的解析", knowledge_point: "修正后的知识点",
+        difficulty: "medium", estimated_seconds: 45, reference_answer: null, grading_rubric: [],
+        source_chunk_ids: [], quote_entry_ids: [], plot_event_ids: [], source_segment_ids: [],
+        fact_key: "updated-fact", fact_claim: "修正后的题干", semantic_signature: {}, source_evidence: [],
+        source_mode: "pdf", max_score: 6, status: "active", use_count: 1,
+        created_at: "2026-09-07T08:00:00Z", updated_at: "2026-09-07T08:01:00Z", usages: [],
       }),
     });
   });
@@ -104,6 +125,11 @@ test("试卷编辑页可直接修正题干、选项和标准答案", async ({ pa
     explanation: "修正后的解析",
     correct_answers: ["B"],
   });
+  await expect(page.getByRole("button", { name: "更新题库" })).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "更新题库" }).click();
+  await expect(page.getByRole("button", { name: "已在题库" })).toBeVisible();
+  expect(bankUpdatePayload).not.toBeNull();
 });
 
 test("试卷出题过程页展示每道题的 prompt、模型回复和 token", async ({ page }) => {

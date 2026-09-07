@@ -54,7 +54,7 @@ test("题库页面展示引用关系并支持人工修改题目", async ({ page 
   await page.goto("/books/book-bank/question-bank");
   await expect(page.getByRole("heading", { name: "《题库测试资源》题库" })).toBeVisible();
   await expect(page.getByText("原题干")).toBeVisible();
-  await page.getByText("查看试卷引用（1）").click();
+  await page.getByText("查看当前试卷引用（1）").click();
   await expect(page.getByText("原始试卷")).toBeVisible();
   await page.getByTitle("编辑题库题目").click();
   await page.getByLabel("题干").fill("修改后的题干");

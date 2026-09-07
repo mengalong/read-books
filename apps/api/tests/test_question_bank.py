@@ -175,3 +175,43 @@ def test_generation_prefers_a_bank_question_and_records_new_usage(client):
         assert len(entry.usages) == 2
         question = db.query(Question).filter(Question.quiz_id == task["quiz_id"]).one()
         assert question.question_bank_entry_id == entry.id
+
+
+def test_promoted_question_updates_existing_bank_entry_after_manual_edit(client):
+    book = create_book(client)
+    quiz_id, question_id = create_source_and_quiz(book["id"])
+    promoted = client.post(
+        f"/api/quizzes/{quiz_id}/questions/{question_id}/question-bank"
+    ).json()
+
+    updated_question = client.patch(
+        f"/api/quizzes/{quiz_id}/questions/{question_id}",
+        json={
+            "prompt": "人工修改后的题干",
+            "options": [
+                {"id": "A", "text": "修改后的正确选项"},
+                {"id": "B", "text": "修改后的选项 B"},
+                {"id": "C", "text": "修改后的选项 C"},
+                {"id": "D", "text": "修改后的选项 D"},
+            ],
+            "correct_answers": ["A"],
+            "explanation": "人工修改后的解析",
+            "knowledge_point": "人工修改后的知识点",
+        },
+    )
+    assert updated_question.status_code == 200
+    assert updated_question.json()["question_bank_entry_id"] == promoted["id"]
+
+    synced = client.post(
+        f"/api/quizzes/{quiz_id}/questions/{question_id}/question-bank"
+    )
+    assert synced.status_code == 201
+    entry = synced.json()
+    assert entry["id"] == promoted["id"]
+    assert entry["prompt"] == "人工修改后的题干"
+    assert entry["options"][0]["text"] == "修改后的正确选项"
+    assert entry["correct_answers"] == ["A"]
+    assert entry["explanation"] == "人工修改后的解析"
+    assert entry["knowledge_point"] == "人工修改后的知识点"
+    assert entry["use_count"] == 1
+    assert len(entry["usages"]) == 1

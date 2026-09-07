@@ -129,6 +129,19 @@ def promote_question_to_bank(
     question: Question,
     user_id: str | None,
 ) -> tuple[QuestionBankEntry, bool]:
+    linked_entry = (
+        db.get(QuestionBankEntry, question.question_bank_entry_id)
+        if question.question_bank_entry_id
+        else None
+    )
+    if linked_entry is not None and linked_entry.book_id == quiz.book_id:
+        for field, value in _copy_question_fields(question).items():
+            setattr(linked_entry, field, value)
+        record_question_bank_usage(db, linked_entry, quiz, question)
+        db.commit()
+        db.refresh(linked_entry)
+        return linked_entry, False
+
     fact_key = _entry_key(question)
     existing = db.scalar(
         select(QuestionBankEntry).where(

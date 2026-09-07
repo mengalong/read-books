@@ -156,7 +156,16 @@ export default function QuizEditPage() {
           onRegenerateQuestion={(questionId) => regenerateQuizQuestion(quiz.id, questionId)}
           onSaved={handleQuestionSaved}
           onReviewQuestion={handleQuestionReview}
-          onPromoteQuestion={(questionId) => promoteQuestionToBank(quiz.id, questionId)}
+          onPromoteQuestion={async (questionId) => {
+            const entry = await promoteQuestionToBank(quiz.id, questionId);
+            setQuiz((current) => current ? {
+              ...current,
+              questions: current.questions.map((question) => question.id === questionId
+                ? { ...question, question_bank_entry_id: entry.id }
+                : question),
+            } : current);
+            return entry;
+          }}
           onDirtyChange={handleDirtyChange}
           onUpdateQuestion={(questionId, payload) => updateQuizQuestion(quiz.id, questionId, payload)}
           qualityReviewResult={quiz.quality_review_result}

@@ -78,6 +78,7 @@ function QuestionEditForm({
   const [reviewing, setReviewing] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [banked, setBanked] = useState(Boolean(question.question_bank_entry_id));
+  const [bankNeedsUpdate, setBankNeedsUpdate] = useState(false);
   const [confirmingRegeneration, setConfirmingRegeneration] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -120,6 +121,7 @@ function QuestionEditForm({
     setOptionTexts(OPTION_IDS.map((id) => question.options.find((option) => option.id === id)?.text || ""));
     setCorrectAnswers(question.correct_answers || []);
     setBanked(Boolean(question.question_bank_entry_id));
+    if (!question.question_bank_entry_id) setBankNeedsUpdate(false);
     setError("");
   }, [question]);
 
@@ -164,6 +166,7 @@ function QuestionEditForm({
     try {
       const nextQuestion = await onUpdateQuestion(question.id, payload);
       onSaved(nextQuestion);
+      if (nextQuestion.question_bank_entry_id) setBankNeedsUpdate(true);
       setSaved(true);
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "保存失败");
@@ -191,6 +194,7 @@ function QuestionEditForm({
     try {
       const nextQuestion = await onRegenerateQuestion(question.id);
       onSaved(nextQuestion);
+      if (nextQuestion.question_bank_entry_id) setBankNeedsUpdate(true);
       setSaved(true);
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "重出失败");
@@ -213,13 +217,17 @@ function QuestionEditForm({
   }
 
   async function handlePromote() {
-    if (!onPromoteQuestion || promoting || banked) return;
-    if (!window.confirm("确认将这道题加入本资源题库吗？题目会保留当前版本，后续可在题库中继续修改。")) return;
+    if (!onPromoteQuestion || promoting || (banked && !bankNeedsUpdate) || dirty) return;
+    const message = banked
+      ? "确认将本题保存后的最新内容同步到题库吗？原题库条目和试卷引用关系会保留。"
+      : "确认将这道题加入本资源题库吗？题目会保留当前版本，后续可在题库中继续修改。";
+    if (!window.confirm(message)) return;
     setPromoting(true);
     setError("");
     try {
       await onPromoteQuestion(question.id);
       setBanked(true);
+      setBankNeedsUpdate(false);
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "加入题库失败");
     } finally {
@@ -233,7 +241,7 @@ function QuestionEditForm({
         <div className="question-card-heading"><span className="question-number">第 {question.position} 题 · {question.knowledge_point}</span><span className={`question-edit-status ${dirty ? "dirty" : saved ? "saved" : "clean"}`}>{dirty ? <><AlertCircle size={13} />有未保存修改</> : saved ? <><CheckCircle2 size={13} />已保存修改</> : "未修改"}</span></div>
         <div className="question-card-actions">
           <span className="question-type">{questionTypeLabels[question.question_type]}</span>
-          {onPromoteQuestion && <button className="button button-secondary question-edit-trigger" disabled={submitting || regenerating || promoting || banked} onClick={() => void handlePromote()} title={banked ? "已加入题库" : "加入题库"} type="button"><LibraryBig size={14} /><span>{banked ? "已在题库" : promoting ? "加入中……" : "加入题库"}</span></button>}
+          {onPromoteQuestion && <button className="button button-secondary question-edit-trigger" disabled={submitting || regenerating || promoting || (banked && !bankNeedsUpdate) || dirty} onClick={() => void handlePromote()} title={dirty ? "请先保存本题修改" : banked ? bankNeedsUpdate ? "同步最新内容到题库" : "已加入题库" : "加入题库"} type="button"><LibraryBig size={14} /><span>{banked ? bankNeedsUpdate ? "更新题库" : "已在题库" : promoting ? "加入中……" : "加入题库"}</span></button>}
           <button
             className="button button-secondary question-edit-trigger"
             disabled={submitting || regenerating}
