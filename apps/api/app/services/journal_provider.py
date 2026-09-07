@@ -75,13 +75,16 @@ def _mock_organization(
     ordered = sorted(captures, key=lambda item: str(item.get("captured_at") or ""))
     highlights: list[str] = []
     items: list[dict[str, Any]] = []
-    body_lines: list[str] = []
+    narrative_parts: list[str] = []
     grouped: dict[str, list[str]] = {"todo": [], "idea": [], "want_read": [], "want_watch": []}
     for capture in ordered:
         content = _compact(str(capture.get("content") or ""))
         if not content:
             continue
-        body_lines.append(f"- {content}")
+        # The mock provider has no language model, but it should still produce prose
+        # rather than presenting the capture inbox as a copied bullet list.
+        lead = ("起初" if not narrative_parts else "随后") if len(narrative_parts) < 2 else "此外"
+        narrative_parts.append(f"{lead}，{content.rstrip('。！？；')}。")
         if len(highlights) < 3:
             highlights.append(content)
         capture_type = str(capture.get("capture_type") or "note")
@@ -113,7 +116,7 @@ def _mock_organization(
         "",
         "## 日记",
         "",
-        "\n".join(body_lines) or "今天没有可整理的正文。",
+        "".join(narrative_parts) or "今天没有可整理的正文。",
         "",
         "## 今日重点",
         "",
