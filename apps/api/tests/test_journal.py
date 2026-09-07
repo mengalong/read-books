@@ -67,6 +67,27 @@ def test_quick_captures_are_classified_and_organized(client):
     assert confirmed.status_code == 200
     assert confirmed.json()["status"] == "inbox"
 
+    rejected = client.patch(
+        f"/api/journal/items/{items['todo']['id']}",
+        json={"status": "dismissed"},
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "dismissed"
+    day_after_reject = client.get(f"/api/journal/days/{local_date}")
+    assert day_after_reject.status_code == 200
+    rejected_item = next(
+        item for item in day_after_reject.json()["items"] if item["id"] == items["todo"]["id"]
+    )
+    assert rejected_item["status"] == "dismissed"
+
+    restored_as_idea = client.patch(
+        f"/api/journal/items/{items['todo']['id']}",
+        json={"item_type": "idea"},
+    )
+    assert restored_as_idea.status_code == 200
+    assert restored_as_idea.json()["item_type"] == "idea"
+    assert restored_as_idea.json()["status"] == "inbox"
+
 
 def test_journal_item_filters_and_day_edit(client):
     local_date = "2026-09-08"

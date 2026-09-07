@@ -85,8 +85,9 @@ function dayLabel(value: string) {
 
 function statusLabel(item: JournalItem) {
   if (item.status === "needs_review") return "待确认";
+  if (item.status === "dismissed") return "已打回";
   if (item.item_type === "todo") return item.status === "done" ? "已完成" : item.status === "cancelled" ? "已取消" : "进行中";
-  if (item.status === "archived" || item.status === "dismissed") return "已归档";
+  if (item.status === "archived") return "已归档";
   if (item.status === "added") return "已采纳";
   if (item.status === "completed") return "已完成";
   return "收件箱";
@@ -265,6 +266,27 @@ export default function JournalPage() {
     }
   }
 
+  async function handleItemTypeChange(item: JournalItem, itemType: JournalItemType) {
+    if (item.item_type === itemType) return;
+    try {
+      const updated = await updateJournalItem(item.id, { item_type: itemType });
+      setDay((current) => current ? { ...current, items: current.items.map((entry) => entry.id === updated.id ? updated : entry) } : current);
+      setNotice("归集类型已修改");
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "归集类型修改失败");
+    }
+  }
+
+  async function handleRejectItem(item: JournalItem) {
+    try {
+      const updated = await updateJournalItem(item.id, { status: "dismissed" });
+      setDay((current) => current ? { ...current, items: current.items.map((entry) => entry.id === updated.id ? updated : entry) } : current);
+      setNotice("已打回这条归集，不会删除原始记录");
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "归集打回失败");
+    }
+  }
+
   if (loading && !day) return <div className="page-wrap"><div className="loading-state">正在打开今天的记录……</div></div>;
 
   return (
@@ -321,14 +343,14 @@ export default function JournalPage() {
         <section className="journal-section form-panel">
           <div className="section-title"><h2>今日整理</h2><span>{day?.organization_status === "completed" ? "已完成" : day?.organization_status === "processing" || day?.organization_status === "pending" ? "整理中" : "尚未整理"}</span></div>
           <div className="journal-draft-hint">Markdown 草稿，可直接复制到支持 Markdown 的编辑器发布</div><textarea aria-label="今日生成的日记" className="journal-draft" onChange={(event) => setJournalText(event.target.value)} placeholder="整理后会在这里生成结构化 Markdown 日记草稿。" rows={16} value={journalText} />
-          <div className="journal-draft-footer"><div className="journal-draft-meta"><span>{day?.confirmed_at ? <><Check size={14} />已确认</> : "草稿可继续编辑"}</span><label className="journal-style-picker"><span>写作风格</span><select aria-label="日记写作风格" onChange={(event) => setWritingStyle(event.target.value as JournalWritingStyle)} value={writingStyle}>{writingStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}</select></label></div><div className="table-actions"><button className="button button-secondary" disabled={saving || !journalText.trim()} onClick={() => void handleSaveJournal()} type="button"><Save size={15} />保存</button><button className="button button-secondary" disabled={!journalText.trim()} onClick={() => void handleCopyJournal()} type="button"><Copy size={15} />复制 Markdown</button><button className="button button-primary" disabled={saving || !captureCount} onClick={() => void handleOrganize()} type="button"><Sparkles size={15} />{organizing ? "整理中……" : "重新整理"}</button>{day?.journal_text && <button aria-label={day.confirmed_at ? "取消确认" : "确认日记"} className="button button-quiet" disabled={saving} onClick={() => void handleSaveJournal(true)} title={day.confirmed_at ? "取消确认" : "确认日记"} type="button"><Check size={15} /></button>}</div></div>
+          <div className="journal-draft-footer"><div className="journal-draft-meta"><span>{day?.confirmed_at ? <><Check size={14} />已确认</> : "草稿可继续编辑"}</span><label className="journal-style-picker"><span>写作风格</span><select aria-label="日记写作风格" onChange={(event) => setWritingStyle(event.target.value as JournalWritingStyle)} value={writingStyle}>{writingStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}</select></label></div><div className="journal-draft-actions table-actions"><button className="button button-secondary" disabled={saving || !journalText.trim()} onClick={() => void handleSaveJournal()} type="button"><Save size={15} />保存草稿</button><button className="button button-secondary" disabled={!journalText.trim()} onClick={() => void handleCopyJournal()} type="button"><Copy size={15} />复制 Markdown</button><button className="button button-primary" disabled={saving || !captureCount} onClick={() => void handleOrganize()} type="button"><Sparkles size={15} />{organizing ? "整理中" : "重新整理"}</button>{day?.journal_text && <button aria-label={day.confirmed_at ? "取消确认" : "确认日记"} className="button button-quiet" disabled={saving} onClick={() => void handleSaveJournal(true)} title={day.confirmed_at ? "取消确认" : "确认日记"} type="button"><Check size={15} /></button>}</div></div>
           {day?.organization_error && <div className="journal-error">{day.organization_error}</div>}
         </section>
       </div>
 
       <section className="journal-section form-panel journal-items-panel">
         <div className="section-title"><h2>从今天归集</h2><span>{pendingItems ? `${pendingItems} 项待确认` : `${day?.items.length || 0} 项`}</span><Link className="section-link" href="/journal/items">查看全部清单 →</Link></div>
-        {day?.items.length ? <div className="journal-item-grid">{day.items.map((item) => { const Icon = itemIcons[item.item_type]; return <article className={`journal-item-card ${item.status === "done" ? "is-done" : ""}`} key={item.id}><div className="journal-item-card-head"><span className={`journal-item-icon item-${item.item_type}`}><Icon size={15} /></span><span className="journal-item-label">{itemLabels[item.item_type]}</span><span className={`journal-item-status ${item.status}`}>{statusLabel(item)}</span></div><strong>{item.title}</strong>{item.description && <p>{item.description}</p>}<button className="button button-quiet journal-item-action" onClick={() => void handleItemStatus(item)} type="button">{item.item_type === "todo" && item.status !== "done" ? "标记完成" : item.status === "done" ? "重新打开" : item.status === "needs_review" ? "确认归集" : item.status === "archived" || item.status === "completed" ? "重新打开" : "推进状态"}</button></article>; })}</div> : <div className="journal-empty">整理今天后，待办、灵感和想读/想看项目会显示在这里。</div>}
+        {day?.items.length ? <div className="journal-item-grid">{day.items.map((item) => { const Icon = itemIcons[item.item_type]; return <article className={`journal-item-card ${item.status === "done" ? "is-done" : ""}`} key={item.id}><div className="journal-item-card-head"><span className={`journal-item-icon item-${item.item_type}`}><Icon size={15} /></span><select aria-label={`修改${itemLabels[item.item_type]}归集类型`} className="journal-item-type-select" onChange={(event) => void handleItemTypeChange(item, event.target.value as JournalItemType)} value={item.item_type}>{Object.entries(itemLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><span className={`journal-item-status ${item.status}`}>{statusLabel(item)}</span></div><strong>{item.title}</strong>{item.description && <p>{item.description}</p>}<div className="journal-item-card-actions">{item.status === "needs_review" ? <><button className="button button-quiet journal-item-action" onClick={() => void handleItemStatus(item)} type="button">确认</button><button className="button button-quiet journal-item-action journal-item-reject" onClick={() => void handleRejectItem(item)} type="button">打回</button></> : <button className="button button-quiet journal-item-action" onClick={() => void handleItemStatus(item)} type="button">{item.item_type === "todo" && item.status !== "done" ? "标记完成" : item.status === "done" ? "重新打开" : item.status === "dismissed" ? "恢复" : item.status === "archived" || item.status === "completed" ? "重新打开" : "推进状态"}</button>}</div></article>; })}</div> : <div className="journal-empty">整理今天后，待办、灵感和想读/想看项目会显示在这里。</div>}
       </section>
 
       <div className="journal-footer-note"><RefreshCw size={14} />原始记录始终保留，模型只生成可编辑草稿和可追踪项目。</div>

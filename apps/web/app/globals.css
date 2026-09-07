@@ -536,11 +536,40 @@ a {
   margin-top: 12px;
 }
 
+.journal-draft-footer {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .journal-draft-meta {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+  justify-content: space-between;
+}
+
+.journal-draft-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.journal-draft-actions .button {
+  font-size: 12px;
+  min-height: 34px;
+  padding-left: 10px;
+  padding-right: 10px;
+  white-space: nowrap;
+}
+
+.journal-draft-actions .button-quiet {
+  min-width: 34px;
+  padding-left: 7px;
+  padding-right: 7px;
 }
 
 .journal-style-picker {
@@ -809,6 +838,21 @@ a {
   font-size: 11px;
 }
 
+.journal-item-type-select {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  max-width: 96px;
+  outline: 0;
+  padding: 3px 18px 3px 0;
+}
+
+.journal-item-type-select:focus {
+  color: var(--green);
+}
+
 .journal-item-status {
   border-radius: 3px;
   color: var(--muted);
@@ -819,6 +863,7 @@ a {
 
 .journal-item-status.needs_review { background: var(--yellow-soft); color: var(--yellow); }
 .journal-item-status.done { background: var(--green-soft); color: var(--green); }
+.journal-item-status.dismissed { background: var(--red-soft); color: var(--red); }
 .journal-item-status.open,
 .journal-item-status.inbox { background: #f0f3f1; color: var(--muted); }
 
@@ -841,6 +886,21 @@ a {
   margin-top: 10px;
   min-height: 28px;
   padding: 0 7px;
+}
+
+.journal-item-card-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.journal-item-card-actions .journal-item-action {
+  margin-top: 0;
+}
+
+.journal-item-reject {
+  color: var(--red);
 }
 
 .journal-footer-note {

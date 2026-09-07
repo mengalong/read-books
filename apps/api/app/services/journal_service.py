@@ -19,7 +19,7 @@ from app.services.prompt_config import get_prompt_template
 JOURNAL_TIMEZONE = ZoneInfo("Asia/Shanghai")
 CAPTURE_TYPES = {"note", *ITEM_TYPES}
 ITEM_STATUSES = {
-    "todo": {"open", "done", "cancelled", "needs_review"},
+    "todo": {"open", "done", "cancelled", "needs_review", "dismissed"},
     "idea": {"inbox", "archived", "dismissed", "needs_review"},
     "want_read": {"inbox", "added", "completed", "dismissed", "needs_review"},
     "want_watch": {"inbox", "added", "completed", "dismissed", "needs_review"},

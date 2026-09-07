@@ -226,19 +226,25 @@ def update_capture(
         for item in related_items
         if capture.id in (item.source_capture_ids or [])
     ]
+    explicit_related = [
+        item
+        for item in related
+        if (item.metadata_json or {}).get("source") == "explicit"
+    ]
     if capture.capture_type in ITEM_STATUSES:
         explicit_item = next(
-            (
-                item
-                for item in related
-                if item.item_type == capture.capture_type
-                or (
-                    item.status in {"open", "inbox", "needs_review"}
-                    and (item.metadata_json or {}).get("source") in {"explicit", "ai"}
-                )
-            ),
+            (item for item in explicit_related if item.item_type == capture.capture_type),
             None,
         )
+        if explicit_item is None:
+            explicit_item = next(
+                (
+                    item
+                    for item in explicit_related
+                    if item.status not in {"done", "completed", "dismissed", "cancelled"}
+                ),
+                None,
+            )
         if explicit_item is None:
             explicit_item = upsert_journal_item(
                 db,
@@ -263,8 +269,15 @@ def update_capture(
             }
             if explicit_item.status == "needs_review":
                 explicit_item.status = "open" if capture.capture_type == "todo" else "inbox"
-    elif not related:
-        pass
+    else:
+        for item in explicit_related:
+            if item.status not in {"done", "completed", "dismissed", "cancelled"}:
+                item.status = "dismissed"
+                item.metadata_json = {
+                    **(item.metadata_json or {}),
+                    "needs_confirmation": False,
+                    "dismiss_reason": "source_capture_reclassified",
+                }
     mark_day_stale(db, identity.workspace.id, previous_date)
     mark_day_stale(db, identity.workspace.id, capture.local_date)
     db.commit()
