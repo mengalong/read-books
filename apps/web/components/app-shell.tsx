@@ -20,6 +20,7 @@ const readingNavigation = [
 const journalNavigation = [
   { href: "/journal", label: "今天的记录", icon: NotebookPen },
   { href: "/journal/items", label: "日常清单", icon: ClipboardCheck },
+  { href: "/journal/reviews", label: "周期回顾", icon: History },
 ];
 
 const systemNavigation = [
@@ -178,6 +179,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main className="app-main">{children}</main>
         <SiteFooter />
       </div>
+      <Link aria-label="快速记录" className="quick-journal-link" href="/journal#quick-capture" title="快速记录"><NotebookPen size={18} /></Link>
     </div>
   );
 }

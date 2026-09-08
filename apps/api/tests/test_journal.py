@@ -57,7 +57,9 @@ def test_quick_captures_are_classified_and_organized(client):
     assert body["summary"]["capture_count"] == 2
     items = {item["item_type"]: item for item in body["items"]}
     assert items["todo"]["status"] == "open"
+    assert items["todo"]["review_status"] == "confirmed"
     assert items["idea"]["status"] == "needs_review"
+    assert items["idea"]["review_status"] == "pending"
     assert items["idea"]["source_capture_ids"]
 
     confirmed = client.patch(
@@ -66,6 +68,7 @@ def test_quick_captures_are_classified_and_organized(client):
     )
     assert confirmed.status_code == 200
     assert confirmed.json()["status"] == "inbox"
+    assert confirmed.json()["review_status"] == "confirmed"
 
     before_rerun = {
         item["id"]: item["status"]
@@ -128,6 +131,10 @@ def test_journal_item_filters_and_day_edit(client):
     assert edited.status_code == 200
     assert edited.json()["journal_text"] == "今天想读一本新的书。"
     assert edited.json()["confirmed_at"] is not None
+
+    versions = client.get(f"/api/journal/days/{local_date}/versions")
+    assert versions.status_code == 200
+    assert versions.json()
 
 
 def test_journal_data_is_isolated_by_workspace(client):

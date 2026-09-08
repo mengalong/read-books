@@ -18,6 +18,8 @@ export type JournalCapture = {
 export type JournalItem = {
   id: string;
   item_type: JournalItemType;
+  canonical_key: string | null;
+  review_status: "pending" | "confirmed" | "completed" | "cancelled" | "deleted";
   title: string;
   description: string;
   status: string;
@@ -35,6 +37,10 @@ export type JournalDay = {
   id: string;
   local_date: string;
   writing_style: JournalWritingStyle;
+  model_consent: boolean;
+  mood_score: number | null;
+  energy_score: number | null;
+  meaning_score: number | null;
   organization_status: "not_started" | "pending" | "processing" | "completed" | "failed";
   journal_text: string;
   summary: { highlights?: string[]; item_ids?: string[]; capture_count?: number };
@@ -46,6 +52,26 @@ export type JournalDay = {
   updated_at: string;
   captures: JournalCapture[];
   items: JournalItem[];
+};
+
+export type JournalDayVersion = {
+  id: string;
+  version_number: number;
+  source: string;
+  journal_text: string;
+  writing_style: JournalWritingStyle;
+  created_at: string;
+};
+
+export type JournalDaySummary = {
+  local_date: string;
+  capture_count: number;
+  item_count: number;
+  completed_todo_count: number;
+  mood_score: number | null;
+  energy_score: number | null;
+  meaning_score: number | null;
+  journal_preview: string;
 };
 
 export type ModelProviderMode = "mock" | "openai_compatible";

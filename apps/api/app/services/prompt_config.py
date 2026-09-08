@@ -177,8 +177,9 @@ SOURCE_MATERIAL：
             '{"journal_text":"日记草稿","highlights":["重点"],"items":['
             '{"item_type":"todo|idea|want_read|want_watch","title":"归集标题",'
             '"description":"补充说明","source_capture_ids":["原始记录 ID"],'
-            '"confidence":0.0,"due_date":null,"metadata":{"media_title":"书名或片名",'
-            '"reason":"想读/想看的原因","mentioned_at":"提及时间","creator":"作者或导演"}}]}。'
+            '"confidence":0.0,"due_date":null,"canonical_key":"稳定主题键",'
+            '"metadata":{"media_title":"书名或片名","reason":"想读/想看的原因",'
+            '"mentioned_at":"提及时间","creator":"作者或导演"}}]}。'
             "confidence 在 0 到 1 之间；无法确认的项目可以省略。"
             "每个项目必须引用至少一个原始记录 ID，不要生成原始记录中不存在的项目。"
             "journal_text 必须是可以直接复制发布的 Markdown，使用 # 标题、## 分节、段落和列表。"

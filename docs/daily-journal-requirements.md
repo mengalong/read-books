@@ -70,6 +70,8 @@
 
 想读和想看项目当前不会自动创建正式内容库资源；`added` 在界面显示为“已采纳”，只表示用户已经推进该候选。后续应增加明确的“加入内容库”操作，并执行标题确认和重复资源检查。
 
+项目对外使用统一决策状态：`pending`（待确认）、`confirmed`（已确认）、`completed`（已完成，仅待办）、`cancelled`（已取消）和 `deleted`（已删除）。旧的 `status` 字段继续用于兼容历史客户端，但新页面和整理任务以 `review_status` 为准。删除项目使用软删除，后续重复整理会继承删除决定。
+
 ## 3. 页面与接口
 
 页面：
@@ -85,6 +87,9 @@
 - `DELETE /api/journal/captures/{capture_id}`：删除当前工作空间的原始记录。
 - `POST /api/journal/days/{local_date}/organize`：按指定写作风格启动每日整理。
 - `PATCH /api/journal/days/{local_date}`：保存或确认日记草稿。
+- `GET /api/journal/days/{local_date}/versions`：读取日记历史版本。
+- `POST /api/journal/days/{local_date}/versions/{version_number}/restore`：恢复指定日记版本。
+- `GET /api/journal/summaries?period=week|month`：读取周期回顾的每日汇总。
 - `GET /api/journal/items`：按类型和状态读取长期项目。
 - `PATCH /api/journal/items/{item_id}`：编辑分类、标题、说明、截止日期或状态。
 - `DELETE /api/journal/items/{item_id}`：删除归集项目，不删除来源记录。
@@ -123,12 +128,14 @@
 - 明确分类的项目保存后立即出现在长期清单。
 - 普通记录经过每日整理后，模型推断项目以待确认状态出现。
 - 每日整理异步执行，页面可以轮询看到完成或失败结果。
-- 日记草稿可以编辑、保存和确认，原始记录不被覆盖。
+- 日记草稿可以编辑、自动保存、查看历史版本和恢复，原始记录不被覆盖。
 - 已提交原始记录可以编辑内容、分类、日期和标签。
 - 日记草稿以结构化 Markdown 输出，并支持选择写作风格和一键复制。
 - 归集项目保留来源记录 ID，并能按类型查询、编辑分类、更新状态和删除。
 - 当天归集卡片支持直接打回和修改类型，打回不会删除原始记录。
 - 所有日常数据按工作空间隔离。
+- 可以关闭某一天的模型发送授权；真实模型整理在未授权时会拒绝发送原始记录。
+- 周期回顾按周/月展示记录数、归集数、完成待办和自评心情。
 - Mock 模式、真实模型模式和模型调用隐私策略均有明确边界。
 
 ## 7. 后续范围

@@ -119,6 +119,7 @@ def _mock_organization(
                     "confidence": 1.0 if capture_type in ITEM_TYPES else 0.65,
                     "due_date": None,
                     "metadata": _media_metadata(item_type, content, capture.get("captured_at")),
+                    "canonical_key": _canonical_key_for_mock(item_type, content),
                 }
             )
     style_openers = {
@@ -153,6 +154,16 @@ def _mock_organization(
             journal_lines.extend(["", label, "", *[f"- {item}" for item in grouped[item_type]]])
     journal_lines.extend(["", "---", "", "*以上内容由原始记录整理生成，可继续编辑。*"])
     return JournalOrganization("\n".join(journal_lines), highlights, items)
+
+
+def _canonical_key_for_mock(item_type: str, content: str) -> str:
+    key = re.sub(r"[^\w\u4e00-\u9fff]+", "", content).lower()
+    for phrase in ("我想要", "我想", "想要", "需要", "记得", "计划", "给日记", "添加", "增加", "实现", "做一个", "做个", "把"):
+        key = key.replace(phrase, "")
+    if item_type in {"want_read", "want_watch"}:
+        match = re.search(r"《([^》]+)》", content)
+        key = re.sub(r"[^\w\u4e00-\u9fff]+", "", match.group(1) if match else content).lower()
+    return key[:180]
 
 
 class JournalAiProvider:

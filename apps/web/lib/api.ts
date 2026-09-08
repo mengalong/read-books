@@ -55,6 +55,8 @@ import type {
   JournalCaptureType,
   JournalItemType,
   JournalWritingStyle,
+  JournalDayVersion,
+  JournalDaySummary,
 } from "@/lib/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
@@ -168,11 +170,25 @@ export function organizeJournalDay(localDate: string, writingStyle?: JournalWrit
   });
 }
 
-export function updateJournalDay(localDate: string, payload: { journal_text?: string; confirm?: boolean; writing_style?: JournalWritingStyle }) {
+export function updateJournalDay(localDate: string, payload: { journal_text?: string; confirm?: boolean; writing_style?: JournalWritingStyle; model_consent?: boolean; mood_score?: number | null; energy_score?: number | null; meaning_score?: number | null }) {
   return apiFetch<JournalDay>(`/journal/days/${localDate}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
+}
+
+export function getJournalDayVersions(localDate: string) {
+  return apiFetch<JournalDayVersion[]>(`/journal/days/${localDate}/versions`);
+}
+
+export function restoreJournalDayVersion(localDate: string, versionNumber: number) {
+  return apiFetch<JournalDay>(`/journal/days/${localDate}/versions/${versionNumber}/restore`, { method: "POST" });
+}
+
+export function getJournalSummaries(period: "week" | "month", anchorDate?: string) {
+  const params = new URLSearchParams({ period });
+  if (anchorDate) params.set("anchor_date", anchorDate);
+  return apiFetch<JournalDaySummary[]>(`/journal/summaries?${params.toString()}`);
 }
 
 export function getJournalItems(itemType?: JournalItemType, status?: string) {
@@ -183,7 +199,7 @@ export function getJournalItems(itemType?: JournalItemType, status?: string) {
   return apiFetch<JournalItem[]>(`/journal/items${suffix}`);
 }
 
-export function updateJournalItem(itemId: string, payload: { item_type?: JournalItemType; title?: string; description?: string; status?: string; due_date?: string | null }) {
+export function updateJournalItem(itemId: string, payload: { item_type?: JournalItemType; title?: string; description?: string; status?: string; review_status?: JournalItem["review_status"]; due_date?: string | null }) {
   return apiFetch<JournalItem>(`/journal/items/${itemId}`, {
     method: "PATCH",
     body: JSON.stringify(payload),

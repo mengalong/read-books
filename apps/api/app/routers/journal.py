@@ -11,13 +11,15 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies import require_ready_identity
-from app.models import JournalCapture, JournalDay, JournalItem
+from app.models import JournalCapture, JournalDay, JournalDayVersion, JournalItem
 from app.schemas import (
     JournalCaptureCreate,
     JournalCaptureUpdate,
     JournalCaptureResponse,
     JournalDayResponse,
+    JournalDaySummaryResponse,
     JournalDayUpdate,
+    JournalDayVersionResponse,
     JournalOrganizeRequest,
     JournalItemResponse,
     JournalItemUpdate,
@@ -32,6 +34,8 @@ from app.services.journal_service import (
     local_date_for_now,
     normalize_capture_type,
     organize_day,
+    sync_legacy_status,
+    save_day_version,
     upsert_journal_item,
 )
 
@@ -78,11 +82,16 @@ def day_response(db: Session, identity: AuthIdentity, day: JournalDay) -> Journa
         item
         for item in items
         if capture_ids.intersection(set(item.source_capture_ids or []))
+        and item.review_status != "deleted"
     ]
     return JournalDayResponse(
         id=day.id,
         local_date=day.local_date,
         writing_style=day.writing_style,
+        model_consent=day.model_consent,
+        mood_score=day.mood_score,
+        energy_score=day.energy_score,
+        meaning_score=day.meaning_score,
         organization_status=day.organization_status,
         journal_text=day.journal_text,
         summary=dict(day.summary or {}),
@@ -347,6 +356,14 @@ def update_journal_day(
         day.journal_text = payload.journal_text.strip()
     if payload.writing_style is not None:
         day.writing_style = payload.writing_style
+    if payload.model_consent is not None:
+        day.model_consent = payload.model_consent
+    for field in ("mood_score", "energy_score", "meaning_score"):
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(day, field, value)
+    if payload.journal_text is not None:
+        save_day_version(db, day, source="manual")
     if payload.confirm is True:
         day.confirmed_at = datetime.now(timezone.utc)
     elif payload.confirm is False:
@@ -354,6 +371,104 @@ def update_journal_day(
     db.commit()
     db.refresh(day)
     return day_response(db, identity, day)
+
+
+@router.get("/days/{local_date}/versions", response_model=list[JournalDayVersionResponse])
+def list_journal_day_versions(
+    local_date: date,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> list[JournalDayVersionResponse]:
+    day = get_day_or_404(db, identity, local_date)
+    versions = db.scalars(
+        select(JournalDayVersion)
+        .where(JournalDayVersion.journal_day_id == day.id)
+        .order_by(JournalDayVersion.version_number.desc())
+    ).all()
+    return [JournalDayVersionResponse.model_validate(version) for version in versions]
+
+
+@router.post("/days/{local_date}/versions/{version_number}/restore", response_model=JournalDayResponse)
+def restore_journal_day_version(
+    local_date: date,
+    version_number: int,
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> JournalDayResponse:
+    day = get_day_or_404(db, identity, local_date)
+    version = db.scalar(
+        select(JournalDayVersion).where(
+            JournalDayVersion.journal_day_id == day.id,
+            JournalDayVersion.version_number == version_number,
+        )
+    )
+    if version is None:
+        raise HTTPException(status_code=404, detail="未找到这个日记版本")
+    save_day_version(db, day, source="restore")
+    day.journal_text = version.journal_text
+    day.writing_style = version.writing_style
+    day.confirmed_at = None
+    db.commit()
+    db.refresh(day)
+    return day_response(db, identity, day)
+
+
+@router.get("/summaries", response_model=list[JournalDaySummaryResponse])
+def list_journal_summaries(
+    period: str = Query(default="month"),
+    anchor_date: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+    identity: AuthIdentity = Depends(require_ready_identity),
+) -> list[JournalDaySummaryResponse]:
+    if period not in {"week", "month"}:
+        raise HTTPException(status_code=422, detail="周期只能是 week 或 month")
+    anchor = anchor_date or date.today()
+    if period == "week":
+        start = anchor.fromordinal(anchor.toordinal() - anchor.weekday())
+    else:
+        start = anchor.replace(day=1)
+    end = anchor
+    days = db.scalars(
+        select(JournalDay)
+        .where(
+            JournalDay.workspace_id == identity.workspace.id,
+            JournalDay.local_date >= start,
+            JournalDay.local_date <= end,
+        )
+        .order_by(JournalDay.local_date.desc())
+    ).all()
+    summaries: list[JournalDaySummaryResponse] = []
+    for day in days:
+        captures = db.scalars(
+            select(JournalCapture.id).where(
+                JournalCapture.workspace_id == identity.workspace.id,
+                JournalCapture.local_date == day.local_date,
+            )
+        ).all()
+        item_rows = db.scalars(
+            select(JournalItem).where(JournalItem.workspace_id == identity.workspace.id)
+        ).all()
+        capture_ids = set(captures)
+        relevant = [
+            item for item in item_rows
+            if capture_ids.intersection(set(item.source_capture_ids or []))
+            and item.review_status != "deleted"
+        ]
+        summaries.append(
+            JournalDaySummaryResponse(
+                local_date=day.local_date,
+                capture_count=len(captures),
+                item_count=len(relevant),
+                completed_todo_count=sum(
+                    1 for item in relevant if item.item_type == "todo" and item.review_status == "completed"
+                ),
+                mood_score=day.mood_score,
+                energy_score=day.energy_score,
+                meaning_score=day.meaning_score,
+                journal_preview=(day.journal_text or "").replace("\n", " ")[:180],
+            )
+        )
+    return summaries
 
 
 @router.get("/items", response_model=list[JournalItemResponse])
@@ -369,7 +484,11 @@ def list_journal_items(
             raise HTTPException(status_code=422, detail="不支持的日常项目类型")
         statement = statement.where(JournalItem.item_type == item_type)
     if item_status:
-        statement = statement.where(JournalItem.status == item_status)
+        statement = statement.where(JournalItem.review_status == item_status)
+    else:
+        statement = statement.where(
+            (JournalItem.review_status != "deleted") | JournalItem.review_status.is_(None)
+        )
     rows = db.scalars(statement.order_by(JournalItem.updated_at.desc()).limit(200)).all()
     return [item_response(row) for row in rows]
 
@@ -394,9 +513,25 @@ def update_journal_item(
         raise HTTPException(status_code=422, detail="不支持这个项目类型")
     if payload.status is not None and payload.status not in ITEM_STATUSES[next_type]:
         raise HTTPException(status_code=422, detail="不支持这个项目状态")
+    if payload.review_status is not None:
+        sync_legacy_status(item, payload.review_status)
+    elif payload.status is not None:
+        legacy_to_review = {
+            "needs_review": "pending",
+            "open": "confirmed",
+            "inbox": "confirmed",
+            "added": "confirmed",
+            "done": "completed",
+            "completed": "completed",
+            "dismissed": "cancelled",
+            "cancelled": "cancelled",
+        }
+        mapped = legacy_to_review.get(payload.status)
+        if mapped:
+            sync_legacy_status(item, mapped)
     previous_type = item.item_type
     for key, value in payload.model_dump(exclude_unset=True).items():
-        if key == "item_type":
+        if key in {"item_type", "review_status", "metadata"}:
             continue
         if key == "title" and isinstance(value, str):
             value = value.strip()
@@ -412,6 +547,10 @@ def update_journal_item(
             "needs_confirmation": False,
             "manual_type_override": True,
         }
+    if payload.metadata is not None:
+        item.metadata_json = {**(item.metadata_json or {}), **payload.metadata}
+    if payload.title is not None or payload.description is not None or payload.metadata is not None:
+        item.metadata_json = {**(item.metadata_json or {}), "manual_content_override": True}
     if payload.status in {"open", "inbox", "added"}:
         item.metadata_json = {**(item.metadata_json or {}), "needs_confirmation": False}
     mark_item_days_stale(db, identity.workspace.id, item)
@@ -435,5 +574,6 @@ def delete_journal_item(
     if item is None:
         raise HTTPException(status_code=404, detail="未找到这个日常项目")
     mark_item_days_stale(db, identity.workspace.id, item)
-    db.delete(item)
+    sync_legacy_status(item, "deleted")
+    item.metadata_json = {**(item.metadata_json or {}), "deleted_at": datetime.now(timezone.utc).isoformat()}
     db.commit()

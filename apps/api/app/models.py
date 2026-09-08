@@ -218,6 +218,10 @@ class JournalDay(TimestampMixin, Base):
     )
     local_date: Mapped[date] = mapped_column(Date, index=True)
     writing_style: Mapped[str] = mapped_column(String(30), default="natural")
+    model_consent: Mapped[bool] = mapped_column(Boolean, default=True)
+    mood_score: Mapped[int | None] = mapped_column(Integer)
+    energy_score: Mapped[int | None] = mapped_column(Integer)
+    meaning_score: Mapped[int | None] = mapped_column(Integer)
     organization_status: Mapped[str] = mapped_column(
         String(20), default="not_started", index=True
     )
@@ -227,6 +231,23 @@ class JournalDay(TimestampMixin, Base):
     organization_error: Mapped[str | None] = mapped_column(Text)
     organized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class JournalDayVersion(Base):
+    """Immutable snapshots of a generated or user-confirmed journal draft."""
+
+    __tablename__ = "journal_day_versions"
+    __table_args__ = (UniqueConstraint("journal_day_id", "version_number"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    journal_day_id: Mapped[str] = mapped_column(
+        ForeignKey("journal_days.id", ondelete="CASCADE"), index=True
+    )
+    version_number: Mapped[int] = mapped_column(Integer)
+    source: Mapped[str] = mapped_column(String(20), default="organization", index=True)
+    journal_text: Mapped[str] = mapped_column(Text)
+    writing_style: Mapped[str] = mapped_column(String(30), default="natural")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
 
 class JournalItem(TimestampMixin, Base):
@@ -242,6 +263,8 @@ class JournalItem(TimestampMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
     item_type: Mapped[str] = mapped_column(String(20), index=True)
+    canonical_key: Mapped[str | None] = mapped_column(String(240), index=True)
+    review_status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     title: Mapped[str] = mapped_column(String(240))
     description: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(20), default="inbox", index=True)

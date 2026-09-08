@@ -36,6 +36,7 @@ class BookUpdate(BaseModel):
 
 JournalCaptureType = Literal["note", "todo", "idea", "want_read", "want_watch"]
 JournalItemType = Literal["todo", "idea", "want_read", "want_watch"]
+JournalItemReviewStatus = Literal["pending", "confirmed", "completed", "cancelled", "deleted"]
 
 
 class JournalCaptureCreate(BaseModel):
@@ -70,6 +71,8 @@ class JournalCaptureResponse(ApiModel):
 class JournalItemResponse(BaseModel):
     id: str
     item_type: JournalItemType
+    canonical_key: str | None
+    review_status: JournalItemReviewStatus
     title: str
     description: str
     status: str
@@ -85,6 +88,10 @@ class JournalDayUpdate(BaseModel):
     journal_text: str | None = Field(default=None, max_length=20_000)
     confirm: bool | None = None
     writing_style: JournalWritingStyle | None = None
+    model_consent: bool | None = None
+    mood_score: int | None = Field(default=None, ge=1, le=10)
+    energy_score: int | None = Field(default=None, ge=1, le=10)
+    meaning_score: int | None = Field(default=None, ge=1, le=10)
 
 
 class JournalOrganizeRequest(BaseModel):
@@ -96,13 +103,19 @@ class JournalItemUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=240)
     description: str | None = Field(default=None, max_length=2_000)
     status: str | None = Field(default=None, max_length=30)
+    review_status: JournalItemReviewStatus | None = None
     due_date: date | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class JournalDayResponse(BaseModel):
     id: str
     local_date: date
     writing_style: JournalWritingStyle
+    model_consent: bool
+    mood_score: int | None
+    energy_score: int | None
+    meaning_score: int | None
     organization_status: Literal["not_started", "pending", "processing", "completed", "failed"]
     journal_text: str
     summary: dict[str, Any] = Field(default_factory=dict)
@@ -114,6 +127,26 @@ class JournalDayResponse(BaseModel):
     updated_at: datetime
     captures: list[JournalCaptureResponse] = Field(default_factory=list)
     items: list[JournalItemResponse] = Field(default_factory=list)
+
+
+class JournalDaySummaryResponse(BaseModel):
+    local_date: date
+    capture_count: int
+    item_count: int
+    completed_todo_count: int
+    mood_score: int | None
+    energy_score: int | None
+    meaning_score: int | None
+    journal_preview: str
+
+
+class JournalDayVersionResponse(ApiModel):
+    id: str
+    version_number: int
+    source: str
+    journal_text: str
+    writing_style: JournalWritingStyle
+    created_at: datetime
 
 
 class BookStats(ApiModel):

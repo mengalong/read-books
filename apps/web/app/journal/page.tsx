@@ -6,6 +6,7 @@ import {
   BookOpen,
   Copy,
   Film,
+  History,
   Lightbulb,
   ListTodo,
   NotebookPen,
@@ -25,13 +26,15 @@ import {
   createJournalCapture,
   deleteJournalCapture,
   getJournalDay,
+  getJournalDayVersions,
   organizeJournalDay,
+  restoreJournalDayVersion,
   updateJournalCapture,
   updateJournalDay,
   updateJournalItem,
 } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
-import type { JournalCaptureType, JournalDay, JournalItem, JournalItemType, JournalWritingStyle } from "@/lib/types";
+import type { JournalCaptureType, JournalDay, JournalDayVersion, JournalItem, JournalItemType, JournalWritingStyle } from "@/lib/types";
 
 const captureTypes: { value: JournalCaptureType; label: string; icon: typeof NotebookPen }[] = [
   { value: "note", label: "记录", icon: NotebookPen },
@@ -83,29 +86,25 @@ function dayLabel(value: string) {
 }
 
 function statusLabel(item: JournalItem) {
-  if (item.status === "needs_review") return "待确认";
-  if (item.status === "dismissed") return "已取消";
-  if (item.item_type === "todo") return item.status === "done" ? "已完成" : item.status === "cancelled" ? "已取消" : "已确认";
-  if (item.status === "archived") return "已归档";
-  if (item.status === "added") return "已采纳";
-  if (item.status === "completed") return "已完成";
+  if (item.review_status === "pending") return "待确认";
+  if (item.review_status === "completed") return "已完成";
+  if (item.review_status === "cancelled") return "已取消";
+  if (item.review_status === "deleted") return "已删除";
   return "已确认";
 }
 
-function nextStatus(item: JournalItem) {
-  if (item.status === "needs_review") return item.item_type === "todo" ? "open" : "inbox";
-  if (item.status === "dismissed" || item.status === "archived" || item.status === "completed") {
-    return item.item_type === "todo" ? "open" : "inbox";
-  }
-  if (item.item_type === "todo") return item.status === "done" ? "open" : "done";
-  return item.status;
+function nextReviewStatus(item: JournalItem): JournalItem["review_status"] {
+  if (item.review_status === "pending") return "confirmed";
+  if (item.review_status === "cancelled" || item.review_status === "deleted") return "confirmed";
+  if (item.item_type === "todo") return item.review_status === "completed" ? "confirmed" : "completed";
+  return "cancelled";
 }
 
 function primaryItemAction(item: JournalItem) {
-  if (item.status === "needs_review") return "确认";
-  if (item.status === "dismissed" || item.status === "archived" || item.status === "completed") return "恢复";
-  if (item.item_type === "todo" && item.status === "done") return "重新打开";
-  if (item.item_type === "todo" && item.status === "open") return "完成";
+  if (item.review_status === "pending") return "确认";
+  if (item.review_status === "cancelled" || item.review_status === "deleted") return "恢复";
+  if (item.item_type === "todo" && item.review_status === "completed") return "重新打开";
+  if (item.item_type === "todo" && item.review_status === "confirmed") return "完成";
   return null;
 }
 
@@ -147,12 +146,12 @@ function DayItemCard({
   onReject: (item: JournalItem) => void;
 }) {
   const Icon = itemIcons[item.item_type];
-  const rejected = item.status === "dismissed";
+  const rejected = item.review_status === "cancelled" || item.review_status === "deleted";
   const primaryAction = primaryItemAction(item);
-  return <article className={`journal-item-card ${item.status === "done" ? "is-done" : ""}`}>
-    <div className="journal-item-card-head"><span className={`journal-item-icon item-${item.item_type}`}><Icon size={15} /></span><select aria-label={`修改${itemLabels[item.item_type]}归集类型`} className="journal-item-type-select" onChange={(event) => onTypeChange(item, event.target.value as JournalItemType)} value={item.item_type}>{Object.entries(itemLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><span className={`journal-item-status ${item.status}`}>{statusLabel(item)}</span></div>
+  return <article className={`journal-item-card ${item.review_status === "completed" ? "is-done" : ""}`}>
+    <div className="journal-item-card-head"><span className={`journal-item-icon item-${item.item_type}`}><Icon size={15} /></span><select aria-label={`修改${itemLabels[item.item_type]}归集类型`} className="journal-item-type-select" onChange={(event) => onTypeChange(item, event.target.value as JournalItemType)} value={item.item_type}>{Object.entries(itemLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><span className={`journal-item-status ${item.review_status}`}>{statusLabel(item)}</span></div>
     <strong>{item.title}</strong>{item.description && <p>{item.description}</p>}
-    <div className="journal-item-card-actions">{primaryAction && <button className="button button-quiet journal-item-action" onClick={() => onStatus(item)} type="button">{primaryAction}</button>}{!rejected && item.status !== "done" && item.status !== "completed" && <button className="button button-quiet journal-item-action journal-item-reject" onClick={() => onReject(item)} type="button">取消归集</button>}</div>
+    <div className="journal-item-card-actions">{primaryAction && <button className="button button-quiet journal-item-action" onClick={() => onStatus(item)} type="button">{primaryAction}</button>}{!rejected && item.review_status !== "completed" && <button className="button button-quiet journal-item-action journal-item-reject" onClick={() => onReject(item)} type="button">取消归集</button>}</div>
   </article>;
 }
 
@@ -166,6 +165,7 @@ export default function JournalPage() {
   const [previewMode, setPreviewMode] = useState<"edit" | "preview">("edit");
   const [autoSaving, setAutoSaving] = useState(false);
   const [lastAutosavedAt, setLastAutosavedAt] = useState<string | null>(null);
+  const [versions, setVersions] = useState<JournalDayVersion[]>([]);
   const editorRevision = useRef(0);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -186,6 +186,7 @@ export default function JournalPage() {
       setJournalText(result.journal_text);
       setWritingStyle(result.writing_style);
       setLastAutosavedAt(result.updated_at);
+      setVersions(await getJournalDayVersions(localDate));
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "日常记录加载失败");
     } finally {
@@ -196,17 +197,40 @@ export default function JournalPage() {
   useEffect(() => { void loadDay(); }, [loadDay]);
 
   useEffect(() => {
+    const requestedDate = new URLSearchParams(window.location.search).get("date");
+    if (requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) setLocalDate(requestedDate);
+  }, []);
+
+  useEffect(() => {
+    if (window.location.hash === "#quick-capture") {
+      window.setTimeout(() => document.querySelector<HTMLTextAreaElement>("[aria-label='快速记录内容']")?.focus(), 0);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "j") {
+        event.preventDefault();
+        document.querySelector<HTMLTextAreaElement>("[aria-label='快速记录内容']")?.focus();
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, []);
+
+  useEffect(() => {
     if (!day || loading || (journalText === day.journal_text && writingStyle === day.writing_style)) return;
     const timer = window.setTimeout(() => {
       const revisionAtSave = editorRevision.current;
       setAutoSaving(true);
       updateJournalDay(localDate, { journal_text: journalText, writing_style: writingStyle })
-        .then((result) => {
+        .then(async (result) => {
           if (revisionAtSave !== editorRevision.current) return;
           setDay(result);
           setJournalText(result.journal_text);
           setWritingStyle(result.writing_style);
           setLastAutosavedAt(result.updated_at);
+          setVersions(await getJournalDayVersions(localDate));
           setError("");
         })
         .catch((reason: unknown) => setError(reason instanceof ApiError ? reason.message : "草稿自动保存失败"))
@@ -230,7 +254,7 @@ export default function JournalPage() {
   }, [day, localDate]);
 
   const captureCount = day?.captures.length || 0;
-  const pendingItems = useMemo(() => day?.items.filter((item) => item.status === "needs_review").length || 0, [day]);
+  const pendingItems = useMemo(() => day?.items.filter((item) => item.review_status === "pending").length || 0, [day]);
 
   async function handleCapture(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -273,6 +297,32 @@ export default function JournalPage() {
       setNotice("Markdown 日记已复制");
     } catch {
       setError("浏览器拒绝了复制，请手动选中文本复制");
+    }
+  }
+
+  async function handleRestoreVersion(version: JournalDayVersion) {
+    if (!window.confirm(`恢复第 ${version.version_number} 版日记？当前内容会先保存为一个新版本。`)) return;
+    try {
+      const result = await restoreJournalDayVersion(localDate, version.version_number);
+      setDay(result);
+      setJournalText(result.journal_text);
+      setWritingStyle(result.writing_style);
+      setLastAutosavedAt(result.updated_at);
+      setVersions(await getJournalDayVersions(localDate));
+      setPreviewMode("edit");
+      setNotice(`已恢复第 ${version.version_number} 版日记`);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "日记版本恢复失败");
+    }
+  }
+
+  async function updateReflection(payload: { model_consent?: boolean; mood_score?: number | null; energy_score?: number | null; meaning_score?: number | null }) {
+    try {
+      const result = await updateJournalDay(localDate, payload);
+      setDay(result);
+      setLastAutosavedAt(result.updated_at);
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "日常偏好保存失败");
     }
   }
 
@@ -323,7 +373,7 @@ export default function JournalPage() {
 
   async function handleItemStatus(item: JournalItem) {
     try {
-      const updated = await updateJournalItem(item.id, { status: nextStatus(item) });
+      const updated = await updateJournalItem(item.id, { review_status: nextReviewStatus(item) });
       setDay((current) => current ? { ...current, items: current.items.map((entry) => entry.id === updated.id ? updated : entry) } : current);
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "项目状态更新失败");
@@ -343,7 +393,7 @@ export default function JournalPage() {
 
   async function handleRejectItem(item: JournalItem) {
     try {
-      const updated = await updateJournalItem(item.id, { status: "dismissed" });
+      const updated = await updateJournalItem(item.id, { review_status: "cancelled" });
       setDay((current) => current ? { ...current, items: current.items.map((entry) => entry.id === updated.id ? updated : entry) } : current);
       setNotice("已打回这条归集，不会删除原始记录");
     } catch (reason: unknown) {
@@ -375,7 +425,7 @@ export default function JournalPage() {
       <section className="journal-capture-panel form-panel">
         <div className="section-title"><h2>快速记录</h2><span>{captureCount} 条</span></div>
         <form onSubmit={(event) => void handleCapture(event)}>
-          <textarea aria-label="快速记录内容" className="journal-capture-input" onChange={(event) => setContent(event.target.value)} placeholder="现在想到什么？先记下来……" rows={6} value={content} />
+          <textarea aria-label="快速记录内容" className="journal-capture-input" id="quick-capture" onChange={(event) => setContent(event.target.value)} placeholder="现在想到什么？先记下来……" rows={6} value={content} />
           <div className="journal-capture-actions">
             <div className="journal-type-picker" aria-label="记录类型">
               {captureTypes.map(({ value, label, icon: Icon }) => <button className={`journal-type-button ${captureType === value ? "active" : ""}`} key={value} onClick={() => setCaptureType(value)} type="button"><Icon size={15} />{label}</button>)}
@@ -410,6 +460,8 @@ export default function JournalPage() {
           <div className="journal-editor-toolbar"><div className="journal-editor-tabs" role="tablist" aria-label="日记查看模式"><button aria-selected={previewMode === "edit"} className={previewMode === "edit" ? "active" : ""} onClick={() => setPreviewMode("edit")} role="tab" type="button">编辑</button><button aria-selected={previewMode === "preview"} className={previewMode === "preview" ? "active" : ""} onClick={() => setPreviewMode("preview")} role="tab" type="button">预览</button></div><button aria-label="复制 Markdown 日记" className="journal-copy-button" disabled={!journalText.trim()} onClick={() => void handleCopyJournal()} title="复制 Markdown 日记" type="button"><Copy size={16} /></button></div>
           {previewMode === "edit" ? <textarea aria-label="今日生成的日记" className="journal-draft" onChange={(event) => { editorRevision.current += 1; setJournalText(event.target.value); }} placeholder="整理后会在这里生成结构化 Markdown 日记草稿。" rows={16} value={journalText} /> : <MarkdownPreview value={journalText || "还没有日记草稿，先整理今天的记录。"} />}
           <div className="journal-autosave-meta"><span>{autoSaving ? "正在自动保存……" : lastAutosavedAt ? `已自动保存 ${formatDateTime(lastAutosavedAt)}` : "编辑后会自动保存"}</span><label className="journal-style-picker"><span>写作风格</span><select aria-label="日记写作风格" onChange={(event) => { editorRevision.current += 1; setWritingStyle(event.target.value as JournalWritingStyle); }} value={writingStyle}>{writingStyles.map((style) => <option key={style.value} value={style.value}>{style.label}</option>)}</select></label></div>
+          <div className="journal-reflection-row"><label className="journal-consent-control"><input checked={day?.model_consent ?? true} onChange={(event) => void updateReflection({ model_consent: event.target.checked })} type="checkbox" /><span>允许今天的原始记录发送给模型整理</span></label><div className="journal-score-controls"><label>心情 <select aria-label="心情评分" onChange={(event) => void updateReflection({ mood_score: event.target.value ? Number(event.target.value) : null })} value={day?.mood_score ?? ""}><option value="">未评分</option>{Array.from({ length: 10 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1} / 10</option>)}</select></label><label>精力 <select aria-label="精力评分" onChange={(event) => void updateReflection({ energy_score: event.target.value ? Number(event.target.value) : null })} value={day?.energy_score ?? ""}><option value="">未评分</option>{Array.from({ length: 10 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1} / 10</option>)}</select></label><label>意义 <select aria-label="意义评分" onChange={(event) => void updateReflection({ meaning_score: event.target.value ? Number(event.target.value) : null })} value={day?.meaning_score ?? ""}><option value="">未评分</option>{Array.from({ length: 10 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1} / 10</option>)}</select></label></div></div>
+          {versions.length > 0 && <details className="journal-version-history"><summary><History size={14} />历史版本（{versions.length}）</summary><div className="journal-version-list">{versions.map((version) => <div className="journal-version-row" key={version.id}><span><strong>第 {version.version_number} 版</strong><small>{version.source} · {formatDateTime(version.created_at)}</small></span><button className="button button-quiet" onClick={() => void handleRestoreVersion(version)} type="button">恢复</button></div>)}</div></details>}
           {day?.organization_error && <div className="journal-error">{day.organization_error}</div>}
         </section>
       </div>

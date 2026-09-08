@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime, timezone
+from difflib import SequenceMatcher
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -10,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import SessionLocal
-from app.models import JournalCapture, JournalDay, JournalItem
+from app.models import JournalCapture, JournalDay, JournalDayVersion, JournalItem
 from app.services.journal_provider import ITEM_TYPES, JournalOrganization, get_journal_provider
 from app.services.model_config import get_effective_model_configuration
 from app.services.model_usage import new_usage_context
@@ -19,10 +20,10 @@ from app.services.prompt_config import get_prompt_template
 JOURNAL_TIMEZONE = ZoneInfo("Asia/Shanghai")
 CAPTURE_TYPES = {"note", *ITEM_TYPES}
 ITEM_STATUSES = {
-    "todo": {"open", "done", "cancelled", "needs_review", "dismissed"},
-    "idea": {"inbox", "archived", "dismissed", "needs_review"},
-    "want_read": {"inbox", "added", "completed", "dismissed", "needs_review"},
-    "want_watch": {"inbox", "added", "completed", "dismissed", "needs_review"},
+    "todo": {"open", "done", "cancelled", "needs_review", "dismissed", "deleted"},
+    "idea": {"inbox", "archived", "dismissed", "needs_review", "deleted"},
+    "want_read": {"inbox", "added", "completed", "dismissed", "needs_review", "deleted"},
+    "want_watch": {"inbox", "added", "completed", "dismissed", "needs_review", "deleted"},
 }
 
 
@@ -45,6 +46,46 @@ def _title_key(value: str) -> str:
     return re.sub(r"[\s，。！？、：；,.!?;:'\"“”‘’（）()\[\]{}]+", "", value).lower()
 
 
+def _canonical_key(item_type: str, title: str, metadata: dict[str, Any]) -> str:
+    supplied = _title_key(str(metadata.get("canonical_key") or ""))
+    if supplied:
+        return f"{item_type}:{supplied}"[:240]
+    if item_type in {"want_read", "want_watch"}:
+        media_title = _title_key(str(metadata.get("media_title") or title))
+        return f"{item_type}:{media_title}"[:240]
+    normalized = _title_key(title)
+    for phrase in (
+        "我想要",
+        "我想",
+        "想要",
+        "需要",
+        "记得",
+        "计划",
+        "给日记",
+        "为日记",
+        "添加",
+        "增加",
+        "实现",
+        "做一个",
+        "做个",
+        "把",
+    ):
+        normalized = normalized.replace(phrase, "")
+    return f"{item_type}:{normalized or _title_key(title)}"[:240]
+
+
+def _similar_canonical_key(first: str | None, second: str) -> bool:
+    if not first:
+        return False
+    if first == second:
+        return True
+    first_value = first.split(":", 1)[-1]
+    second_value = second.split(":", 1)[-1]
+    if min(len(first_value), len(second_value)) < 5:
+        return False
+    return SequenceMatcher(None, first_value, second_value).ratio() >= 0.78
+
+
 def _safe_source_ids(value: Any, capture_ids: set[str]) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -55,6 +96,35 @@ def _item_status(item_type: str, *, explicit: bool) -> str:
     if not explicit:
         return "needs_review"
     return "open" if item_type == "todo" else "inbox"
+
+
+def _review_status_from_legacy(status: str | None, *, explicit: bool) -> str:
+    if status in {"deleted"}:
+        return "deleted"
+    if status in {"dismissed", "cancelled", "archived"}:
+        return "cancelled"
+    if status in {"done", "completed"}:
+        return "completed"
+    if status in {"open", "inbox", "added"}:
+        return "confirmed"
+    return "confirmed" if explicit else "pending"
+
+
+def review_status_for_item(item: JournalItem) -> str:
+    return item.review_status or _review_status_from_legacy(item.status, explicit=False)
+
+
+def sync_legacy_status(item: JournalItem, review_status: str) -> None:
+    """Keep legacy status readable for old clients while the UI uses review_status."""
+    item.review_status = review_status
+    if review_status == "pending":
+        item.status = "needs_review"
+    elif review_status == "confirmed":
+        item.status = "open" if item.item_type == "todo" else "inbox"
+    elif review_status == "completed":
+        item.status = "done" if item.item_type == "todo" else "completed"
+    elif review_status in {"cancelled", "deleted"}:
+        item.status = "dismissed"
 
 
 def _structured_metadata(
@@ -68,7 +138,7 @@ def _structured_metadata(
     metadata = {
         key: value
         for key, value in (raw_metadata.items() if isinstance(raw_metadata, dict) else [])
-        if key in {"media_title", "reason", "mentioned_at", "creator", "media_kind"}
+        if key in {"media_title", "reason", "mentioned_at", "creator", "media_kind", "canonical_key", "priority"}
         and isinstance(value, (str, int, float, bool))
     }
     if item_type in {"want_read", "want_watch"}:
@@ -113,6 +183,7 @@ def upsert_journal_item(
         structured_metadata.setdefault("reason", clean_title)
         structured_metadata.setdefault("media_kind", "book" if item_type == "want_read" else "movie_or_tv")
     dedupe_key = str(structured_metadata.get("media_title") or clean_title)
+    canonical_key = _canonical_key(item_type, clean_title, structured_metadata)
     candidates = db.scalars(
         select(JournalItem)
         .where(
@@ -128,6 +199,7 @@ def upsert_journal_item(
             for candidate in candidates
             if (
                 set(candidate.source_capture_ids or []).intersection(source_ids)
+                or _similar_canonical_key(candidate.canonical_key, canonical_key)
                 or _title_key(candidate.title) == _title_key(clean_title)
                 or _title_key(str((candidate.metadata_json or {}).get("media_title") or ""))
                 == _title_key(dedupe_key)
@@ -140,9 +212,11 @@ def upsert_journal_item(
             workspace_id=workspace_id,
             created_by_user_id=user_id,
             item_type=item_type,
+            canonical_key=canonical_key,
             title=str(structured_metadata.get("media_title") or clean_title)[:240],
             description=str(description or "").strip()[:2_000],
             status=_item_status(item_type, explicit=explicit),
+            review_status=_review_status_from_legacy(None, explicit=explicit),
             source_capture_ids=source_ids,
             confidence=confidence,
             due_date=due_date,
@@ -158,16 +232,21 @@ def upsert_journal_item(
 
     existing_ids = list(item.source_capture_ids or [])
     item.source_capture_ids = list(dict.fromkeys(existing_ids + source_ids))
-    if description and not item.description:
+    item.canonical_key = item.canonical_key or canonical_key
+    manual_content = (item.metadata_json or {}).get("manual_content_override") is True
+    if description and not item.description and not manual_content:
         item.description = str(description).strip()[:2_000]
     if confidence is not None:
         item.confidence = max(item.confidence or 0, min(1.0, float(confidence)))
     if due_date is not None:
         item.due_date = due_date
-    if structured_metadata:
+    if structured_metadata and not manual_content:
         item.metadata_json = {**(item.metadata_json or {}), **structured_metadata}
     if explicit and item.status == "needs_review":
-        item.status = _item_status(item_type, explicit=True)
+        sync_legacy_status(item, "confirmed")
+        item.metadata_json = {**(item.metadata_json or {}), "needs_confirmation": False}
+    if explicit and item.review_status == "pending":
+        sync_legacy_status(item, "confirmed")
         item.metadata_json = {**(item.metadata_json or {}), "needs_confirmation": False}
     return item
 
@@ -198,6 +277,8 @@ def item_to_dict(item: JournalItem) -> dict[str, Any]:
     return {
         "id": item.id,
         "item_type": item.item_type,
+        "canonical_key": item.canonical_key,
+        "review_status": review_status_for_item(item),
         "title": item.title,
         "description": item.description,
         "status": item.status,
@@ -208,6 +289,37 @@ def item_to_dict(item: JournalItem) -> dict[str, Any]:
         "created_at": item.created_at,
         "updated_at": item.updated_at,
     }
+
+
+def save_day_version(
+    db: Session,
+    day: JournalDay,
+    *,
+    source: str,
+    journal_text: str | None = None,
+    writing_style: str | None = None,
+) -> JournalDayVersion | None:
+    text = (journal_text if journal_text is not None else day.journal_text).strip()
+    if not text:
+        return None
+    latest = db.scalar(
+        select(JournalDayVersion)
+        .where(JournalDayVersion.journal_day_id == day.id)
+        .order_by(JournalDayVersion.version_number.desc())
+        .limit(1)
+    )
+    if latest is not None and latest.journal_text == text:
+        return latest
+    version = JournalDayVersion(
+        journal_day_id=day.id,
+        version_number=(latest.version_number if latest else 0) + 1,
+        source=source,
+        journal_text=text,
+        writing_style=writing_style or day.writing_style or "natural",
+    )
+    db.add(version)
+    db.flush()
+    return version
 
 
 def get_or_create_day(
@@ -258,6 +370,8 @@ def organize_day(day_id: str, *, settings: Settings | None = None) -> None:
             )
             capture_payload = [capture_to_model_dict(capture) for capture in captures]
             configuration = get_effective_model_configuration(db, settings)
+            if configuration.provider_mode != "mock" and not day.model_consent:
+                raise RuntimeError("今天未允许将原始记录发送给模型，请先开启模型整理授权")
             prompt_template = get_prompt_template(db, "journal_organization")
             context = new_usage_context(
                 "journal_daily_organization",
@@ -303,6 +417,9 @@ def organize_day(day_id: str, *, settings: Settings | None = None) -> None:
                     description=str(raw_item.get("description") or ""),
                     source_captures=source_captures,
                 )
+                raw_canonical_key = raw_item.get("canonical_key")
+                if isinstance(raw_canonical_key, str) and raw_canonical_key.strip():
+                    structured_metadata["canonical_key"] = raw_canonical_key.strip()[:240]
                 manual_override = next(
                     (
                         existing
@@ -350,6 +467,7 @@ def organize_day(day_id: str, *, settings: Settings | None = None) -> None:
                 if item is not None:
                     db.flush()
                     item_ids.append(item.id)
+            save_day_version(db, day, source="before_organization")
             day.journal_text = organization.journal_text
             day.summary = {
                 "highlights": organization.highlights,
@@ -359,6 +477,7 @@ def organize_day(day_id: str, *, settings: Settings | None = None) -> None:
             day.organization_status = "completed"
             day.organization_error = None
             day.organized_at = datetime.now(timezone.utc)
+            save_day_version(db, day, source="organization")
             db.commit()
     except Exception as exc:
         with SessionLocal() as db:
