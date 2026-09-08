@@ -136,6 +136,18 @@ def test_journal_item_filters_and_day_edit(client):
     assert versions.status_code == 200
     assert versions.json()
 
+    consent = client.patch(
+        f"/api/journal/days/{local_date}",
+        json={"model_consent": False, "mood_score": 8, "energy_score": 6, "meaning_score": 7},
+    )
+    assert consent.status_code == 200
+    assert consent.json()["model_consent"] is False
+    assert consent.json()["mood_score"] == 8
+
+    summaries = client.get(f"/api/journal/summaries?period=month&anchor_date={local_date}")
+    assert summaries.status_code == 200
+    assert any(item["local_date"] == local_date for item in summaries.json())
+
 
 def test_journal_data_is_isolated_by_workspace(client):
     with SessionLocal() as db:
