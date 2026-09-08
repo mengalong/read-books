@@ -633,6 +633,11 @@ a {
   width: 100%;
 }
 
+.journal-page > .journal-capture-panel,
+.journal-page > .journal-items-panel {
+  max-width: none;
+}
+
 .journal-grid > .journal-section {
   max-width: none;
 }
