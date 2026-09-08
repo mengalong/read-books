@@ -433,7 +433,9 @@ def organize_day(day_id: str, *, settings: Settings | None = None) -> None:
                     manual_override.source_capture_ids = list(
                         dict.fromkeys((manual_override.source_capture_ids or []) + source_ids)
                     )
-                    if structured_metadata:
+                    if structured_metadata and (manual_override.metadata_json or {}).get(
+                        "manual_content_override"
+                    ) is not True:
                         manual_override.metadata_json = {
                             **(manual_override.metadata_json or {}),
                             **structured_metadata,

@@ -47,6 +47,7 @@ export default function JournalItemsPage() {
   const [loading, setLoading] = useState(true);
   const [workingId, setWorkingId] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [editingDescription, setEditingDescription] = useState("");
@@ -68,9 +69,11 @@ export default function JournalItemsPage() {
 
   async function changeStatus(item: JournalItem) {
     setWorkingId(item.id);
+    setError("");
     try {
       const updated = await updateJournalItem(item.id, { review_status: nextReviewStatus(item) });
       setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+      setNotice(`归集状态已更新：${statusText(updated)}`);
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "项目状态更新失败");
     } finally {
@@ -94,10 +97,12 @@ export default function JournalItemsPage() {
   async function saveEdit() {
     if (!editingId || !editingTitle.trim()) return;
     setWorkingId(editingId);
+    setError("");
     try {
       const updated = await updateJournalItem(editingId, { item_type: editingType, title: editingTitle.trim(), description: editingDescription.trim() });
       setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
       cancelEdit();
+      setNotice("归集项目已更新");
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "项目更新失败");
     } finally {
@@ -108,11 +113,28 @@ export default function JournalItemsPage() {
   async function removeItem(item: JournalItem) {
     if (!window.confirm(`确定删除“${item.title}”吗？来源记录不会删除。`)) return;
     setWorkingId(item.id);
+    setError("");
     try {
       await deleteJournalItem(item.id);
       setItems((current) => current.filter((entry) => entry.id !== item.id));
+      setNotice("归集项目已删除，来源记录仍保留");
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "项目删除失败");
+    } finally {
+      setWorkingId("");
+    }
+  }
+
+  async function changeType(item: JournalItem, itemType: JournalItemType) {
+    if (item.item_type === itemType) return;
+    setWorkingId(item.id);
+    setError("");
+    try {
+      const updated = await updateJournalItem(item.id, { item_type: itemType });
+      setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+      setNotice("归集类型已修改");
+    } catch (reason: unknown) {
+      setError(reason instanceof ApiError ? reason.message : "项目类型修改失败");
     } finally {
       setWorkingId("");
     }
@@ -124,6 +146,7 @@ export default function JournalItemsPage() {
         <div><div className="eyebrow">Long-lived items</div><h1 className="page-title">日常清单</h1><p className="page-description">所有从快速记录中沉淀的项目，都在这张表里继续追踪。</p></div>
         <Link className="button button-secondary" href="/journal"><RefreshCw size={15} />回到今天</Link>
       </header>
+      {notice && <div className="toast-success">{notice}</div>}
       {error && <ErrorState message={error} />}
       <div className="journal-list-filters">{filters.map((filter) => <button className={`tag ${activeFilter === filter.value ? "active-filter" : ""}`} key={filter.label} onClick={() => setActiveFilter(filter.value)} type="button">{filter.label}</button>)}</div>
       {loading ? <div className="loading-state">正在整理日常清单……</div> : items.length === 0 ? <div className="journal-empty journal-empty-large"><Archive size={22} /><strong>还没有归集项目</strong><span>在今天的页面记录待办、灵感或想读/想看的内容，整理后会出现在这里。</span></div> : <div className="journal-unified-table-wrap"><table className="journal-unified-table"><thead><tr><th>类型</th><th>内容</th><th>原因 / 说明</th><th>提及时间</th><th>状态</th><th>操作</th></tr></thead><tbody>{items.map((item) => {
@@ -132,7 +155,7 @@ export default function JournalItemsPage() {
         const mediaTitle = item.metadata.media_title ? String(item.metadata.media_title) : item.title;
         const reason = item.metadata.reason ? String(item.metadata.reason) : item.description || "-";
         const mentionedAt = item.metadata.mentioned_at ? new Date(String(item.metadata.mentioned_at)).toLocaleDateString("zh-CN") : "-";
-        return <tr key={item.id}><td><select aria-label="修改项目类型" className="journal-table-type-select" onChange={(event) => void updateJournalItem(item.id, { item_type: event.target.value as JournalItemType }).then((updated) => setItems((current) => current.map((entry) => entry.id === updated.id ? updated : entry))).catch((reason: unknown) => setError(reason instanceof ApiError ? reason.message : "项目类型修改失败"))} value={item.item_type}>{filters.filter((filter): filter is { value: JournalItemType; label: string } => Boolean(filter.value)).map((filter) => <option key={filter.value} value={filter.value}>{filter.label}</option>)}</select></td><td><strong>{mediaTitle}</strong><small>{item.source_capture_ids.length} 条来源记录</small></td><td>{reason}</td><td>{mentionedAt}</td><td><span className={`journal-item-status ${item.review_status}`}>{statusText(item)}</span></td><td><div className="journal-table-actions"><button className="button button-quiet" disabled={busy} onClick={() => startEdit(item)} title="编辑项目" type="button"><Pencil size={14} /></button><button className="button button-quiet" disabled={busy} onClick={() => void changeStatus(item)} type="button">{actionText(item)}</button><button className="button button-quiet danger-action" disabled={busy} onClick={() => void removeItem(item)} title="删除项目" type="button"><Trash2 size={14} /></button></div></td></tr>;
+        return <tr key={item.id}><td><select aria-label="修改项目类型" className="journal-table-type-select" disabled={busy} onChange={(event) => void changeType(item, event.target.value as JournalItemType)} value={item.item_type}>{filters.filter((filter): filter is { value: JournalItemType; label: string } => Boolean(filter.value)).map((filter) => <option key={filter.value} value={filter.value}>{filter.label}</option>)}</select></td><td><strong>{mediaTitle}</strong><small>{item.source_capture_ids.length} 条来源记录</small></td><td>{reason}</td><td>{mentionedAt}</td><td><span className={`journal-item-status ${item.review_status}`}>{statusText(item)}</span></td><td><div className="journal-table-actions"><button className="button button-quiet" disabled={busy} onClick={() => startEdit(item)} title="编辑项目" type="button"><Pencil size={14} /></button><button className="button button-quiet" disabled={busy} onClick={() => void changeStatus(item)} type="button">{actionText(item)}</button><button className="button button-quiet danger-action" disabled={busy} onClick={() => void removeItem(item)} title="删除项目" type="button"><Trash2 size={14} /></button></div></td></tr>;
       })}</tbody></table></div>}
     </div>
   );

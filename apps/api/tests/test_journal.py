@@ -144,9 +144,12 @@ def test_journal_item_filters_and_day_edit(client):
     assert consent.json()["model_consent"] is False
     assert consent.json()["mood_score"] == 8
 
-    summaries = client.get(f"/api/journal/summaries?period=month&anchor_date={local_date}")
+    summaries = client.get("/api/journal/summaries?period=month&anchor_date=2026-09-01")
     assert summaries.status_code == 200
     assert any(item["local_date"] == local_date for item in summaries.json())
+    weekly_summaries = client.get("/api/journal/summaries?period=week&anchor_date=2026-09-07")
+    assert weekly_summaries.status_code == 200
+    assert any(item["local_date"] == local_date for item in weekly_summaries.json())
 
 
 def test_journal_data_is_isolated_by_workspace(client):
@@ -224,6 +227,26 @@ def test_captures_and_items_can_be_edited_and_deleted(client):
     assert edited_item.status_code == 200
     assert edited_item.json()["item_type"] == "want_read"
     assert edited_item.json()["title"] == "想读的一本书"
+    assert edited_item.json()["review_status"] == "confirmed"
+    assert edited_item.json()["metadata"]["media_title"] == "想读的一本书"
+    assert edited_item.json()["metadata"]["reason"] == "想读的一本书"
+
+    rerun = client.post(f"/api/journal/days/{local_date}/organize")
+    assert rerun.status_code == 202
+    rerun_body = wait_for_day(client, local_date)
+    preserved = next(entry for entry in rerun_body["items"] if entry["id"] == item["id"])
+    assert preserved["item_type"] == "want_read"
+    assert preserved["title"] == "想读的一本书"
+    assert preserved["metadata"]["media_title"] == "想读的一本书"
+
+    conflicting_status = client.patch(
+        f"/api/journal/items/{item['id']}",
+        json={"status": "inbox", "review_status": "cancelled"},
+    )
+    assert conflicting_status.status_code == 200
+    assert conflicting_status.json()["review_status"] == "cancelled"
+    assert conflicting_status.json()["status"] == "dismissed"
+
     deleted_item = client.delete(f"/api/journal/items/{item['id']}")
     assert deleted_item.status_code == 204
     deleted_capture = client.delete(f"/api/journal/captures/{capture_id}")

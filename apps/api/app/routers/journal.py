@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 import threading
 from datetime import date, datetime, timezone
 from uuid import uuid4
@@ -422,12 +423,16 @@ def list_journal_summaries(
 ) -> list[JournalDaySummaryResponse]:
     if period not in {"week", "month"}:
         raise HTTPException(status_code=422, detail="周期只能是 week 或 month")
-    anchor = anchor_date or date.today()
+    anchor = anchor_date or local_date_for_now()
     if period == "week":
         start = anchor.fromordinal(anchor.toordinal() - anchor.weekday())
+        end = start.fromordinal(start.toordinal() + 6)
     else:
         start = anchor.replace(day=1)
-    end = anchor
+        end = anchor.replace(day=calendar.monthrange(anchor.year, anchor.month)[1])
+    item_rows = db.scalars(
+        select(JournalItem).where(JournalItem.workspace_id == identity.workspace.id)
+    ).all()
     days = db.scalars(
         select(JournalDay)
         .where(
@@ -444,9 +449,6 @@ def list_journal_summaries(
                 JournalCapture.workspace_id == identity.workspace.id,
                 JournalCapture.local_date == day.local_date,
             )
-        ).all()
-        item_rows = db.scalars(
-            select(JournalItem).where(JournalItem.workspace_id == identity.workspace.id)
         ).all()
         capture_ids = set(captures)
         relevant = [
@@ -513,6 +515,10 @@ def update_journal_item(
         raise HTTPException(status_code=422, detail="不支持这个项目类型")
     if payload.status is not None and payload.status not in ITEM_STATUSES[next_type]:
         raise HTTPException(status_code=422, detail="不支持这个项目状态")
+    previous_type = item.item_type
+    type_changed = payload.item_type is not None and payload.item_type != previous_type
+    if type_changed:
+        item.item_type = payload.item_type
     if payload.review_status is not None:
         sync_legacy_status(item, payload.review_status)
     elif payload.status is not None:
@@ -529,19 +535,20 @@ def update_journal_item(
         mapped = legacy_to_review.get(payload.status)
         if mapped:
             sync_legacy_status(item, mapped)
-    previous_type = item.item_type
+            # Preserve the legacy value for older clients while review_status
+            # remains the canonical state used by the current UI.
+            item.status = payload.status
+    elif type_changed:
+        sync_legacy_status(item, "confirmed")
     for key, value in payload.model_dump(exclude_unset=True).items():
-        if key in {"item_type", "review_status", "metadata"}:
+        if key in {"item_type", "review_status", "metadata", "status"}:
             continue
         if key == "title" and isinstance(value, str):
             value = value.strip()
         if key == "description" and isinstance(value, str):
             value = value.strip()
         setattr(item, key, value)
-    if payload.item_type is not None and payload.item_type != previous_type:
-        item.item_type = payload.item_type
-        if payload.status is None:
-            item.status = "open" if payload.item_type == "todo" else "inbox"
+    if type_changed:
         item.metadata_json = {
             **(item.metadata_json or {}),
             "needs_confirmation": False,
@@ -551,6 +558,15 @@ def update_journal_item(
         item.metadata_json = {**(item.metadata_json or {}), **payload.metadata}
     if payload.title is not None or payload.description is not None or payload.metadata is not None:
         item.metadata_json = {**(item.metadata_json or {}), "manual_content_override": True}
+    if item.item_type in {"want_read", "want_watch"} and (
+        type_changed or payload.title is not None or payload.description is not None
+    ):
+        item.metadata_json = {
+            **(item.metadata_json or {}),
+            "media_title": item.title,
+            "reason": item.description or item.title,
+            "media_kind": "book" if item.item_type == "want_read" else "movie_or_tv",
+        }
     if payload.status in {"open", "inbox", "added"}:
         item.metadata_json = {**(item.metadata_json or {}), "needs_confirmation": False}
     mark_item_days_stale(db, identity.workspace.id, item)

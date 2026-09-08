@@ -1091,6 +1091,11 @@ a {
 .journal-item-status.dismissed { background: var(--red-soft); color: var(--red); }
 .journal-item-status.open,
 .journal-item-status.inbox { background: #f0f3f1; color: var(--muted); }
+.journal-item-status.pending { background: var(--yellow-soft); color: var(--yellow); }
+.journal-item-status.confirmed { background: #f0f3f1; color: var(--muted); }
+.journal-item-status.completed { background: var(--green-soft); color: var(--green); }
+.journal-item-status.cancelled,
+.journal-item-status.deleted { background: var(--red-soft); color: var(--red); }
 
 .journal-item-card > strong {
   display: block;

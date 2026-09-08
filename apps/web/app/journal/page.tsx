@@ -375,6 +375,7 @@ export default function JournalPage() {
     try {
       const updated = await updateJournalItem(item.id, { review_status: nextReviewStatus(item) });
       setDay((current) => current ? { ...current, items: current.items.map((entry) => entry.id === updated.id ? updated : entry) } : current);
+      setNotice(`归集状态已更新：${statusLabel(updated)}`);
     } catch (reason: unknown) {
       setError(reason instanceof ApiError ? reason.message : "项目状态更新失败");
     }
@@ -466,9 +467,9 @@ export default function JournalPage() {
         </section>
       </div>
 
-      <section className="journal-section form-panel journal-items-panel">
+      <section className="journal-section form-panel journal-items-panel journal-items-table-panel">
         <div className="section-title"><h2>从今天归集</h2><span>{pendingItems ? `${pendingItems} 项待确认` : `${day?.items.length || 0} 项`}</span><Link className="section-link" href="/journal/items">查看全部清单 →</Link></div>
-        {day?.items.length ? <div className="journal-item-grid">{day.items.map((item) => { const Icon = itemIcons[item.item_type]; return <article className={`journal-item-card ${item.status === "done" ? "is-done" : ""}`} key={item.id}><div className="journal-item-card-head"><span className={`journal-item-icon item-${item.item_type}`}><Icon size={15} /></span><select aria-label={`修改${itemLabels[item.item_type]}归集类型`} className="journal-item-type-select" onChange={(event) => void handleItemTypeChange(item, event.target.value as JournalItemType)} value={item.item_type}>{Object.entries(itemLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><span className={`journal-item-status ${item.status}`}>{statusLabel(item)}</span></div><strong>{item.title}</strong>{item.description && <p>{item.description}</p>}<div className="journal-item-card-actions">{item.status === "needs_review" ? <><button className="button button-quiet journal-item-action" onClick={() => void handleItemStatus(item)} type="button">确认</button><button className="button button-quiet journal-item-action journal-item-reject" onClick={() => void handleRejectItem(item)} type="button">打回</button></> : <button className="button button-quiet journal-item-action" onClick={() => void handleItemStatus(item)} type="button">{item.item_type === "todo" && item.status !== "done" ? "标记完成" : item.status === "done" ? "重新打开" : item.status === "dismissed" ? "恢复" : item.status === "archived" || item.status === "completed" ? "重新打开" : "推进状态"}</button>}</div></article>; })}</div> : <div className="journal-empty">整理今天后，待办、灵感和想读/想看项目会显示在这里。</div>}
+        {day?.items.length ? <div className="journal-item-grid">{day.items.map((item) => <DayItemCard item={item} key={item.id} onReject={handleRejectItem} onStatus={handleItemStatus} onTypeChange={handleItemTypeChange} />)}</div> : <div className="journal-empty">整理今天后，待办、灵感和想读/想看的内容会显示在这里。</div>}
       </section>
 
       <div className="journal-footer-note"><RefreshCw size={14} />原始记录始终保留，模型只生成可编辑草稿和可追踪项目。</div>
